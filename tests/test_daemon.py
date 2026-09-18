@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 import tarfile
 import threading
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -37,7 +38,7 @@ from ophelia.daemon.enrollment import (
     _enable_agent_config,
     enrollment_plan,
 )
-from ophelia.daemon.systemd import notify_systemd
+from ophelia.daemon.systemd import notify_systemd, watchdog_ping_seconds
 from ophelia.daemon.decisions import verify_lumen_decision
 from ophelia.daemon.upgrades import (
     AgentUpgradeError,
@@ -533,6 +534,225 @@ class SystemdNotificationTests(unittest.TestCase):
                 self.assertEqual(b"READY=1", receiver.recv(4096))
             finally:
                 receiver.close()
+
+
+class WatchdogPingIntervalTests(unittest.TestCase):
+    def test_interval_is_half_the_configured_watchdog_window(self) -> None:
+        self.assertEqual(
+            30.0,
+            watchdog_ping_seconds(
+                {"NOTIFY_SOCKET": "/run/notify", "WATCHDOG_USEC": "60000000"}
+            ),
+        )
+
+    def test_no_interval_without_systemd_or_a_watchdog(self) -> None:
+        self.assertIsNone(watchdog_ping_seconds({}))
+        self.assertIsNone(watchdog_ping_seconds({"NOTIFY_SOCKET": "/run/notify"}))
+        self.assertIsNone(
+            watchdog_ping_seconds({"WATCHDOG_USEC": "60000000"}),
+        )
+
+    def test_a_watchdog_scoped_to_another_process_is_ignored(self) -> None:
+        self.assertIsNone(
+            watchdog_ping_seconds(
+                {
+                    "NOTIFY_SOCKET": "/run/notify",
+                    "WATCHDOG_USEC": "60000000",
+                    "WATCHDOG_PID": str(os.getpid() + 1),
+                }
+            )
+        )
+
+    def test_an_unreadable_or_zero_window_asks_for_no_pings(self) -> None:
+        for value in ("", "abc", "0", "-1"):
+            self.assertIsNone(
+                watchdog_ping_seconds(
+                    {"NOTIFY_SOCKET": "/run/notify", "WATCHDOG_USEC": value}
+                ),
+                value,
+            )
+
+
+class WatchdogLoopTests(unittest.TestCase):
+    """The watchdog must survive a reconciliation pass that blocks for minutes.
+
+    A deploy drives long synchronous work through this daemon, and before this
+    the watchdog ping was sent at the end of the reconciliation pass, so a pass
+    that outran WatchdogSec had systemd SIGABRT the process mid-deploy.
+    """
+
+    def _daemon(self, directory: str, **overrides) -> OpheliaDaemon:
+        root = Path(directory)
+        config = DaemonConfig(
+            host_id="host_fixture-1",
+            runtime_root=root / "runtime",
+            socket_path=root / "opheliad.sock",
+            allowed_uids=(os.geteuid(),),
+            allowed_manifest_roots=(),
+            require_edge_runtime=False,
+            watchdog_stall_seconds=60.0,
+            **overrides,
+        )
+        return OpheliaDaemon(config, runner=FakeRunner())
+
+    def test_pings_continue_while_a_reconciliation_pass_is_still_running(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            service = self._daemon(directory)
+            path = Path(directory) / "notify.sock"
+            receiver = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+            receiver.bind(str(path))
+            receiver.settimeout(5)
+            try:
+                environment = {
+                    "NOTIFY_SOCKET": str(path),
+                    "WATCHDOG_USEC": "2000000",
+                }
+                with mock.patch.dict(os.environ, environment):
+                    # No pass has completed for 30 seconds, well past the one
+                    # minute systemd would allow, but inside the stall limit.
+                    service._reconciler_progress = time.monotonic() - 30.0
+                    thread = threading.Thread(target=service._watchdog_loop, daemon=True)
+                    thread.start()
+                    try:
+                        self.assertEqual(b"WATCHDOG=1", receiver.recv(4096))
+                        self.assertEqual(b"WATCHDOG=1", receiver.recv(4096))
+                    finally:
+                        service._stop.set()
+                        thread.join(timeout=5)
+            finally:
+                receiver.close()
+
+    def test_pings_stop_once_reconciliation_has_stalled_past_the_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            service = self._daemon(directory)
+            path = Path(directory) / "notify.sock"
+            receiver = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+            receiver.bind(str(path))
+            receiver.settimeout(1)
+            try:
+                environment = {
+                    "NOTIFY_SOCKET": str(path),
+                    "WATCHDOG_USEC": "2000000",
+                }
+                with mock.patch.dict(os.environ, environment):
+                    # A daemon that has not completed a pass for far longer than
+                    # the stall limit is wedged, and systemd must be allowed to
+                    # restart it.
+                    service._reconciler_progress = time.monotonic() - 600.0
+                    thread = threading.Thread(target=service._watchdog_loop, daemon=True)
+                    thread.start()
+                    try:
+                        with self.assertRaises(socket.timeout):
+                            receiver.recv(4096)
+                    finally:
+                        service._stop.set()
+                        thread.join(timeout=5)
+            finally:
+                receiver.close()
+
+    def test_a_failing_reconciliation_pass_still_records_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            service = self._daemon(directory, reconciliation_seconds=0.01)
+            service._reconciler_progress = time.monotonic() - 300.0
+            with mock.patch.object(
+                service.store, "heartbeat", side_effect=RuntimeError("store is busy")
+            ):
+                thread = threading.Thread(
+                    target=service._reconciliation_loop, daemon=True
+                )
+                thread.start()
+                try:
+                    deadline = time.monotonic() + 5
+                    while time.monotonic() < deadline:
+                        if time.monotonic() - service._reconciler_progress < 5:
+                            break
+                        time.sleep(0.01)
+                finally:
+                    service._stop.set()
+                    thread.join(timeout=5)
+            # The loop is alive even though every pass raised, so the watchdog
+            # must keep pinging; only a pass that never returns stops it.
+            self.assertLess(time.monotonic() - service._reconciler_progress, 5)
+            self.assertIn("reconciler", service.health()["loop_errors"])
+
+
+class DaemonClientReconnectTests(unittest.TestCase):
+    """A read must survive the few seconds systemd takes to restart opheliad.
+
+    A production deploy preflight failed outright on 2026-09-17 because its
+    closing `ship daemon status` landed inside a watchdog restart window.
+    """
+
+    def test_a_read_waits_for_a_socket_that_appears_during_a_restart(self) -> None:
+        from ophelia.daemon.client import DaemonClient
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = DaemonConfig(
+                host_id="host_fixture-1",
+                runtime_root=root / "runtime",
+                socket_path=root / "opheliad.sock",
+                allowed_uids=(os.geteuid(),),
+                allowed_manifest_roots=(),
+                require_edge_runtime=False,
+            )
+            daemon = OpheliaDaemon(config, runner=FakeRunner())
+            daemon.store.register_host(
+                host_id=config.host_id,
+                capabilities=daemon.capabilities(),
+                agent_version="0.6.0",
+                protocol_version=1,
+            )
+            client = DaemonClient(config.socket_path, reconnect_seconds=8.0)
+            listening = threading.Event()
+            holder: Dict[str, object] = {}
+
+            def serve() -> None:
+                # The socket does not exist yet, exactly as while systemd is
+                # restarting the daemon.
+                time.sleep(0.75)
+                server = create_unix_server(daemon)
+                holder["server"] = server
+                listening.set()
+                server.serve_forever(poll_interval=0.05)
+
+            thread = threading.Thread(target=serve, daemon=True)
+            thread.start()
+            try:
+                data = client.get("/v1/health")
+                self.assertTrue(listening.is_set())
+                self.assertIn(data["status"], {"ready", "degraded"})
+            finally:
+                server = holder.get("server")
+                if server is not None:
+                    server.shutdown()
+                    server.server_close()
+                thread.join(timeout=5)
+
+    def test_a_read_still_fails_once_the_budget_is_spent(self) -> None:
+        from ophelia.daemon.client import DaemonClient, DaemonClientError
+
+        with tempfile.TemporaryDirectory() as directory:
+            client = DaemonClient(
+                Path(directory) / "missing.sock", reconnect_seconds=0.5
+            )
+            started = time.monotonic()
+            with self.assertRaises(DaemonClientError) as caught:
+                client.get("/v1/health")
+            self.assertEqual("daemon_unavailable", caught.exception.code)
+            self.assertGreaterEqual(time.monotonic() - started, 0.5)
+
+    def test_a_write_is_never_replayed(self) -> None:
+        from ophelia.daemon.client import DaemonClient, DaemonClientError
+
+        with tempfile.TemporaryDirectory() as directory:
+            client = DaemonClient(
+                Path(directory) / "missing.sock", reconnect_seconds=30.0
+            )
+            started = time.monotonic()
+            with self.assertRaises(DaemonClientError):
+                client.post("/v1/apps", {}, idempotency_key="key-1")
+            self.assertLess(time.monotonic() - started, 5.0)
 
 
 class SystemdLauncherTests(unittest.TestCase):

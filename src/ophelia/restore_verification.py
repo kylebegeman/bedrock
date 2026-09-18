@@ -26,7 +26,7 @@ from __future__ import annotations
 import tarfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Mapping, Optional
 
 from .config import DEFAULT_RUNTIME_ROOT, REPO_ROOT
 from .manifest import Manifest
@@ -346,7 +346,7 @@ def restore_drills_show(
     if isinstance(resolved_payload, dict):
         return _restore_drill_show_report(
             resolved_payload,
-            drill_id,
+            _restore_drill_display_id(resolved_payload, drill_id),
             requested_ref=drill_id,
             receipt_locator=receipt_locator,
         )
@@ -354,11 +354,13 @@ def restore_drills_show(
     if drill_path.exists() and drill_path.is_file():
         payload = receipt_payload(drill_path)
         if payload:
-            resolved_id = str(
-                payload.get("verify_id")
-                or payload.get("receipt_id")
-                or payload.get("operation_id")
-                or drill_path.stem
+            resolved_id = _restore_drill_display_id(
+                payload,
+                str(
+                    payload.get("receipt_id")
+                    or payload.get("operation_id")
+                    or drill_path.stem
+                ),
             )
             return _restore_drill_show_report(
                 payload,
@@ -376,13 +378,21 @@ def restore_drills_show(
             drill_id=drill_id,
         )
     for record in receipt_records(runtime_root):
-        if str(record.get("receipt_id") or "") != drill_id:
+        record_aliases = record.get("aliases")
+        aliases = (
+            {value for value in record_aliases if isinstance(value, str) and value}
+            if isinstance(record_aliases, (list, tuple, set))
+            else set()
+        )
+        # A receipt also answers to the identifiers earlier releases wrote for
+        # it, so a legacy verification id still resolves.
+        if str(record.get("receipt_id") or "") != drill_id and drill_id not in aliases:
             continue
         payload = receipt_payload(record)
         if isinstance(payload, dict):
             return _restore_drill_show_report(
                 payload,
-                drill_id,
+                _restore_drill_display_id(payload, drill_id),
                 requested_ref=drill_id,
                 receipt_locator=str(record.get("path") or ""),
                 fallback_app=(
@@ -400,6 +410,25 @@ def restore_drills_show(
         kind="ophelia.restore_drill",
         drill_id=drill_id,
     )
+
+
+def _restore_drill_display_id(payload: Mapping[str, object], fallback: str) -> str:
+    """The identifier that names a drill or verification receipt.
+
+    A verification receipt is named by its ``verify_id`` and a drill by its
+    ``restore_drill_id``. Resolution may arrive by a different route, such as a
+    kernel receipt id or a ``latest:`` alias, so the caller's id is the
+    fallback. Every lookup path reports the same name for the same receipt.
+    """
+
+    nested = payload.get("ophelia_receipt")
+    terminal = nested if isinstance(nested, dict) else payload
+    for key in ("verify_id", "restore_drill_id"):
+        for candidate in (payload, terminal):
+            value = candidate.get(key) if hasattr(candidate, "get") else None
+            if isinstance(value, str) and value:
+                return value
+    return fallback
 
 
 def _restore_drill_show_report(

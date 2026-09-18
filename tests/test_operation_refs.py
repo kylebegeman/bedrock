@@ -62,6 +62,59 @@ class OperationReferenceTests(unittest.TestCase):
             self.assertIn("operation_ref_ambiguous", codes)
             self.assertEqual(2, len(resolution["candidates"]))
 
+    def test_receipt_resolves_a_legacy_alias_before_guessing_a_prefix(self) -> None:
+        """An operator holding an identifier an earlier release wrote still resolves.
+
+        Discovery records those identifiers as aliases. An exact alias is
+        stronger evidence than a prefix guess, so it wins.
+        """
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir)
+            _write_receipt(
+                runtime_root,
+                "demo-service",
+                "verify-modern-id",
+                "backup.verify.apply",
+                "2026-06-20T10:00:00Z",
+                verify_id="verify-legacy-id",
+            )
+            _write_receipt(
+                runtime_root,
+                "demo-service",
+                "verify-legacy-id-but-different-receipt",
+                "backup.verify.apply",
+                "2026-06-20T09:00:00Z",
+            )
+
+            resolution = resolve_receipt_ref("verify-legacy-id", runtime_root=runtime_root)
+
+            self.assertTrue(resolution["ok"], resolution.get("blockers"))
+            self.assertEqual("alias", resolution["strategy"])
+            self.assertEqual("verify-modern-id", resolution["resolved_id"])
+
+    def test_receipt_alias_ambiguity_reports_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir)
+            for receipt_id in ("verify-one", "verify-two"):
+                _write_receipt(
+                    runtime_root,
+                    "demo-service",
+                    receipt_id,
+                    "backup.verify.apply",
+                    "2026-06-20T10:00:00Z",
+                    verify_id="verify-shared-alias",
+                )
+
+            resolution = resolve_receipt_ref(
+                "verify-shared-alias", runtime_root=runtime_root
+            )
+
+            self.assertFalse(resolution["ok"])
+            codes = {blocker["code"] for blocker in resolution["blockers"]}
+            self.assertIn("operation_ref_ambiguous", codes)
+            self.assertEqual(2, len(resolution["candidates"]))
+
     def test_workflow_latest_and_prefix_resolution(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime_root = Path(temp_dir)
@@ -77,26 +130,32 @@ class OperationReferenceTests(unittest.TestCase):
             self.assertEqual(first["workflow_id"], prefix["resolved_id"])
 
 
-def _write_receipt(runtime_root: Path, app: str, receipt_id: str, operation: str, started_at: str) -> Path:
+def _write_receipt(
+    runtime_root: Path,
+    app: str,
+    receipt_id: str,
+    operation: str,
+    started_at: str,
+    *,
+    verify_id: str | None = None,
+) -> Path:
     path = runtime_root / "apps" / app / "receipts" / f"{receipt_id}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "kind": "ophelia.receipt",
-                "operation": operation,
-                "operation_id": receipt_id,
-                "status": "succeeded",
-                "app": app,
-                "environment": "production",
-                "started_at": started_at,
-                "completed_at": started_at,
-                "inputs_redacted": True,
-            }
-        )
-        + "\n"
-    )
+    payload = {
+        "schema_version": 1,
+        "kind": "ophelia.receipt",
+        "operation": operation,
+        "operation_id": receipt_id,
+        "status": "succeeded",
+        "app": app,
+        "environment": "production",
+        "started_at": started_at,
+        "completed_at": started_at,
+        "inputs_redacted": True,
+    }
+    if verify_id is not None:
+        payload["verify_id"] = verify_id
+    path.write_text(json.dumps(payload) + "\n")
     return path
 
 

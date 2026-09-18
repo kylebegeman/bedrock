@@ -394,9 +394,17 @@ workers that lose a fence stop participating without overwriting the new
 owner's result.
 
 The reconciliation loop heartbeats host state, checks journal and event-chain
-integrity, and signals the systemd watchdog. Loop failures make `/v1/health`
+integrity, and reports `STATUS=` to systemd. Loop failures make `/v1/health`
 degraded while retaining only the error type and observation time. Raw process
 output and exception text are not persisted in host health.
+
+A separate watchdog loop owns `WATCHDOG=1`, at half the `WATCHDOG_USEC` systemd
+supplies. Reconciliation must not own the ping: a pass can block past
+`WatchdogSec` while the host is under deployment load, and a pass that raises
+would skip it, so systemd would kill a daemon that was merely slow or reporting
+an error. The watchdog keeps pinging while reconciliation still completes
+passes, and withholds the ping once none has completed for
+`watchdog_stall_seconds`, so a genuinely wedged daemon is still restarted.
 
 ## Current Boundary
 

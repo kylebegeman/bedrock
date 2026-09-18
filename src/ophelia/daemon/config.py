@@ -39,6 +39,11 @@ class DaemonConfig:
     max_workers: int = 4
     operation_poll_seconds: float = 0.5
     reconciliation_seconds: float = 15.0
+    # How long reconciliation may go without completing a pass before the
+    # watchdog loop stops pinging and lets systemd restart a wedged daemon. A
+    # deploy can make one pass take minutes, so this is far above the usual
+    # 15 second cadence while still bounding a true hang.
+    watchdog_stall_seconds: float = 900.0
     integrity_check_seconds: float = 300.0
     scheduler_seconds: float = 15.0
     require_edge_runtime: bool = True
@@ -75,6 +80,7 @@ class DaemonConfig:
             "max_workers": self.max_workers,
             "operation_poll_seconds": self.operation_poll_seconds,
             "reconciliation_seconds": self.reconciliation_seconds,
+            "watchdog_stall_seconds": self.watchdog_stall_seconds,
             "integrity_check_seconds": self.integrity_check_seconds,
             "scheduler_seconds": self.scheduler_seconds,
             "require_edge_runtime": self.require_edge_runtime,
@@ -112,6 +118,7 @@ _KEYS = {
     "max_workers",
     "operation_poll_seconds",
     "reconciliation_seconds",
+    "watchdog_stall_seconds",
     "integrity_check_seconds",
     "scheduler_seconds",
     "require_edge_runtime",

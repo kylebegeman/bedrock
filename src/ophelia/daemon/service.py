@@ -39,7 +39,7 @@ from .identity import identity_status
 from .observations import collect_host_observation
 from .recovery import create_host_backup as create_encrypted_host_backup
 from .store import DaemonStore
-from .systemd import notify_systemd
+from .systemd import notify_systemd, watchdog_ping_seconds
 from .workloads import WorkloadExecutionError, WorkloadRunManager
 
 
@@ -70,6 +70,9 @@ class OpheliaDaemon:
         self._threads: list[threading.Thread] = []
         self._last_scheduled_minute: Optional[str] = None
         self._last_integrity_check = 0.0
+        # Monotonic stamp of the last completed reconciliation pass. The
+        # watchdog loop reads it to tell a slow pass from a wedged daemon.
+        self._reconciler_progress = time.monotonic()
         self._health_lock = threading.Lock()
         self._loop_errors: Dict[str, Dict[str, str]] = {}
         self.agent: Optional[OutboundHostAgent] = None
@@ -193,6 +196,7 @@ class OpheliaDaemon:
             self._spawn("workload-%d" % index, self._workload_loop)
         self._spawn("scheduler", self._scheduler_loop)
         self._spawn("reconciler", self._reconciliation_loop)
+        self._spawn("watchdog", self._watchdog_loop)
         self._spawn("observations", self._observation_loop)
         if self.agent is not None:
             self._spawn("agent", self._agent_loop)
@@ -508,11 +512,34 @@ class OpheliaDaemon:
                 if now - self._last_integrity_check >= self.config.integrity_check_seconds:
                     self.journal.integrity_check()
                     self._last_integrity_check = now
-                notify_systemd("WATCHDOG=1\nSTATUS=Ophelia host state reconciled")
+                # Status is informational. The watchdog ping belongs to its own
+                # loop so a slow store or a raised error cannot starve it.
+                notify_systemd("STATUS=Ophelia host state reconciled")
                 self._clear_error("reconciler")
             except Exception as exc:
                 self._record_error("reconciler", exc)
+            # A pass that failed still proves the loop is running, so progress
+            # is recorded either way. Only a pass that never returns stops it.
+            self._reconciler_progress = time.monotonic()
             self._stop.wait(self.config.reconciliation_seconds)
+
+    def _watchdog_loop(self) -> None:
+        interval = watchdog_ping_seconds(os.environ)
+        if interval is None:
+            return
+        stall_limit = self.config.watchdog_stall_seconds
+        while not self._stop.is_set():
+            stalled = time.monotonic() - self._reconciler_progress
+            # Ping while the daemon is demonstrably alive. Withholding the ping
+            # once reconciliation has stopped returning is what still lets
+            # systemd restart a wedged daemon, which is the point of a watchdog.
+            if stalled <= stall_limit:
+                try:
+                    notify_systemd("WATCHDOG=1")
+                    self._clear_error("watchdog")
+                except Exception as exc:
+                    self._record_error("watchdog", exc)
+            self._stop.wait(interval)
 
     def _agent_loop(self) -> None:
         if self.agent is None:

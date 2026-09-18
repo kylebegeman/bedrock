@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.client
 import json
 import socket
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -37,9 +38,15 @@ class DaemonClient:
         socket_path: Path = DEFAULT_SOCKET_PATH,
         *,
         timeout_seconds: float = 30.0,
+        reconnect_seconds: float = 8.0,
     ) -> None:
         self.socket_path = Path(socket_path).expanduser()
         self.timeout_seconds = timeout_seconds
+        # systemd restarts opheliad a few seconds after a stop, and the socket
+        # is absent until it is listening again. A read that lands in that
+        # window waits for it rather than reporting the host as unavailable,
+        # which would fail a caller's whole script over a transient restart.
+        self.reconnect_seconds = reconnect_seconds
 
     def get(self, path: str, *, query: Optional[Dict[str, object]] = None) -> Dict[str, Any]:
         if query:
@@ -75,19 +82,35 @@ class DaemonClient:
             headers["Content-Length"] = str(len(encoded))
         if idempotency_key is not None:
             headers["Idempotency-Key"] = idempotency_key
-        connection = _UnixConnection(self.socket_path, self.timeout_seconds)
-        try:
-            connection.request(method, path, body=encoded, headers=headers)
-            response = connection.getresponse()
-            payload = json.loads(response.read().decode("utf-8"))
-        except (OSError, http.client.HTTPException, UnicodeError, ValueError) as exc:
-            raise DaemonClientError(
-                0,
-                "daemon_unavailable",
-                "Unable to communicate with opheliad at %s." % self.socket_path,
-            ) from exc
-        finally:
-            connection.close()
+        # Only a read is replayed. A write carries an idempotency key for the
+        # daemon's own deduplication, but a connection that died mid-request
+        # gives no proof the write did not land, so it is never resent here.
+        deadline = time.monotonic() + (self.reconnect_seconds if method == "GET" else 0.0)
+        while True:
+            connection = _UnixConnection(self.socket_path, self.timeout_seconds)
+            try:
+                connection.request(method, path, body=encoded, headers=headers)
+                response = connection.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+                break
+            except OSError as exc:
+                # A missing or refused socket is a daemon that is down or
+                # restarting; anything else already reached it.
+                if time.monotonic() >= deadline:
+                    raise DaemonClientError(
+                        0,
+                        "daemon_unavailable",
+                        "Unable to communicate with opheliad at %s." % self.socket_path,
+                    ) from exc
+            except (http.client.HTTPException, UnicodeError, ValueError) as exc:
+                raise DaemonClientError(
+                    0,
+                    "daemon_unavailable",
+                    "Unable to communicate with opheliad at %s." % self.socket_path,
+                ) from exc
+            finally:
+                connection.close()
+            time.sleep(0.25)
         if not isinstance(payload, dict) or payload.get("request_id") != request_id:
             raise DaemonClientError(0, "protocol_error", "Daemon response envelope is invalid.")
         if response.status >= 400 or not payload.get("ok"):

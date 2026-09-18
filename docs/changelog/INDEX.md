@@ -111,3 +111,5 @@
 | [0107](0107-release-0616-immutable-install-source.md) | 2026-08-08 | landed | Release 0.6.16 immutable installer source identity | release, daemon, installer, packaging, reproducibility, reliability, docs, tests |
 | [0108](0108-release-0617-execution-fence-heartbeat.md) | 2026-08-27 | landed | Release 0.6.17 long-operation execution fence heartbeat | release, execution, leases, reliability, lumen, docs, tests |
 | [0109](0109-portability-minor-completion-and-major-program.md) | 2026-08-30 | landed | Portability minor completion and major-feature program | portability, readiness, backup, conflicts, runbook, receipts, docs, tests |
+| [0110](0110-enrollment-and-edge-credential-hardening.md) | 2026-08-28 | landed | Enrollment journal observation and in-place edge credential refresh | daemon, enrollment, execution, edge, credentials, reliability, docs, tests |
+| [0111](0111-release-0618-watchdog-and-receipt-aliases.md) | 2026-09-18 | landed | Release 0.6.18 watchdog independence and receipt alias resolution | release, daemon, systemd, receipts, reliability, client, docs, tests |

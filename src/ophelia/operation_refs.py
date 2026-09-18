@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from .config import DEFAULT_RUNTIME_ROOT
 from .operation_schema import issue
@@ -182,6 +182,25 @@ def _resolve_ref(
     if len(exact) == 1:
         return _resolved(base, exact[0], id_key, strategy="exact")
 
+    # A receipt carries the identifiers earlier releases used for the same
+    # evidence, such as a legacy `verify_id`. An operator holding one of those
+    # must still resolve the receipt, and an exact alias is stronger evidence
+    # than a prefix guess, so it is tried before prefix matching.
+    alias_matches = [record for record in scoped_records if requested in _record_aliases(record)]
+    if len(alias_matches) == 1:
+        return _resolved(base, alias_matches[0], id_key, strategy="alias")
+    if len(alias_matches) > 1:
+        base["strategy"] = "alias"
+        base["candidates"] = [_candidate(record, id_key) for record in alias_matches[:10]]
+        candidate_ids = ", ".join(str(item.get("id")) for item in base["candidates"])
+        base["blockers"].append(
+            issue(
+                "operation_ref_ambiguous",
+                f"{target.capitalize()} reference '{requested}' matched multiple candidates: {candidate_ids}.",
+            )
+        )
+        return base
+
     prefix = [record for record in scoped_records if str(record.get(id_key) or "").startswith(requested)]
     if len(prefix) == 1:
         return _resolved(base, prefix[0], id_key, strategy="prefix")
@@ -199,6 +218,20 @@ def _resolve_ref(
 
     base["blockers"].append(issue("operation_ref_not_found", f"No {target} matched reference '{requested}'."))
     return base
+
+
+def _record_aliases(record: Any) -> Set[str]:
+    """Identifiers a record answers to besides its own id.
+
+    Receipt discovery records the ids earlier releases wrote for the same
+    evidence. Resolution reads them so an operator is not required to know
+    which release produced a receipt.
+    """
+
+    values = record.get("aliases") if hasattr(record, "get") else None
+    if not isinstance(values, (list, tuple, set)):
+        return set()
+    return {value for value in values if isinstance(value, str) and value}
 
 
 def _base_resolution(requested: str, target: str) -> Dict[str, Any]:

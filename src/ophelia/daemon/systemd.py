@@ -28,3 +28,29 @@ def notify_systemd(message: str) -> bool:
     finally:
         channel.close()
     return True
+
+
+def watchdog_ping_seconds(environ) -> float | None:
+    """Seconds between watchdog pings, or ``None`` when systemd wants none.
+
+    systemd sets ``WATCHDOG_USEC`` to the configured ``WatchdogSec`` and expects
+    a ping comfortably inside it; half the interval is the convention, so one
+    lost or delayed ping is not fatal. ``WATCHDOG_PID`` scopes the contract to a
+    single process when systemd sets it.
+    """
+
+    if not environ.get("NOTIFY_SOCKET"):
+        return None
+    raw = environ.get("WATCHDOG_USEC")
+    if not raw:
+        return None
+    watchdog_pid = environ.get("WATCHDOG_PID")
+    if watchdog_pid and watchdog_pid.strip() != str(os.getpid()):
+        return None
+    try:
+        microseconds = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if microseconds <= 0:
+        return None
+    return max(1.0, microseconds / 2_000_000)
