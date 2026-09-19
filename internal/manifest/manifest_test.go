@@ -101,3 +101,20 @@ func TestTwoWorkloadsCannotClaimTheSameRoute(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestWorkloadForPicksTheLongestPrefix(t *testing.T) {
+	m, err := Parse([]byte(site))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]string{"/": "site", "/about": "site", "/thebatteredbaker": "bakery", "/thebatteredbaker/": "bakery", "/thebatteredbaker/menu": "bakery", "/thebatteredbakery": "site"}
+	for path, want := range cases {
+		name, _, ok := m.WorkloadFor("kylebegeman.com", path)
+		if !ok || name != want {
+			t.Errorf("%s: got %q (%v), want %q", path, name, ok, want)
+		}
+	}
+	if _, _, ok := m.WorkloadFor("other.com", "/"); ok {
+		t.Fatal("an unrouted host must not match")
+	}
+}

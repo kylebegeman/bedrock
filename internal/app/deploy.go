@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -242,6 +244,30 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 			return nil
 		},
 	})
+	if len(m.Checks) > 0 {
+		add(kernel.Step{
+			Name: "checks", Change: fmt.Sprintf("run %d check(s) against the new containers", len(m.Checks)),
+			// Before any traffic reaches it: a revision that answers wrong
+			// never goes live.
+			Apply: func(ctx context.Context, out io.Writer) error {
+				e, err := connect(ctx)
+				if err != nil {
+					return err
+				}
+				for _, c := range m.Checks {
+					if err := runCheckDirect(ctx, e, m, containers, c); err != nil {
+						for _, name := range containers {
+							_ = e.Remove(ctx, name, 5*time.Second)
+						}
+						_ = store.SetRevisionStatus(ctx, m.App, revision, state.RevisionFailed)
+						return err
+					}
+					fmt.Fprintf(out, "%s ok\n", c.URL)
+				}
+				return nil
+			},
+		})
+	}
 	if len(hosts) > 0 {
 		add(kernel.Step{
 			Name: "dns", Change: "confirm " + strings.Join(hosts, ", ") + " point at this machine",
@@ -295,11 +321,18 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 	}
 	if len(m.Checks) > 0 {
 		add(kernel.Step{
-			Name: "checks", Change: fmt.Sprintf("run %d check(s)", len(m.Checks)),
+			Name: "verify", Change: fmt.Sprintf("run %d check(s) through the edge", len(m.Checks)),
+			// The checks already passed against the containers; this proves
+			// the edge and the certificates. If it fails, the previous
+			// revision comes back before anyone notices.
 			Apply: func(ctx context.Context, out io.Writer) error {
 				for _, c := range m.Checks {
 					if err := runCheck(ctx, c); err != nil {
-						return err
+						revert, revertErr := revertSwitch(ctx, store, connect, m.App, revision, containers)
+						if revertErr != nil {
+							return fmt.Errorf("%w; and putting the previous revision back failed too: %v", err, revertErr)
+						}
+						return fmt.Errorf("%w; %s", err, revert)
 					}
 					fmt.Fprintf(out, "%s ok\n", c.URL)
 				}
@@ -409,6 +442,7 @@ func containerSpec(m *manifest.Manifest, name string, w manifest.Workload, revis
 	if w.Kind != manifest.Worker {
 		spec.Networks = append(spec.Networks, docker.EdgeNetwork)
 	}
+	spec.Env = []string{"QUARK_APP=" + m.App, "QUARK_WORKLOAD=" + name, "QUARK_REVISION=" + revision}
 	for k, v := range w.Env {
 		spec.Env = append(spec.Env, k+"="+v)
 	}
@@ -531,20 +565,61 @@ func edgeConfig(ctx context.Context, store *state.Store) ([]byte, error) {
 	return edge.Config(routes)
 }
 
-// runCheck performs one manifest check against the live URL.
-func runCheck(ctx context.Context, c manifest.Check) error {
-	within := 10 * time.Second
+func checkTimeout(c manifest.Check) time.Duration {
 	if c.Within != "" {
 		if d, err := time.ParseDuration(c.Within); err == nil {
-			within = d
+			return d
 		}
 	}
+	return 10 * time.Second
+}
+
+// runCheck performs one manifest check against the live URL, through the
+// edge, resolving the name the way the world does.
+func runCheck(ctx context.Context, c manifest.Check) error {
+	within := checkTimeout(c)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.URL, nil)
 	if err != nil {
 		return err
 	}
+	return evaluateCheck(c, &http.Client{Timeout: within, Transport: publicTransport()}, req, within)
+}
+
+// runCheckDirect performs a check against the new container that would
+// serve the URL, before the edge routes anything to it.
+func runCheckDirect(ctx context.Context, e *docker.Engine, m *manifest.Manifest, containers map[string]string, c manifest.Check) error {
+	u, err := url.Parse(c.URL)
+	if err != nil {
+		return fmt.Errorf("check %s: %w", c.URL, err)
+	}
+	name, w, ok := m.WorkloadFor(u.Hostname(), u.Path)
+	if !ok {
+		return fmt.Errorf("check %s: no workload routes %s%s", c.URL, u.Hostname(), u.Path)
+	}
+	info, err := e.Inspect(ctx, containers[name])
+	if err != nil {
+		return fmt.Errorf("check %s: %w", c.URL, err)
+	}
+	ip := containerIP(info)
+	if ip == "" {
+		return fmt.Errorf("check %s: %s has no address", c.URL, containers[name])
+	}
+	port := w.Port
+	if w.Kind == manifest.Static {
+		port, _ = strconv.Atoi(docker.StaticPort)
+	}
+	within := checkTimeout(c)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://%s:%d%s", ip, port, u.RequestURI()), nil)
+	if err != nil {
+		return err
+	}
+	req.Host = u.Host
+	return evaluateCheck(c, &http.Client{Timeout: within}, req, within)
+}
+
+func evaluateCheck(c manifest.Check, client *http.Client, req *http.Request, within time.Duration) error {
 	started := time.Now()
-	resp, err := (&http.Client{Timeout: within}).Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("check %s: %w", c.URL, err)
 	}
@@ -565,6 +640,50 @@ func runCheck(ctx context.Context, c manifest.Check) error {
 		return fmt.Errorf("check %s: took %s, longer than %s", c.URL, took.Round(time.Millisecond), within)
 	}
 	return nil
+}
+
+func containerIP(info *docker.Info) string {
+	if ip := info.IPs[docker.EdgeNetwork]; ip != "" {
+		return ip
+	}
+	for _, ip := range info.IPs {
+		return ip
+	}
+	return ""
+}
+
+// revertSwitch puts the previous revision back on the edge after a live
+// verification failed, or routes nothing to the app when there is none,
+// and takes the failed revision's containers down.
+func revertSwitch(ctx context.Context, store *state.Store, connect func(context.Context) (*docker.Engine, error), app, failed string, containers map[string]string) (string, error) {
+	prev, err := store.RevisionWithStatus(ctx, app, state.RevisionPrevious)
+	if err != nil {
+		return "", err
+	}
+	if prev != nil {
+		if err := store.Activate(ctx, app, prev.ID, time.Now().UTC()); err != nil {
+			return "", err
+		}
+	}
+	if err := store.SetRevisionStatus(ctx, app, failed, state.RevisionFailed); err != nil {
+		return "", err
+	}
+	cfg, err := edgeConfig(ctx, store)
+	if err != nil {
+		return "", err
+	}
+	if err := edge.NewAdmin().Load(ctx, cfg); err != nil {
+		return "", err
+	}
+	if e, err := connect(ctx); err == nil {
+		for _, c := range containers {
+			_ = e.Remove(ctx, c, 5*time.Second)
+		}
+	}
+	if prev == nil {
+		return "the edge routes nothing to " + app + " now", nil
+	}
+	return "the edge is back on " + prev.ID, nil
 }
 
 // sourceCommit reads the source's git commit, when it is a checkout.
@@ -622,4 +741,11 @@ func (r Rollback) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, 
 		return nil, err
 	}
 	return r.Deploy.rollout(ctx, &m, rev.ID, nil)
+}
+
+// publicTransport resolves names the way the world does, through a public
+// resolver, so a check isn't fooled by the machine's own cache.
+func publicTransport() *http.Transport {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, Resolver: edge.PublicResolver}
+	return &http.Transport{DialContext: dialer.DialContext, TLSHandshakeTimeout: 10 * time.Second}
 }

@@ -10,10 +10,25 @@ import (
 	"time"
 )
 
+// PublicResolver asks a public resolver directly, so a stale negative
+// answer cached on the machine (from looking a name up before its record
+// existed) doesn't hide a record the rest of the world already sees.
+var PublicResolver = &net.Resolver{
+	PreferGo: true,
+	Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		d := net.Dialer{Timeout: 5 * time.Second}
+		conn, err := d.DialContext(ctx, "udp", "1.1.1.1:53")
+		if err != nil {
+			return d.DialContext(ctx, "udp", "8.8.8.8:53")
+		}
+		return conn, nil
+	},
+}
+
 // Resolves says whether host's DNS points at one of this machine's
 // addresses, and what it points at when it doesn't.
 func Resolves(ctx context.Context, host string, machineAddrs []string) (ok bool, pointsAt []string, err error) {
-	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	ips, err := PublicResolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		return false, nil, fmt.Errorf("%s doesn't resolve: %w", host, err)
 	}

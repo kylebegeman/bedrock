@@ -295,3 +295,28 @@ func (r Route) NormalizedPath() string {
 	}
 	return strings.TrimSuffix(r.Path, "/") + "/"
 }
+
+// WorkloadFor finds the workload that serves a host and path: the route
+// with the longest matching prefix wins, as it does at the edge.
+func (m *Manifest) WorkloadFor(host, path string) (string, Workload, bool) {
+	if path == "" {
+		path = "/"
+	}
+	probe := strings.TrimSuffix(path, "/") + "/"
+	var (
+		bestName string
+		bestLen  = -1
+	)
+	for _, name := range m.WorkloadNames() {
+		for _, r := range m.Workloads[name].Routes {
+			prefix := r.NormalizedPath()
+			if r.Host == host && strings.HasPrefix(probe, prefix) && len(prefix) > bestLen {
+				bestName, bestLen = name, len(prefix)
+			}
+		}
+	}
+	if bestLen < 0 {
+		return "", Workload{}, false
+	}
+	return bestName, m.Workloads[bestName], true
+}
