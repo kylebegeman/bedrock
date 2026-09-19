@@ -86,6 +86,9 @@ CREATE TABLE IF NOT EXISTS steps (
 	if err != nil {
 		return fmt.Errorf("migrate state: %w", err)
 	}
+	if err := s.migrateApps(ctx); err != nil {
+		return fmt.Errorf("migrate state: %w", err)
+	}
 	return nil
 }
 

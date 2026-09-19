@@ -1,0 +1,20 @@
+app: hello
+description: The lane's web fixture
+owner: personal
+workloads:
+  web:
+    kind: web
+    build:
+      context: .
+    port: 8000
+    routes:
+      - host: hello.lane.begam.in
+    env:
+      GREETING: hello
+    health:
+      path: /healthz
+    resources:
+      memory: 64m
+checks:
+  - url: https://hello.lane.begam.in/
+    contains: hello from quark

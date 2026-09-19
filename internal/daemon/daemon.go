@@ -15,6 +15,9 @@ import (
 	"time"
 
 	"github.com/kylebegeman/quark/internal/api"
+	"github.com/kylebegeman/quark/internal/app"
+	"github.com/kylebegeman/quark/internal/docker"
+	"github.com/kylebegeman/quark/internal/edge"
 	"github.com/kylebegeman/quark/internal/host"
 	"github.com/kylebegeman/quark/internal/kernel"
 	"github.com/kylebegeman/quark/internal/state"
@@ -40,13 +43,23 @@ const DefaultStateDir = "/var/lib/quark"
 
 // Registry returns the operation kinds the daemon knows, for the machine
 // this process runs on.
-func Registry(socket string) kernel.Registry {
+func Registry(store *state.Store, socket string) kernel.Registry {
 	env := host.RealEnv()
 	reg := kernel.Registry{}
 	reg.Add(kernel.Exercise{})
-	reg.Add(host.Setup{Env: env, Socket: socket})
+	reg.Add(host.Setup{Env: env, Socket: socket, EnsureEdge: func(ctx context.Context, out io.Writer) error {
+		e, err := docker.Connect(ctx)
+		if err != nil {
+			return err
+		}
+		defer e.Close()
+		return edge.Ensure(ctx, e, out)
+	}})
 	reg.Add(host.Maintain{Env: env, Socket: socket})
 	reg.Add(host.Upgrade{Env: env})
+	deploy := app.Deploy{Store: store, Addresses: func(ctx context.Context) []string { return host.Addresses(ctx, env) }}
+	reg.Add(deploy)
+	reg.Add(app.Rollback{Deploy: deploy})
 	return reg
 }
 
@@ -77,7 +90,7 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 		return err
 	}
 	defer store.Close()
-	engine := kernel.New(store, Registry(cfg.Socket), cfg.Owner)
+	engine := kernel.New(store, Registry(store, cfg.Socket), cfg.Owner)
 	logf("quark daemon %s, state %s, owner %s", version.Current().Version, store.Path(), cfg.Owner)
 
 	apiServer := &api.Server{Engine: engine, Store: store}

@@ -131,6 +131,7 @@ func setUpBox(t *testing.T) *fakeMachine {
 	m.answers["docker compose version"] = "Docker Compose version v2.40.0"
 	m.answers["docker buildx version"] = "github.com/docker/buildx v0.30.0"
 	m.answers["docker inspect -f {{.State.Running}} "+RegistryContainer] = "true"
+	m.answers["docker inspect -f {{.State.Running}} quark-edge"] = "true"
 	m.answers["ufw status"] = "Status: active\n\nTo                         Action      From\n--                         ------      ----\nOpenSSH                    ALLOW       Anywhere\n80/tcp                     ALLOW       Anywhere\n443/tcp                    ALLOW       Anywhere\nOpenSSH (v6)               ALLOW       Anywhere (v6)\n"
 	m.answers["sshd -T"] = "passwordauthentication no\npermitrootlogin prohibit-password\n"
 	m.answers["apt-get -s -o Debug::NoLocking=true upgrade"] = "Reading package lists...\n"

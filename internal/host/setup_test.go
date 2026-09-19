@@ -62,7 +62,7 @@ func TestSetupPlansEveryStepAndSaysWhatEachWillChange(t *testing.T) {
 	m := freshUbuntu(t)
 	allowEverything(m)
 	view, notes := planSteps(t, m, Profile{Hostname: "personal-vps", SwapGiB: 4})
-	want := []string{"packages", "hostname", "swap", "docker", "registry", "security-updates", "journal", "ssh", "firewall", "fail2ban", "time", "profile"}
+	want := []string{"packages", "hostname", "swap", "docker", "registry", "edge", "security-updates", "journal", "ssh", "firewall", "fail2ban", "time", "profile"}
 	var got []string
 	for _, st := range view.Steps {
 		got = append(got, st.Name)

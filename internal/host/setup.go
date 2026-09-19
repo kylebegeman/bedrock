@@ -20,6 +20,8 @@ const SetupKind = "host.setup"
 type Setup struct {
 	Env    Env
 	Socket string
+	// EnsureEdge runs the web edge; nil skips it (tests).
+	EnsureEdge func(ctx context.Context, out io.Writer) error
 }
 
 // Kind implements kernel.Definition.
@@ -146,6 +148,16 @@ func (s Setup) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, err
 		Note: doneIf(f.Registry.Running, "already running", "not running"),
 		Apply: func(ctx context.Context, out io.Writer) error {
 			return ensureRegistry(ctx, env, out)
+		},
+	})
+	add(kernel.Step{
+		Name: "edge", Change: "run the web edge on ports 80 and 443",
+		Note: doneIf(f.EdgeRunning, "already running", "not running"),
+		Apply: func(ctx context.Context, out io.Writer) error {
+			if s.EnsureEdge == nil {
+				return nil
+			}
+			return s.EnsureEdge(ctx, out)
 		},
 	})
 	add(kernel.Step{

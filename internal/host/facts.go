@@ -53,6 +53,7 @@ type Facts struct {
 		Present bool `json:"present"`
 		Running bool `json:"running"`
 	} `json:"registry"`
+	EdgeRunning   bool `json:"edge_running"`
 	DaemonAnswers bool `json:"daemon_answers"`
 }
 
@@ -113,6 +114,9 @@ func Gather(ctx context.Context, env Env, socket string) Facts {
 		if state, err := env.Run(ctx, "docker", "inspect", "-f", "{{.State.Running}}", RegistryContainer); err == nil {
 			f.Registry.Present = true
 			f.Registry.Running = strings.TrimSpace(state) == "true"
+		}
+		if state, err := env.Run(ctx, "docker", "inspect", "-f", "{{.State.Running}}", "quark-edge"); err == nil {
+			f.EdgeRunning = strings.TrimSpace(state) == "true"
 		}
 	}
 
@@ -220,4 +224,24 @@ func (f Facts) Allows(port string) bool {
 		}
 	}
 	return false
+}
+
+// Addresses returns the machine's global addresses, the ones DNS should
+// point at.
+func Addresses(ctx context.Context, env Env) []string {
+	out, err := env.Run(ctx, "ip", "-o", "addr", "show", "scope", "global")
+	if err != nil {
+		return nil
+	}
+	var addrs []string
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 4 && (fields[2] == "inet" || fields[2] == "inet6") {
+			addr := strings.SplitN(fields[3], "/", 2)[0]
+			if !strings.HasPrefix(addr, "172.") && !strings.HasPrefix(addr, "192.168.") && !strings.HasPrefix(addr, "10.") {
+				addrs = append(addrs, addr)
+			}
+		}
+	}
+	return addrs
 }

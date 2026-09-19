@@ -118,6 +118,14 @@ func Diagnose(f Facts) []Result {
 		add("registry", Pass, "running on 127.0.0.1:5000", "")
 	}
 
+	if f.Docker.Running {
+		if f.EdgeRunning {
+			add("edge", Pass, "running on 80 and 443", "")
+		} else {
+			add("edge", Fail, "not running", setup)
+		}
+	}
+
 	switch {
 	case !f.Firewall.Installed:
 		add("firewall", Fail, "ufw not installed", setup)

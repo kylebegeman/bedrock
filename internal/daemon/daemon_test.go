@@ -32,7 +32,7 @@ func TestASweepRecoversAnOperationWhoseLeaseOutlivesTheRestart(t *testing.T) {
 	// A dead daemon left this operation applying with 1.5 s of lease left,
 	// after finishing step 1.
 	input, _ := json.Marshal(kernel.ExerciseInput{Dir: dir, Steps: 3})
-	dead := kernel.New(store, Registry(""), "dead-daemon")
+	dead := kernel.New(store, Registry(store, ""), "dead-daemon")
 	view, err := dead.PlanOnly(ctx, kernel.ExerciseKind, input)
 	if err != nil {
 		t.Fatal(err)
