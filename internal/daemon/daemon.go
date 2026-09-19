@@ -60,6 +60,7 @@ func Registry(store *state.Store, socket string) kernel.Registry {
 	deploy := app.Deploy{Store: store, Addresses: func(ctx context.Context) []string { return host.Addresses(ctx, env) }}
 	reg.Add(deploy)
 	reg.Add(app.Rollback{Deploy: deploy})
+	reg.Add(app.GC{Store: store})
 	return reg
 }
 

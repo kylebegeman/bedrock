@@ -20,6 +20,43 @@ behind it live in [docs/](docs/):
 Every milestone is proven on a real machine that is wiped and rebuilt for the
 purpose. See [lane/README.md](lane/README.md).
 
+## An app's manifest
+
+An app describes itself in `quark.yaml` at the root of its source:
+
+```yaml
+app: hello
+description: What this is for
+owner: personal
+workloads:
+  web:
+    kind: web              # web, static or worker
+    build: {context: .}    # or image: ghcr.io/you/hello:1.2
+    port: 8000
+    routes:
+      - host: hello.example.com
+      - host: example.com
+        path: /hello       # a prefix; longest wins on a host
+    env: {GREETING: hello}
+    secrets: [API_KEY]     # names only; values live in quark's store
+    health: {path: /healthz}
+    resources: {memory: 256m, cpus: 0.5}
+  site:
+    kind: static
+    dir: public            # served by a file server
+    routes: [{host: www.example.com}]
+checks:
+  - url: https://hello.example.com/
+    contains: hello
+```
+
+`quark deploy <dir>` builds the images on the machine, starts the new
+revision beside the old one, runs the checks against it, confirms DNS,
+switches the edge, waits for certificates, checks again through the edge
+and retires the replaced revision, which `quark rollback` can bring back.
+Every container is told its `QUARK_APP`, `QUARK_WORKLOAD` and
+`QUARK_REVISION`.
+
 ## Build
 
 ```sh

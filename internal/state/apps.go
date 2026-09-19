@@ -221,3 +221,9 @@ func scanRevision(row scanner) (*Revision, error) {
 	r.CreatedAt = fromUnix(created)
 	return &r, nil
 }
+
+// ForgetRevision drops a revision's record.
+func (s *Store) ForgetRevision(ctx context.Context, app, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM revisions WHERE app = ? AND id = ? AND status <> ?`, app, id, string(RevisionActive))
+	return err
+}
