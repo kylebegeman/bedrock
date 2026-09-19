@@ -23,6 +23,7 @@ import (
 
 	"github.com/kylebegeman/quark/internal/docker"
 	"github.com/kylebegeman/quark/internal/edge"
+	"github.com/kylebegeman/quark/internal/integration"
 	"github.com/kylebegeman/quark/internal/kernel"
 	"github.com/kylebegeman/quark/internal/manifest"
 	"github.com/kylebegeman/quark/internal/secrets"
@@ -51,6 +52,9 @@ type DeployInput struct {
 	Revision string `json:"revision"`
 	// Restore loads data before the first start.
 	Restore Restore `json:"restore,omitempty"`
+	// Commit is the source's commit when the caller knows it, as a push
+	// does; otherwise it is read from the source when it is a checkout.
+	Commit string `json:"commit,omitempty"`
 }
 
 var revisionPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{3,40}$`)
@@ -74,7 +78,15 @@ func (d Deploy) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 	if err != nil {
 		return nil, err
 	}
-	commit := sourceCommit(ctx, in.Source)
+	if len(m.ManagedHosts()) > 0 {
+		if _, err := integration.LoadCloudflare(d.Secrets); err != nil {
+			return nil, errNoCloudflare(m.App, err)
+		}
+	}
+	commit := in.Commit
+	if commit == "" {
+		commit = sourceCommit(ctx, in.Source)
+	}
 	return d.rollout(ctx, m, in.Revision, &buildFrom{source: in.Source, commit: commit, restore: in.Restore})
 }
 
@@ -135,16 +147,26 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 		})
 	}
 	add(kernel.Step{
-		Name: "edge", Change: "run the edge and the app's network",
+		Name: "edge", Change: "run the edge, the app's own network and the one it shares with the edge alone",
 		Apply: func(ctx context.Context, out io.Writer) error {
 			e, err := connect(ctx)
 			if err != nil {
 				return err
 			}
-			if err := edge.Ensure(ctx, e, out); err != nil {
+			boot, err := EdgeConfig(ctx, store)
+			if err != nil {
 				return err
 			}
-			return e.EnsureNetwork(ctx, docker.AppNetwork(m.App))
+			if err := edge.Ensure(ctx, e, boot, out); err != nil {
+				return err
+			}
+			if err := e.EnsureNetwork(ctx, docker.AppNetwork(m.App)); err != nil {
+				return err
+			}
+			if servesAny(m) {
+				return edge.Join(ctx, e, m.App)
+			}
+			return nil
 		},
 	})
 	if m.Data != nil {
@@ -242,16 +264,8 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 					return err
 				}
 			}
-			if from != nil && len(from.restore.Volumes) > 0 {
-				if err := fixVolumeOwners(ctx, e, m, rev.Images, from.restore.Volumes, out); err != nil {
-					return err
-				}
-			}
 			for _, name := range m.WorkloadNames() {
 				w := m.Workloads[name]
-				if !w.LongRunning() {
-					continue
-				}
 				image := rev.Images[name]
 				if image == "" {
 					return fmt.Errorf("no image recorded for %s", name)
@@ -260,10 +274,22 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 				if err != nil {
 					return err
 				}
+				u, err := isolate(ctx, e, &spec, w, image)
+				if err != nil {
+					return fmt.Errorf("%s: %w", name, err)
+				}
+				// Cron workloads start later, but their volumes are
+				// readied now, once, instead of on every run.
+				if err := ownVolumes(ctx, e, m, w, u, out); err != nil {
+					return err
+				}
+				if !w.LongRunning() {
+					continue
+				}
 				if err := e.Run(ctx, spec); err != nil {
 					return err
 				}
-				fmt.Fprintf(out, "%s running\n", spec.Name)
+				fmt.Fprintf(out, "%s running as %s%s\n", spec.Name, u, isolationWord(w))
 			}
 			if version > 0 {
 				fmt.Fprintf(out, "secrets version %d\n", version)
@@ -321,21 +347,14 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 		})
 	}
 	if len(hosts) > 0 {
+		change := "confirm " + strings.Join(hosts, ", ") + " point at this machine"
+		if managed := m.ManagedHosts(); len(managed) > 0 {
+			change = "keep the DNS records for " + strings.Join(sortedKeys(managed), ", ") + " and confirm every host points here"
+		}
 		add(kernel.Step{
-			Name: "dns", Change: "confirm " + strings.Join(hosts, ", ") + " point at this machine",
+			Name: "dns", Change: change,
 			Apply: func(ctx context.Context, out io.Writer) error {
-				addrs := d.Addresses(ctx)
-				for _, host := range hosts {
-					ok, pointsAt, err := edge.Resolves(ctx, host, addrs)
-					if err != nil {
-						return err
-					}
-					if !ok {
-						return errors.New(edge.DNSProblem(host, pointsAt, addrs))
-					}
-					fmt.Fprintf(out, "%s points here\n", host)
-				}
-				return nil
+				return keepRecords(ctx, d.Secrets, m, d.Addresses(ctx), out)
 			},
 		})
 	}
@@ -416,7 +435,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 					fmt.Fprintf(out, "%s stopped, kept for rollback\n", r.ID)
 				}
 			}
-			return nil
+			return pruneRecords(ctx, store, d.Secrets, m.App, d.Addresses(ctx), out)
 		},
 	})
 	return plan, nil
@@ -492,7 +511,8 @@ func containerSpec(m *manifest.Manifest, name string, w manifest.Workload, revis
 		Restart:  true,
 	}
 	if w.Serves() {
-		spec.Networks = append(spec.Networks, docker.EdgeNetwork)
+		// The one network it shares with the edge, and with no other app.
+		spec.Networks = append(spec.Networks, edge.AppNetwork(m.App))
 	}
 	spec.Env = []string{"QUARK_APP=" + m.App, "QUARK_WORKLOAD=" + name, "QUARK_REVISION=" + revision}
 	for _, k := range sortedKeys(w.Env) {
@@ -556,8 +576,11 @@ func waitReady(ctx context.Context, e *docker.Engine, container string, w manife
 		switch {
 		case err != nil:
 			last = err.Error()
-		case !info.Running:
-			return fmt.Errorf("the container stopped (%s); see quark logs", info.Status)
+		case !info.Running || info.Restarts > 0:
+			// Its last words say why, isolation included (a binary that
+			// wants a capability, a write to a read-only path).
+			words := lastWords(e.LogTail(ctx, container, 5))
+			return fmt.Errorf("the container exited (exit code %d, restarted %d times): %s", info.ExitCode, info.Restarts, words)
 		default:
 			ip := info.IPs[docker.EdgeNetwork]
 			if ip == "" {
@@ -608,11 +631,75 @@ func ReloadEdge(ctx context.Context, store *state.Store) error {
 	if !admin.Answers(ctx) {
 		return nil
 	}
-	cfg, err := edgeConfig(ctx, store)
+	cfg, err := EdgeConfig(ctx, store)
 	if err != nil {
 		return err
 	}
 	return admin.Load(ctx, cfg)
+}
+
+// UpgradeEdge replaces an edge an older quark made, keeping its routes,
+// and then gives it the current configuration. A machine without an edge
+// yet is left for host setup.
+func UpgradeEdge(ctx context.Context, store *state.Store, out io.Writer) error {
+	e, err := docker.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer e.Close()
+	info, err := e.Inspect(ctx, edge.Container)
+	if err != nil {
+		return nil
+	}
+	if info.Labels[edge.LayoutLabel] != edge.Layout {
+		boot, err := EdgeConfig(ctx, store)
+		if err != nil {
+			return err
+		}
+		if err := edge.Ensure(ctx, e, boot, out); err != nil {
+			return err
+		}
+	}
+	return ReloadEdge(ctx, store)
+}
+
+// servesAny reports whether any of an app's workloads takes traffic from
+// the edge.
+func servesAny(m *manifest.Manifest) bool {
+	for _, name := range m.WorkloadNames() {
+		if m.Workloads[name].Serves() {
+			return true
+		}
+	}
+	return false
+}
+
+// isolationWord says in a few words when a workload asked to be less
+// isolated than the default.
+func isolationWord(w manifest.Workload) string {
+	switch {
+	case w.Privileged:
+		return ", privileged as its manifest says"
+	case w.WritableRoot:
+		return ", root filesystem writable as its manifest says"
+	}
+	return ""
+}
+
+// EdgeConfig builds the edge's whole configuration from every active revision.
+func EdgeConfig(ctx context.Context, store *state.Store) ([]byte, error) {
+	return edgeConfig(ctx, store)
+}
+
+// lastWords picks the last line a container wrote, for an error message.
+func lastWords(logs string) string {
+	lines := strings.Split(strings.TrimSpace(logs), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if l := strings.TrimSpace(lines[i]); l != "" {
+			return l
+		}
+	}
+	return "it wrote nothing; see quark logs"
 }
 
 // edgeConfig builds the edge's whole configuration from every active revision.

@@ -85,6 +85,14 @@ var DefaultKeep = Keep{Daily: 7, Weekly: 4, Monthly: 6}
 // integration credentials. No app may take it.
 const ReservedApp = "quark"
 
+// reservedApps are names whose containers, networks or volumes would
+// collide with quark's own: quark-edge, quark-registry, quark-restic-cache.
+var reservedApps = map[string]bool{ReservedApp: true, "edge": true, "registry": true, "restic": true}
+
+// DatabaseVolume is the name of the volume that holds an app's database;
+// no declared volume may take it.
+const DatabaseVolume = "postgres"
+
 // Data is an app's state, kept across revisions.
 type Data struct {
 	// Postgres gives the app its own database. Its URL reaches every
@@ -154,6 +162,24 @@ type Workload struct {
 	Schedule string `yaml:"schedule,omitempty" json:"schedule,omitempty"`
 	// Timeout is how long a cron run may take. Default 1h.
 	Timeout string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	// User runs the container as this user (uid, name or uid:gid) instead
+	// of the image's own.
+	User string `yaml:"user,omitempty" json:"user,omitempty"`
+	// Privileged keeps every capability and lets the container gain
+	// privileges: for a workload that runs other containers, such as
+	// Loom's Runner. Everything else runs with no capabilities and can't
+	// gain any.
+	Privileged bool `yaml:"privileged,omitempty" json:"privileged,omitempty"`
+	// Capabilities are the kernel capabilities to keep, such as
+	// NET_BIND_SERVICE, when an image needs a few. Every other one is
+	// dropped.
+	Capabilities []string `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
+	// WritableRoot lets the workload write to its root filesystem. By
+	// default it is read-only, with /tmp in memory.
+	WritableRoot bool `yaml:"writable_root,omitempty" json:"writable_root,omitempty"`
+	// Tmpfs are more paths the workload may write to, kept in memory, such
+	// as a framework's cache directory.
+	Tmpfs []string `yaml:"tmpfs,omitempty" json:"tmpfs,omitempty"`
 }
 
 // Build says how to build a workload's image.
@@ -174,7 +200,27 @@ type Route struct {
 	// Path is a prefix; "/" (the default) takes everything not claimed by
 	// a longer prefix on the same host.
 	Path string `yaml:"path,omitempty" json:"path,omitempty"`
+	// DNS says whether quark keeps the host's record in Cloudflare:
+	// "direct" makes a record that names this machine, "proxied" one
+	// behind Cloudflare's proxy. Empty leaves the record alone and only
+	// checks that it points here.
+	DNS DNSMode `yaml:"dns,omitempty" json:"dns,omitempty"`
 }
+
+// DNSMode is how a route's record is kept.
+type DNSMode string
+
+const (
+	// DNSManual leaves the record to the person; the deploy checks it.
+	DNSManual DNSMode = ""
+	// DNSDirect keeps a record that points straight at the machine.
+	DNSDirect DNSMode = "direct"
+	// DNSProxied keeps a record behind Cloudflare's proxy.
+	DNSProxied DNSMode = "proxied"
+)
+
+// Managed reports whether quark keeps the record.
+func (m DNSMode) Managed() bool { return m == DNSDirect || m == DNSProxied }
 
 // Health is how a workload says it is ready.
 type Health struct {
@@ -209,6 +255,8 @@ var (
 	hostPattern = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$`)
 	envPattern  = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 	sizePattern = regexp.MustCompile(`^[0-9]+[kmg]$`)
+	capPattern  = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+	userPattern = regexp.MustCompile(`^[a-z0-9_][a-z0-9_-]*(:[a-z0-9_][a-z0-9_-]*)?$`)
 )
 
 // Parse reads a manifest from YAML and validates it.
@@ -241,8 +289,8 @@ func (m *Manifest) Validate() error {
 	fail := func(format string, args ...any) { errs = append(errs, fmt.Sprintf(format, args...)) }
 	if !namePattern.MatchString(m.App) {
 		fail("app: %q must be lowercase letters, digits and hyphens, up to 40 characters", m.App)
-	} else if m.App == ReservedApp {
-		fail("app: %q is quark's own name", m.App)
+	} else if reservedApps[m.App] {
+		fail("app: %q is a name quark uses for itself", m.App)
 	}
 	if len(m.Workloads) == 0 {
 		fail("workloads: an app needs at least one")
@@ -333,6 +381,27 @@ func (m *Manifest) Validate() error {
 				fail("%s: %s %s is already routed to %s", ra, r.Host, path, other)
 			}
 			claimed[key] = name
+			switch r.DNS {
+			case DNSManual, DNSDirect, DNSProxied:
+			default:
+				fail("%s.dns: %q isn't direct or proxied", ra, r.DNS)
+			}
+		}
+		if w.User != "" && !userPattern.MatchString(w.User) {
+			fail("%s.user: %q must be a user, uid, or user:group", at, w.User)
+		}
+		for _, c := range w.Capabilities {
+			if !capPattern.MatchString(strings.TrimPrefix(strings.ToUpper(c), "CAP_")) {
+				fail("%s.capabilities: %q isn't a capability name such as NET_BIND_SERVICE", at, c)
+			}
+		}
+		if w.Privileged && len(w.Capabilities) > 0 {
+			fail("%s: a privileged workload keeps every capability already; drop capabilities", at)
+		}
+		for _, t := range w.Tmpfs {
+			if !strings.HasPrefix(t, "/") {
+				fail("%s.tmpfs: %q must be an absolute path", at, t)
+			}
 		}
 		for k := range w.Env {
 			if !envPattern.MatchString(k) {
@@ -363,10 +432,22 @@ func (m *Manifest) Validate() error {
 			fail("%s.dir: must be inside the source", at)
 		}
 	}
+	modes := map[string]DNSMode{}
+	for _, name := range m.WorkloadNames() {
+		for _, r := range m.Workloads[name].Routes {
+			if prev, seen := modes[r.Host]; seen && prev != r.DNS {
+				fail("routes: %s has dns %q on one route and %q on another; use one", r.Host, prev, r.DNS)
+			}
+			modes[r.Host] = r.DNS
+		}
+	}
 	if m.Data != nil {
 		for name := range m.Data.Volumes {
 			if !namePattern.MatchString(name) {
 				fail("data.volumes: %q must be lowercase letters, digits and hyphens", name)
+			}
+			if name == DatabaseVolume {
+				fail("data.volumes: %q is the database's own volume; pick another name", name)
 			}
 		}
 		if m.Data.Postgres != nil {
@@ -552,4 +633,30 @@ func (m *Manifest) VerifyQuery() (string, int) {
 		atLeast = 1
 	}
 	return m.Backup.Verify.SQL, atLeast
+}
+
+// ManagedHosts returns the hosts whose records quark keeps, with their
+// mode, in host order. A host routed twice with different modes is an
+// error at validation time, so the first wins here.
+func (m *Manifest) ManagedHosts() map[string]DNSMode {
+	out := map[string]DNSMode{}
+	for _, name := range m.WorkloadNames() {
+		for _, r := range m.Workloads[name].Routes {
+			if r.DNS.Managed() {
+				if _, seen := out[r.Host]; !seen {
+					out[r.Host] = r.DNS
+				}
+			}
+		}
+	}
+	return out
+}
+
+// Capabilities returns the capability names to keep, with CAP_ stripped.
+func (w Workload) CapabilityNames() []string {
+	var out []string
+	for _, c := range w.Capabilities {
+		out = append(out, strings.TrimPrefix(strings.ToUpper(c), "CAP_"))
+	}
+	return out
 }

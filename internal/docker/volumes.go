@@ -88,20 +88,6 @@ func wrappedInData(ctx context.Context, tarball string) bool {
 	return true
 }
 
-// ChownVolume makes a volume's files belong to the user an image runs as,
-// using that image so the user's name resolves. A numeric or empty user
-// is handled too.
-func (e *Engine) ChownVolume(ctx context.Context, name, image, user, path string) error {
-	if user == "" {
-		return nil
-	}
-	_, err := cliOutput(ctx, nil, "docker", "run", "--rm", "--user", "0", "--entrypoint", "chown", "-v", name+":"+path, image, "-R", user, path)
-	if err != nil {
-		return fmt.Errorf("chown %s: %w", name, err)
-	}
-	return nil
-}
-
 // ImageUser returns the user an image runs as, as its config says.
 func (e *Engine) ImageUser(ctx context.Context, ref string) (string, error) {
 	res, err := e.cli.ImageInspect(ctx, ref)

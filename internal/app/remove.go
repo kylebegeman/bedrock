@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/kylebegeman/quark/internal/docker"
 	"github.com/kylebegeman/quark/internal/edge"
 	"github.com/kylebegeman/quark/internal/kernel"
 	"github.com/kylebegeman/quark/internal/manifest"
+	"github.com/kylebegeman/quark/internal/secrets"
 	"github.com/kylebegeman/quark/internal/state"
 )
 
@@ -21,7 +23,9 @@ const RemoveKind = "app.remove"
 
 // Remove is the Definition for RemoveKind.
 type Remove struct {
-	Store *state.Store
+	Store     *state.Store
+	Secrets   *secrets.Store
+	Addresses func(ctx context.Context) []string
 }
 
 // RemoveInput says which app, and whether its data goes too.
@@ -84,6 +88,33 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 					}
 				}
 				fmt.Fprintln(out, "routes removed")
+				return nil
+			},
+		},
+		kernel.Step{
+			Name: "dns", Change: "remove the DNS records quark keeps for the app" + recordsNote(m),
+			Apply: func(ctx context.Context, out io.Writer) error {
+				managed := m.ManagedHosts()
+				if len(managed) == 0 {
+					fmt.Fprintln(out, "the app keeps no records")
+					return nil
+				}
+				var addrs []string
+				if r.Addresses != nil {
+					addrs = r.Addresses(ctx)
+				}
+				mgr, err := DNSManager(r.Secrets, addrs)
+				if err != nil {
+					fmt.Fprintf(out, "records for %v stay: %v\n", sortedKeys(managed), err)
+					return nil
+				}
+				removed, err := mgr.Remove(ctx, in.App, sortedKeys(managed))
+				if err != nil {
+					return err
+				}
+				for _, host := range removed {
+					fmt.Fprintf(out, "%s's record removed\n", host)
+				}
 				return nil
 			},
 		},
@@ -164,6 +195,9 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 				return err
 			}
 			defer e.Close()
+			if err := edge.Leave(ctx, e, in.App); err != nil {
+				return err
+			}
 			if err := e.RemoveNetwork(ctx, docker.AppNetwork(in.App)); err != nil {
 				return err
 			}
@@ -175,4 +209,11 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 		},
 	})
 	return plan, nil
+}
+
+func recordsNote(m manifest.Manifest) string {
+	if managed := m.ManagedHosts(); len(managed) > 0 {
+		return ": " + strings.Join(sortedKeys(managed), ", ")
+	}
+	return " (none)"
 }

@@ -5,25 +5,43 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 )
 
-// AdminAddress is where the edge's admin API answers on the machine.
-const AdminAddress = "http://127.0.0.1:2019"
-
-// Admin talks to Caddy's admin API.
+// Admin talks to Caddy's admin API, which listens only on a Unix socket in
+// a directory the edge shares with this machine: no container, the apps'
+// included, can reach it over the network.
 type Admin struct {
+	// Base is the URL requests go to; the host part is ignored on a socket.
 	Base string
-	http *http.Client
+	// BootFile is where a loaded configuration is kept, for the edge to
+	// start with after a restart. Empty keeps nothing.
+	BootFile string
+	http     *http.Client
 }
 
 // NewAdmin returns a client for the edge on this machine.
 func NewAdmin() *Admin {
-	return &Admin{Base: AdminAddress, http: &http.Client{Timeout: 15 * time.Second}}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", AdminSocket)
+		},
+	}
+	return &Admin{Base: "http://localhost", BootFile: BootFile, http: &http.Client{Timeout: 15 * time.Second, Transport: transport}}
 }
 
-// Load replaces the whole configuration atomically.
+// NewAdminAt returns a client for an HTTP base URL, for tests.
+func NewAdminAt(base, bootFile string) *Admin {
+	return &Admin{Base: base, BootFile: bootFile, http: &http.Client{Timeout: 15 * time.Second}}
+}
+
+// Load replaces the whole configuration atomically, then keeps it as the
+// configuration the edge starts with.
 func (a *Admin) Load(ctx context.Context, config []byte) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.Base+"/load", bytes.NewReader(config))
 	if err != nil {
@@ -39,12 +57,40 @@ func (a *Admin) Load(ctx context.Context, config []byte) error {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("edge rejected the configuration: %s: %s", resp.Status, bytes.TrimSpace(body))
 	}
+	if a.BootFile == "" {
+		return nil
+	}
+	if err := WriteBoot(a.BootFile, config); err != nil {
+		return fmt.Errorf("the edge took the configuration, but keeping it for its next start failed: %w", err)
+	}
 	return nil
+}
+
+// WriteBoot keeps a configuration where the edge reads it at start,
+// replacing the file in one step so a restart never sees half of it.
+func WriteBoot(path string, config []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, config, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // Current returns the configuration the edge is running.
 func (a *Admin) Current(ctx context.Context) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.Base+"/config/", nil)
+	return a.get(ctx, "/config/")
+}
+
+// Metrics returns the edge's Prometheus metrics.
+func (a *Admin) Metrics(ctx context.Context) ([]byte, error) {
+	return a.get(ctx, "/metrics")
+}
+
+func (a *Admin) get(ctx context.Context, path string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.Base+path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +102,7 @@ func (a *Admin) Current(ctx context.Context) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("edge admin answered %s", resp.Status)
 	}
-	return io.ReadAll(resp.Body)
+	return io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 }
 
 // Answers reports whether the admin API is up.

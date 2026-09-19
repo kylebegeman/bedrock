@@ -59,7 +59,10 @@ func Config(routes []Route) ([]byte, error) {
 		serverRoutes = []map[string]any{}
 	}
 	cfg := map[string]any{
-		"admin": map[string]any{"listen": ":2019"},
+		// The admin API is a socket in a directory only this machine and
+		// the edge share. quark keeps the configuration itself (BootFile),
+		// so Caddy's own copy is off.
+		"admin": map[string]any{"listen": adminListen, "config": map[string]any{"persist": false}},
 		"logging": map[string]any{"logs": map[string]any{
 			"default": map[string]any{"writer": map[string]any{"output": "stdout"}, "encoder": map[string]any{"format": "json"}},
 		}},
@@ -83,6 +86,9 @@ func Config(routes []Route) ([]byte, error) {
 
 // Initial is the configuration the edge starts with before any app is
 // deployed: an admin API quark can reach, and nothing to serve.
+//
+// A route's Dial may be a Unix socket (unix//path), for quark's own
+// endpoints.
 func Initial() []byte {
 	b, _ := Config(nil)
 	return b

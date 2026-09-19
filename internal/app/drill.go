@@ -52,22 +52,25 @@ type drillNames struct {
 
 func newDrillNames(stateDir string, m *manifest.Manifest) drillNames {
 	app := m.App
+	// A dot can't appear in an app's name, so these never collide with
+	// another app's volumes, which the cleanup would otherwise remove.
+	prefix := "quark-" + app + ".drill"
 	n := drillNames{
 		dir:            filepath.Join(stateDir, "drills", app),
-		network:        "quark-" + app + "-drill",
-		postgres:       "quark-" + app + "-drill-postgres",
-		postgresVolume: "quark-" + app + "-drill-postgres",
+		network:        prefix,
+		postgres:       prefix + ".postgres",
+		postgresVolume: prefix + ".postgres",
 		volumes:        map[string]string{},
 		containers:     map[string]string{},
 	}
 	if m.Data != nil {
 		for v := range m.Data.Volumes {
-			n.volumes[v] = "quark-" + app + "-drill-" + v
+			n.volumes[v] = prefix + "." + v
 		}
 	}
 	for _, w := range m.WorkloadNames() {
 		if m.Workloads[w].Serves() {
-			n.containers[w] = "quark-" + app + "-drill-" + w
+			n.containers[w] = prefix + "." + w
 		}
 	}
 	return n
@@ -293,6 +296,9 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 					spec.Mounts = nil
 					for _, mt := range w.Mounts {
 						spec.Mounts = append(spec.Mounts, d.names.volumes[mt.Volume]+":"+mt.Path)
+					}
+					if _, err := isolate(ctx, e, &spec, w, image); err != nil {
+						return d.abort(e, err)
 					}
 					started := time.Now()
 					if err := e.Run(ctx, spec); err != nil {

@@ -84,7 +84,19 @@ func StaticContext(sourceDir, dir string) (string, error) {
 		os.RemoveAll(tmp)
 		return "", fmt.Errorf("static dir %s: %w", dir, err)
 	}
-	dockerfile := "FROM " + StaticServerImage + "\nCOPY site /srv\nCMD [\"caddy\", \"file-server\", \"--root\", \"/srv\", \"--listen\", \":" + StaticPort + "\"]\n"
+	// Caddy's binary on plain Alpine: no VOLUME lines to leave anonymous
+	// volumes behind, a user that isn't root, and state in /tmp so the
+	// root filesystem can be read-only. The copy drops the binary's file
+	// capability (to bind low ports, which 8080 isn't): with every
+	// capability dropped, the kernel refuses to run a binary that has one.
+	dockerfile := "FROM " + StaticServerImage + " AS caddy\n" +
+		"RUN cp /usr/bin/caddy /caddy\n" +
+		"FROM " + HelperImage + "\n" +
+		"COPY --from=caddy /caddy /usr/bin/caddy\n" +
+		"COPY site /srv\n" +
+		"ENV XDG_CONFIG_HOME=/tmp/caddy XDG_DATA_HOME=/tmp/caddy\n" +
+		"USER 65534:65534\n" +
+		"CMD [\"caddy\", \"file-server\", \"--root\", \"/srv\", \"--listen\", \":" + StaticPort + "\"]\n"
 	if err := os.WriteFile(filepath.Join(tmp, "Dockerfile"), []byte(dockerfile), 0o644); err != nil {
 		os.RemoveAll(tmp)
 		return "", err

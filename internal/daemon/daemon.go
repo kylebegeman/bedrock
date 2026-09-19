@@ -65,7 +65,11 @@ func registry(store *state.Store, sec *secrets.Store, socket, stateDir string) k
 			return err
 		}
 		defer e.Close()
-		if err := edge.Ensure(ctx, e, out); err != nil {
+		boot, err := app.EdgeConfig(ctx, store)
+		if err != nil {
+			return err
+		}
+		if err := edge.Ensure(ctx, e, boot, out); err != nil {
 			return err
 		}
 		return app.ReloadEdge(ctx, store)
@@ -77,7 +81,9 @@ func registry(store *state.Store, sec *secrets.Store, socket, stateDir string) k
 	reg.Add(app.Rollback{Deploy: deploy})
 	reg.Add(app.GC{Store: store})
 	reg.Add(app.RunDefinition{Jobs: app.NewJobs(store, sec)})
-	reg.Add(app.Remove{Store: store})
+	addresses := func(ctx context.Context) []string { return host.Addresses(ctx, env) }
+	reg.Add(app.Remove{Store: store, Secrets: sec, Addresses: addresses})
+	reg.Add(app.Point{Store: store, Secrets: sec, Addresses: addresses})
 	reg.Add(app.Backup{Store: store, Secrets: sec, StateDir: stateDir, Hostname: hostname})
 	reg.Add(app.Drill{Store: store, Secrets: sec, StateDir: stateDir})
 	reg.Add(app.RestoreDef{Store: store, Secrets: sec, StateDir: stateDir})
@@ -161,8 +167,9 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	}()
 
 	// The edge gets the configuration this build of quark makes for the
-	// active revisions, in case the shape changed since the last deploy.
-	if err := app.ReloadEdge(ctx, store); err != nil {
+	// active revisions, in case the shape changed since the last deploy;
+	// an edge an older quark made is replaced, keeping its routes.
+	if err := app.UpgradeEdge(ctx, store, logWriter{logf}); err != nil {
 		logf("edge: %v", err)
 	}
 
@@ -249,4 +256,16 @@ func every(ctx context.Context, period time.Duration, now bool, fn func(time.Tim
 			fn(t.UTC())
 		}
 	}
+}
+
+// logWriter turns lines written to it into log lines.
+type logWriter struct{ logf func(string, ...any) }
+
+func (w logWriter) Write(p []byte) (int, error) {
+	for _, line := range strings.Split(strings.TrimRight(string(p), "\n"), "\n") {
+		if line != "" {
+			w.logf("%s", line)
+		}
+	}
+	return len(p), nil
 }

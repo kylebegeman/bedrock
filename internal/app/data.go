@@ -225,35 +225,3 @@ func tail(s string, n int) string {
 	}
 	return strings.Join(lines, "\n")
 }
-
-// fixVolumeOwners makes restored files belong to the user the mounting
-// workload's image runs as.
-func fixVolumeOwners(ctx context.Context, e *docker.Engine, m *manifest.Manifest, images map[string]string, restored map[string]string, out io.Writer) error {
-	for volName := range restored {
-		for _, wl := range m.WorkloadNames() {
-			w := m.Workloads[wl]
-			for _, mt := range w.Mounts {
-				if mt.Volume != volName {
-					continue
-				}
-				image := images[wl]
-				if image == "" {
-					continue
-				}
-				user, err := e.ImageUser(ctx, image)
-				if err != nil {
-					return err
-				}
-				if user == "" || user == "root" || user == "0" {
-					continue
-				}
-				if err := e.ChownVolume(ctx, docker.VolumeName(m.App, volName), image, user, mt.Path); err != nil {
-					return err
-				}
-				fmt.Fprintf(out, "volume %s now belongs to %s, as %s expects\n", volName, user, wl)
-				break
-			}
-		}
-	}
-	return nil
-}

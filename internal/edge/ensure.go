@@ -3,6 +3,7 @@ package edge
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -10,27 +11,100 @@ import (
 	"github.com/kylebegeman/quark/internal/docker"
 )
 
-// Container is the edge's container; Image is what it runs.
+// The edge's container, image and the places it shares with this machine.
 const (
 	Container = "quark-edge"
 	Image     = "caddy:2-alpine"
-	// ConfigDir holds the initial configuration the edge boots with.
+	// ConfigDir holds what the edge shares with the machine.
 	ConfigDir = "/var/lib/quark/edge"
+	// RunDir holds the sockets: Caddy's admin API, and quark's hooks
+	// endpoint the edge proxies to. The edge sees it as /run/quark.
+	RunDir = ConfigDir + "/run"
+	// BootDir holds the configuration the edge starts with; the edge sees
+	// it read-only as /etc/caddy/quark.
+	BootDir = ConfigDir + "/boot"
+	// AdminSocket is the admin API's socket, as this machine sees it.
+	AdminSocket = RunDir + "/caddy.sock"
+	// HooksSocket is where quark answers hooks, as this machine sees it.
+	HooksSocket = RunDir + "/hooks.sock"
+	// BootFile is the configuration the edge starts with.
+	BootFile = BootDir + "/caddy.json"
+
+	// Inside the edge.
+	runDirInside  = "/run/quark"
+	bootDirInside = "/etc/caddy/quark"
+	adminListen   = "unix/" + runDirInside + "/caddy.sock"
+	// HooksDial is how the edge reaches quark's hooks endpoint.
+	HooksDial = "unix/" + runDirInside + "/hooks.sock"
+
+	// LayoutLabel marks how the edge's container is made. A container
+	// with another layout is replaced by Ensure.
+	LayoutLabel = "quark.edge.layout"
+	Layout      = "2"
+
+	// AppNetworkPrefix starts the name of each app's edge network. The
+	// dots keep it from colliding with any app's own network, which is
+	// quark-<app> with hyphens only.
+	AppNetworkPrefix = "quark.edge."
 )
 
-// Ensure runs the edge on ports 80 and 443 with its admin API on
-// 127.0.0.1:2019, and waits until it answers. Safe to call any time.
-func Ensure(ctx context.Context, engine *docker.Engine, out interface{ Write([]byte) (int, error) }) error {
+// AppNetwork names the network an app's serving workloads share with the
+// edge and nothing else, so apps can't reach each other through it.
+func AppNetwork(app string) string { return AppNetworkPrefix + app }
+
+// Join puts the edge on an app's edge network.
+func Join(ctx context.Context, engine *docker.Engine, app string) error {
+	if err := engine.EnsureNetwork(ctx, AppNetwork(app)); err != nil {
+		return err
+	}
+	return engine.ConnectNetwork(ctx, Container, AppNetwork(app))
+}
+
+// Leave takes the edge off an app's edge network and removes the network.
+func Leave(ctx context.Context, engine *docker.Engine, app string) error {
+	if err := engine.DisconnectNetwork(ctx, Container, AppNetwork(app)); err != nil {
+		return err
+	}
+	return engine.RemoveNetwork(ctx, AppNetwork(app))
+}
+
+// Ensure runs the edge on ports 80 and 443 and waits until its admin API
+// answers. It starts with boot, the whole configuration for the apps this
+// machine runs, when it has to make the container; an edge made by an
+// older quark is replaced that way, which takes a few seconds. Safe to
+// call any time.
+func Ensure(ctx context.Context, engine *docker.Engine, boot []byte, out io.Writer) error {
 	if err := engine.EnsureNetwork(ctx, docker.EdgeNetwork); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(ConfigDir, 0o755); err != nil {
-		return err
-	}
-	initial := filepath.Join(ConfigDir, "initial.json")
-	if _, err := os.Stat(initial); err != nil {
-		if err := os.WriteFile(initial, Initial(), 0o644); err != nil {
+	for _, dir := range []string{RunDir, BootDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
+		}
+	}
+	if boot == nil {
+		boot = Initial()
+	}
+	info, err := engine.Inspect(ctx, Container)
+	switch {
+	case err == nil && info.Labels[LayoutLabel] != Layout:
+		// Made by an older quark, whose admin API listened on the network.
+		if err := WriteBoot(BootFile, boot); err != nil {
+			return err
+		}
+		if err := engine.Remove(ctx, Container, 10*time.Second); err != nil {
+			return err
+		}
+		fmt.Fprintln(out, "the edge is replaced by one whose admin API only this machine reaches")
+	case err != nil:
+		if err := WriteBoot(BootFile, boot); err != nil {
+			return err
+		}
+	default:
+		if _, statErr := os.Stat(BootFile); statErr != nil {
+			if err := WriteBoot(BootFile, boot); err != nil {
+				return err
+			}
 		}
 	}
 	if !engine.HasImage(ctx, Image) {
@@ -38,24 +112,41 @@ func Ensure(ctx context.Context, engine *docker.Engine, out interface{ Write([]b
 			return err
 		}
 	}
-	err := engine.Run(ctx, docker.Spec{
+	err = engine.Run(ctx, docker.Spec{
 		Name:     Container,
 		Image:    Image,
-		Cmd:      []string{"caddy", "run", "--config", "/etc/caddy/initial.json", "--resume"},
-		Labels:   map[string]string{docker.LabelApp: "edge"},
+		Cmd:      []string{"caddy", "run", "--config", filepath.Join(bootDirInside, filepath.Base(BootFile))},
+		Labels:   map[string]string{docker.LabelApp: "edge", LayoutLabel: Layout},
 		Networks: []string{docker.EdgeNetwork},
-		Publish:  []string{"80:80/tcp", "443:443/tcp", "443:443/udp", "127.0.0.1:2019:2019/tcp"},
-		Mounts:   []string{"quark-edge-data:/data", "quark-edge-config:/config", initial + ":/etc/caddy/initial.json:ro"},
-		Restart:  true,
+		Publish:  []string{"80:80/tcp", "443:443/tcp", "443:443/udp"},
+		Mounts: []string{
+			"quark-edge-data:/data", "quark-edge-config:/config",
+			RunDir + ":" + runDirInside, BootDir + ":" + bootDirInside + ":ro",
+		},
+		Restart: true,
+		// Root, to write its certificates, but with nothing beyond
+		// binding the web ports, and a read-only root filesystem.
+		Isolated:     true,
+		Capabilities: []string{"NET_BIND_SERVICE"},
+		ReadOnly:     true,
 	})
 	if err != nil {
 		return fmt.Errorf("edge: %w", err)
+	}
+	nets, err := engine.Networks(ctx, AppNetworkPrefix)
+	if err != nil {
+		return err
+	}
+	for _, n := range nets {
+		if err := engine.ConnectNetwork(ctx, Container, n); err != nil {
+			return err
+		}
 	}
 	admin := NewAdmin()
 	deadline := time.Now().Add(30 * time.Second)
 	for !admin.Answers(ctx) {
 		if time.Now().After(deadline) {
-			return fmt.Errorf("the edge started but its admin API didn't answer on %s", AdminAddress)
+			return fmt.Errorf("the edge started but its admin API didn't answer on %s; see docker logs %s", AdminSocket, Container)
 		}
 		select {
 		case <-ctx.Done():

@@ -70,8 +70,18 @@ func (j *Jobs) Run(ctx context.Context, rev *state.Revision, workload string, co
 	}
 	spec.Name = fmt.Sprintf("quark-%s-%s-job-%d", rev.App, workload, time.Now().UnixMilli())
 	spec.Restart = false
+	// A job never takes traffic: it stays on the app's own network.
+	spec.Networks = []string{docker.AppNetwork(rev.App)}
 	if len(command) > 0 {
 		spec.Cmd = command
+	}
+	if _, err := isolate(ctx, e, &spec, w, image); err != nil {
+		return -1, err
+	}
+	if kind == JobRun {
+		// A one-off command is the operator's: it may write where it
+		// likes, and is gone when it ends.
+		spec.ReadOnly = false
 	}
 	started := time.Now().UTC()
 	id, err := j.Store.StartJobRun(ctx, state.JobRun{App: rev.App, Workload: workload, Revision: rev.ID, Kind: kind, StartedAt: started})

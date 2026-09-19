@@ -82,7 +82,8 @@ var Definitions = []Definition{
 		Name:    CloudflareName,
 		Purpose: "DNS records for the apps' hostnames",
 		Fields: []Field{
-			{Name: "token", Prompt: "API token with DNS edit on the zones", Secret: true},
+			{Name: "token", Prompt: "API token with Zone read and DNS edit on the zones", Secret: true},
+			{Name: "api", Prompt: "API URL, only to test against something other than Cloudflare", Optional: true},
 		},
 	},
 }
@@ -197,6 +198,10 @@ func validate(name string, v map[string]string) error {
 		}
 		if !bucketPrefixPattern.MatchString(v["bucket_prefix"]) {
 			return errors.New("storage.bucket_prefix must be 2 to 20 lowercase letters, digits and hyphens")
+		}
+	case CloudflareName:
+		if api := v["api"]; api != "" && !strings.HasPrefix(api, "https://") && !strings.HasPrefix(api, "http://") {
+			return errors.New("cloudflare.api must be a URL starting with https:// or http://")
 		}
 	case EmailName:
 		port, err := strconv.Atoi(v["smtp_port"])
@@ -396,9 +401,11 @@ func LoadEmail(store *secrets.Store) (*Email, error) {
 	return e, nil
 }
 
-// Cloudflare is the DNS API token.
+// Cloudflare is the DNS API token, and the API it is for.
 type Cloudflare struct {
 	Token string
+	// API is empty for Cloudflare itself.
+	API string
 }
 
 // LoadCloudflare reads the cloudflare integration.
@@ -407,5 +414,5 @@ func LoadCloudflare(store *secrets.Store) (*Cloudflare, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Cloudflare{Token: v["token"]}, nil
+	return &Cloudflare{Token: v["token"], API: v["api"]}, nil
 }

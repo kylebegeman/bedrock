@@ -50,7 +50,8 @@ func TestConfigGroupsByHostAndOrdersPrefixes(t *testing.T) {
 	if err := json.Unmarshal(cfg, &parsed); err != nil {
 		t.Fatal(err)
 	}
-	if parsed.Admin.Listen != ":2019" {
+	// Never a network address: an app on an edge network must not reach it.
+	if parsed.Admin.Listen != "unix//run/quark/caddy.sock" {
 		t.Fatalf("admin: %+v", parsed.Admin)
 	}
 	server := parsed.Apps.HTTP.Servers["quark"]

@@ -76,6 +76,40 @@ func (e *Engine) EnsureNetwork(ctx context.Context, name string) error {
 	return nil
 }
 
+// ConnectNetwork joins a container to a network. Already joined is fine.
+func (e *Engine) ConnectNetwork(ctx context.Context, containerName, networkName string) error {
+	_, err := e.cli.NetworkConnect(ctx, networkName, client.NetworkConnectOptions{Container: containerName, EndpointConfig: &network.EndpointSettings{}})
+	if err != nil && !strings.Contains(err.Error(), "already exists") && !errdefs.IsConflict(err) {
+		return fmt.Errorf("connect %s to %s: %w", containerName, networkName, err)
+	}
+	return nil
+}
+
+// DisconnectNetwork takes a container off a network. Not joined, or no
+// such network, is fine.
+func (e *Engine) DisconnectNetwork(ctx context.Context, containerName, networkName string) error {
+	_, err := e.cli.NetworkDisconnect(ctx, networkName, client.NetworkDisconnectOptions{Container: containerName, Force: true})
+	if err != nil && !IsNotFound(err) && !strings.Contains(err.Error(), "is not connected") {
+		return fmt.Errorf("disconnect %s from %s: %w", containerName, networkName, err)
+	}
+	return nil
+}
+
+// Networks lists the networks quark made whose names start with prefix.
+func (e *Engine) Networks(ctx context.Context, prefix string) ([]string, error) {
+	res, err := e.cli.NetworkList(ctx, client.NetworkListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, n := range res.Items {
+		if n.Labels[LabelOwner] == OwnerValue && strings.HasPrefix(n.Name, prefix) {
+			out = append(out, n.Name)
+		}
+	}
+	return out, nil
+}
+
 // Spec is a container quark wants running.
 type Spec struct {
 	Name   string
@@ -96,7 +130,23 @@ type Spec struct {
 	// HostNetwork puts the container on the machine's own network, for
 	// helpers that only make outbound connections.
 	HostNetwork bool
+	// User overrides the image's user.
+	User string
+	// Isolated drops every capability and forbids gaining privileges,
+	// except the ones in Capabilities. Privileged does the opposite.
+	Isolated     bool
+	Capabilities []string
+	Privileged   bool
+	// ReadOnly makes the root filesystem read-only; Tmpfs are writable
+	// in-memory paths (/tmp comes with ReadOnly).
+	ReadOnly bool
+	Tmpfs    []string
+	// PidsLimit bounds the processes in the container; 0 means the default.
+	PidsLimit int64
 }
+
+// DefaultPidsLimit bounds every isolated container's processes.
+const DefaultPidsLimit int64 = 4096
 
 // Run creates and starts a container, or starts it if it already exists.
 func (e *Engine) Run(ctx context.Context, spec Spec) error {
@@ -112,10 +162,32 @@ func (e *Engine) Run(ctx context.Context, spec Spec) error {
 		labels[k] = v
 	}
 	hostConfig := &container.HostConfig{
-		Binds:       spec.Mounts,
-		SecurityOpt: []string{"no-new-privileges"},
-		LogConfig:   container.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "20m", "max-file": "5"}},
-		Resources:   container.Resources{Memory: spec.MemoryBytes, NanoCPUs: spec.NanoCPUs},
+		Binds:          spec.Mounts,
+		LogConfig:      container.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "20m", "max-file": "5"}},
+		Resources:      container.Resources{Memory: spec.MemoryBytes, NanoCPUs: spec.NanoCPUs},
+		ReadonlyRootfs: spec.ReadOnly,
+		Privileged:     spec.Privileged,
+	}
+	if !spec.Privileged {
+		hostConfig.SecurityOpt = []string{"no-new-privileges"}
+	}
+	if spec.Isolated && !spec.Privileged {
+		hostConfig.CapDrop = []string{"ALL"}
+		hostConfig.CapAdd = spec.Capabilities
+		pids := spec.PidsLimit
+		if pids == 0 {
+			pids = DefaultPidsLimit
+		}
+		hostConfig.Resources.PidsLimit = &pids
+	}
+	if spec.ReadOnly || len(spec.Tmpfs) > 0 {
+		hostConfig.Tmpfs = map[string]string{}
+		if spec.ReadOnly {
+			hostConfig.Tmpfs["/tmp"] = "rw,nosuid"
+		}
+		for _, t := range spec.Tmpfs {
+			hostConfig.Tmpfs[t] = "rw,nosuid"
+		}
 	}
 	if spec.Restart {
 		hostConfig.RestartPolicy = container.RestartPolicy{Name: container.RestartPolicyUnlessStopped}
@@ -141,7 +213,7 @@ func (e *Engine) Run(ctx context.Context, spec Spec) error {
 	}
 	created, err := e.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Name:             spec.Name,
-		Config:           &container.Config{Image: spec.Image, Cmd: spec.Cmd, Env: spec.Env, Labels: labels, ExposedPorts: exposed},
+		Config:           &container.Config{Image: spec.Image, Cmd: spec.Cmd, Env: spec.Env, Labels: labels, ExposedPorts: exposed, User: spec.User},
 		HostConfig:       hostConfig,
 		NetworkingConfig: &network.NetworkingConfig{EndpointsConfig: endpoints},
 	})
@@ -247,7 +319,9 @@ func (e *Engine) Remove(ctx context.Context, name string, timeout time.Duration)
 	if _, err := e.cli.ContainerStop(ctx, name, client.ContainerStopOptions{Timeout: &secs}); err != nil && !IsNotFound(err) {
 		return fmt.Errorf("stop %s: %w", name, err)
 	}
-	if _, err := e.cli.ContainerRemove(ctx, name, client.ContainerRemoveOptions{Force: true}); err != nil && !IsNotFound(err) {
+	// Anonymous volumes (an image's VOLUME lines) go with the container;
+	// named volumes never do.
+	if _, err := e.cli.ContainerRemove(ctx, name, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true}); err != nil && !IsNotFound(err) {
 		return fmt.Errorf("remove %s: %w", name, err)
 	}
 	return nil

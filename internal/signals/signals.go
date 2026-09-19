@@ -9,8 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -129,10 +127,10 @@ func (s Series) key() string {
 // Sampler takes one sample per call and rolls it up.
 type Sampler struct {
 	Store *state.Store
-	// MetricsURL is the edge's metrics endpoint.
-	MetricsURL string
-	Now        func() time.Time
-	Log        func(format string, args ...any)
+	// Metrics fetches the edge's metrics text.
+	Metrics func(ctx context.Context) ([]byte, error)
+	Now     func() time.Time
+	Log     func(format string, args ...any)
 	// Connect opens Docker; nil skips container stats.
 	Connect func(ctx context.Context) (*docker.Engine, error)
 	// DiskUsage measures a directory in bytes; nil skips disk.
@@ -148,12 +146,12 @@ type Sampler struct {
 // NewSampler returns a sampler for this machine.
 func NewSampler(store *state.Store) *Sampler {
 	return &Sampler{
-		Store:      store,
-		MetricsURL: edge.AdminAddress + "/metrics",
-		Now:        func() time.Time { return time.Now().UTC() },
-		Log:        func(string, ...any) {},
-		Connect:    docker.Connect,
-		DiskUsage:  du,
+		Store:     store,
+		Metrics:   edge.NewAdmin().Metrics,
+		Now:       func() time.Time { return time.Now().UTC() },
+		Log:       func(string, ...any) {},
+		Connect:   docker.Connect,
+		DiskUsage: du,
 	}
 }
 
@@ -262,19 +260,12 @@ func (s *Sampler) Sample(ctx context.Context) error {
 }
 
 func (s *Sampler) scrape(ctx context.Context) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.MetricsURL, nil)
-	if err != nil {
-		return "", err
+	if s.Metrics == nil {
+		return "", fmt.Errorf("no metrics source")
 	}
-	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("%s", resp.Status)
-	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	b, err := s.Metrics(ctx)
 	return string(b), err
 }
 
