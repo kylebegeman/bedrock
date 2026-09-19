@@ -59,6 +59,11 @@ func (j *Jobs) Run(ctx context.Context, rev *state.Revision, workload string, co
 
 // RunWith is Run with more secrets or a standard input.
 func (j *Jobs) RunWith(ctx context.Context, rev *state.Revision, workload string, command []string, kind string, opts JobOptions, out io.Writer) (int, error) {
+	unlock, err := AcquireDataAccess(ctx, j.Store.Path(), rev.App)
+	if err != nil {
+		return -1, err
+	}
+	defer unlock()
 	var m manifest.Manifest
 	if err := json.Unmarshal(rev.Manifest, &m); err != nil {
 		return -1, err

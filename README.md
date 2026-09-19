@@ -10,7 +10,7 @@ Quark is the Go rewrite of Ophelia. The Python 0.6 line is archived on the
 
 ## Status
 
-0.7 is being built. The plan, the ideas it was chosen from, and the blueprint
+0.7 is the first Go release. The plan, the ideas it was chosen from, and the blueprint
 behind it live in [docs/](docs/):
 
 - [docs/plan.html](docs/plan.html): the 0.7 plan, milestone by milestone.
@@ -232,3 +232,41 @@ One static binary, no runtime to install.
 ## License
 
 Apache 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+## Consistent backups
+
+App backups drain Quark-managed jobs, stop running workloads gracefully, stop the
+object store, dump PostgreSQL, and snapshot the unchanged volume files. This is a
+maintenance window: the app is unavailable for the capture and upload, bounded to
+30 minutes. Backups then restart exactly the containers that were running, with
+the object store first. Retention runs after service is restored. Forced shutdowns
+abort the capture instead of certifying an inconsistent snapshot.
+
+The pause journal survives daemon restarts. The daemon restores paused containers
+before accepting work; failed restarts retain the journal and report the error.
+Cron, `quark run --stdin`, `quark exec`, and `quark psql` share the backup lock. Direct Docker/SQL writes and
+external database writers are outside this contract: do not run them during a
+backup. All app writers must be Quark-managed. Pick `backup.schedule` for an
+acceptable maintenance window; an app must not use its own paused object store as
+its backup destination. Offsite storage remains the recovery target.
+
+## Separate-host secret transfer
+
+`quark secret recipient` initializes the machine identity if needed and prints
+only its public age recipient. Keep `/etc/quark/secrets.key` in your recovery
+process; automation never prints its private recovery key.
+
+`quark secret export core TOKEN runner --recipient age1...` emits only ciphertext.
+Pipe that to `quark secret import runner TOKEN` on the receiving machine through
+pinned SSH connections. Transfers expire after ten minutes, are bound to the
+receiving app/name, and are idempotent. Integration credentials cannot be exported.
+
+## Release artifacts
+
+Run tests and the lane proof, commit, then run
+`scripts/build-release.sh 0.7.0 /tmp/quark-release-0.7.0` from a clean checkout.
+It builds static Linux and macOS binaries for amd64/arm64 and `SHA256SUMS`, stamped
+with the version and exact source commit. Publish those exact files on the matching
+GitHub release. Consumers pin the version and SHA-256 in reviewed source, verify
+before execution, and never pipe a downloaded script into a shell. An artifact
+replacement needs a new reviewed pin; do not overwrite published assets.

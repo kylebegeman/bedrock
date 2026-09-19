@@ -154,7 +154,45 @@ store. Copying the same value again changes nothing.`,
 			return nil
 		},
 	}
-	cmd.AddCommand(set, list, remove, versions, copySecret)
+	recipient := &cobra.Command{
+		Use: "recipient", Short: "Print the machine's public encryption recipient, creating its key if needed.", Args: cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			// Automated provisioning must not print the recovery identity. It
+			// remains in the root-only key file for deliberate recovery setup.
+			public, _, _, err := a.secretsStore().EnsureKey()
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(a.stdout, public)
+			return err
+		},
+	}
+	var recipientKey string
+	export := &cobra.Command{
+		Use: "export <from-app> <NAME> <to-app>", Short: "Seal one secret for another machine; prints only age ciphertext.", Args: cobra.ExactArgs(3),
+		RunE: func(_ *cobra.Command, args []string) error {
+			value, err := a.secretsStore().Export(args[0], args[1], args[2], recipientKey)
+			if err != nil {
+				return err
+			}
+			_, err = io.WriteString(a.stdout, value)
+			return err
+		},
+	}
+	export.Flags().StringVar(&recipientKey, "recipient", "", "the receiving machine's public age recipient")
+	_ = export.MarkFlagRequired("recipient")
+	importSecret := &cobra.Command{
+		Use: "import <app> <NAME>", Short: "Read a secret sealed for this machine from stdin, without showing it.", Args: cobra.ExactArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			version, err := a.secretsStore().Import(args[0], args[1], os.Stdin)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(a.stdout, "%s: %s received; secrets version %d\n", args[0], args[1], version)
+			return nil
+		},
+	}
+	cmd.AddCommand(set, list, remove, versions, copySecret, recipient, export, importSecret)
 	return cmd
 }
 

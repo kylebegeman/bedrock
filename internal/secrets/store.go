@@ -43,12 +43,26 @@ func ValidName(name string) bool { return namePattern.MatchString(name) }
 // returns the identity once: the person keeps it somewhere safe, because
 // it is the only way to read this store's backups on another machine.
 func (s *Store) EnsureKey() (recipient string, created bool, identity string, err error) {
+	if err := os.MkdirAll(filepath.Dir(s.KeyPath), 0o700); err != nil {
+		return "", false, "", err
+	}
+	lock, err := os.OpenFile(s.KeyPath+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return "", false, "", err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return "", false, "", err
+	}
+
 	if data, err := os.ReadFile(s.KeyPath); err == nil {
 		id, err := parseIdentity(string(data))
 		if err != nil {
 			return "", false, "", fmt.Errorf("%s: %w", s.KeyPath, err)
 		}
 		return id.Recipient().String(), false, "", nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", false, "", err
 	}
 	id, err := age.GenerateX25519Identity()
 	if err != nil {

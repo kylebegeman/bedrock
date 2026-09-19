@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
-	"syscall"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -56,8 +58,24 @@ func newExec(a *app) *cobra.Command {
 				argv = append(argv, "-t")
 			}
 			argv = append(append(argv, container), command...)
-			// Hand the terminal to docker exec entirely.
-			return syscall.Exec(dockerBin, argv, os.Environ())
+			return a.runDataCommand(cmd.Context(), target[0], dockerBin, argv[1:], os.Environ())
 		},
 	}
+}
+
+// Keep the shared backup lock alive for the full operator command.
+func (a *app) runDataCommand(ctx context.Context, appName, binary string, args, env []string) error {
+	unlock, err := apps.AcquireDataAccess(ctx, filepath.Join(a.stateDir, "state.db"), appName)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr, cmd.Env = os.Stdin, a.stdout, a.stderr, env
+	err = cmd.Run()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return quietError{code: exit.ExitCode()}
+	}
+	return err
 }

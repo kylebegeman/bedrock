@@ -122,7 +122,8 @@ echo "-- the secret arrived; the input arrived and was recorded nowhere; the com
 
 echo "== backup and drill: the database with its first-run scripts, and the object store"
 if ! out=$(run 'quark backup notes --yes' 2>&1 | quiet); then echo "$out"; fail "the backup failed"; fi
-echo "$out" | grep -E "database dumped|snapshot|succeeded"
+echo "$out" | grep -E "writers stopped|database dumped|snapshot|succeeded"
+echo "$out" | grep -q "writers stopped; capturing a consistent" || fail "the backup did not pause its writers"
 if ! out=$(run 'quark drill notes --yes' 2>&1 | quiet); then echo "$out"; fail "the drill failed"; fi
 echo "$out" | grep -E "restored|tables|verify query|object store answered|api answered|succeeded"
 echo "$out" | grep -q "object store answered" || fail "the drill didn't bring the object store back"

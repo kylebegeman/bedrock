@@ -134,6 +134,9 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 		return err
 	}
 	defer store.Close()
+	if err := app.RecoverBackupPauses(ctx, store.Path()); err != nil {
+		return fmt.Errorf("recover backup pauses: %w", err)
+	}
 	clearStaleUpgrade(logf)
 	sec := secrets.DefaultStore(cfg.StateDir)
 	engine := kernel.New(store, RegistryIn(store, sec, cfg.Socket, cfg.StateDir), cfg.Owner)

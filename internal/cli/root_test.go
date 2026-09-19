@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -146,5 +148,15 @@ func TestSecretCopyGivesAnotherAppTheSameValueUnseen(t *testing.T) {
 		if _, errOut, code := run(t, stateDir, append([]string{"secret", "copy"}, args...)...); code == 0 {
 			t.Fatalf("secret copy %v must be refused: %q", args, errOut)
 		}
+	}
+}
+
+func TestDataCommandPreservesOutputAndExitCode(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	a := &app{stateDir: t.TempDir(), stdout: &stdout, stderr: &stderr}
+	err := a.runDataCommand(context.Background(), "fixture", "sh", []string{"-c", "printf hello; exit 7"}, os.Environ())
+	var exit quietError
+	if !errors.As(err, &exit) || exit.code != 7 || stdout.String() != "hello" {
+		t.Fatalf("output or exit lost: %q %v", stdout.String(), err)
 	}
 }

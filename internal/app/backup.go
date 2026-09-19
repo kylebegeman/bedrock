@@ -143,7 +143,7 @@ func (b Backup) appPlan(st *integration.Storage, rev *state.Revision, m *manifes
 
 	prepare := "write the manifest"
 	if m.PostgresVersion() != "" {
-		prepare += " and dump the database"
+		prepare += " and preserve its initialization scripts"
 	}
 	plan.Steps = append(plan.Steps, kernel.Step{
 		Name: "prepare", Change: prepare,
@@ -174,29 +174,11 @@ func (b Backup) appPlan(st *integration.Storage, rev *state.Revision, m *manifes
 					return run.fail(fmt.Errorf("copy the database's first-run scripts: %s", strings.TrimSpace(string(out))))
 				}
 			}
-			e, err := docker.Connect(ctx)
-			if err != nil {
-				return run.fail(err)
-			}
-			defer e.Close()
-			values, _, err := b.Secrets.LoadCurrent(app)
-			if err != nil {
-				return run.fail(err)
-			}
-			svc, err := postgresService(m, values, "")
-			if err != nil {
-				return run.fail(err)
-			}
-			size, err := dumpDatabase(ctx, e, svc, filepath.Join(staging, "postgres.dump"))
-			if err != nil {
-				return run.fail(err)
-			}
-			fmt.Fprintf(out, "database dumped: %s\n", humanBytes(size))
 			return nil
 		},
 	})
 	plan.Steps = append(plan.Steps, kernel.Step{
-		Name: "snapshot", Change: fmt.Sprintf("snapshot the data into bucket %s", bucket),
+		Name: "snapshot", Change: fmt.Sprintf("pause writers, dump and snapshot consistent data into bucket %s, then resume (30m limit)", bucket),
 		Apply: func(ctx context.Context, out io.Writer) error {
 			if err := run.begin(ctx); err != nil {
 				return err
@@ -221,7 +203,26 @@ func (b Backup) appPlan(st *integration.Storage, rev *state.Revision, m *manifes
 			for _, v := range m.DataVolumes() {
 				mounts = append(mounts, restic.VolumeMount(docker.VolumeName(app, v), v, true))
 			}
-			summary, err = r.Backup(ctx, app, mounts, restic.DataRoot)
+			err = withQuiescedWriters(ctx, e, b.Store.Path(), m, out, func(ctx context.Context) error {
+				if m.PostgresVersion() != "" {
+					values, _, err := b.Secrets.LoadCurrent(app)
+					if err != nil {
+						return err
+					}
+					svc, err := postgresService(m, values, "")
+					if err != nil {
+						return err
+					}
+					size, err := dumpDatabase(ctx, e, svc, filepath.Join(staging, "postgres.dump"))
+					if err != nil {
+						return err
+					}
+					fmt.Fprintf(out, "database dumped: %s\n", humanBytes(size))
+				}
+				var err error
+				summary, err = r.Backup(ctx, app, mounts, restic.DataRoot)
+				return err
+			})
 			if err != nil {
 				return run.fail(err)
 			}
