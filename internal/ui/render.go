@@ -222,13 +222,13 @@ func (r *Renderer) Receipt(rc *kernel.Receipt) {
 
 // Summary is one row of history.
 type Summary struct {
-	ID            string
-	Kind          string
-	Target        string
-	Status        state.OperationStatus
-	CreatedAt     time.Time
-	Interruptions int
-	Error         string
+	ID            string                `json:"id"`
+	Kind          string                `json:"kind"`
+	Target        string                `json:"target"`
+	Status        state.OperationStatus `json:"status"`
+	CreatedAt     time.Time             `json:"created_at"`
+	Interruptions int                   `json:"interruptions"`
+	Error         string                `json:"error,omitempty"`
 }
 
 // History prints operation summaries as a table, newest first.

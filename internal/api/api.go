@@ -62,6 +62,16 @@ type Server struct {
 	mu     sync.Mutex
 }
 
+// Recover finishes operations left behind by a daemon that died, one at a
+// time with everything else the server runs. The daemon calls it at start
+// and then keeps sweeping, because a dead daemon's lease can outlive its
+// restart.
+func (s *Server) Recover(ctx context.Context, emit func(kernel.Event)) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Engine.Recover(ctx, emit)
+}
+
 // Handler returns the HTTP routes.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()

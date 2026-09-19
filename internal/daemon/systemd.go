@@ -88,10 +88,15 @@ func Install(ctx context.Context, out io.Writer) error {
 func Status(ctx context.Context, socket string) (string, error) {
 	var b strings.Builder
 	if _, err := os.Stat("/run/systemd/system"); err == nil {
-		outp, _ := exec.CommandContext(ctx, "systemctl", "show", "quark.service", "--property=ActiveState,SubState,NRestarts,MainPID", "--value").Output()
-		fields := strings.Fields(string(outp))
-		if len(fields) == 4 {
-			fmt.Fprintf(&b, "unit %s (%s), pid %s, restarts %s\n", fields[0], fields[1], fields[3], fields[2])
+		outp, _ := exec.CommandContext(ctx, "systemctl", "show", "quark.service", "--property=ActiveState,SubState,NRestarts,MainPID").Output()
+		props := map[string]string{}
+		for _, line := range strings.Split(string(outp), "\n") {
+			if k, v, ok := strings.Cut(line, "="); ok {
+				props[k] = v
+			}
+		}
+		if props["ActiveState"] != "" {
+			fmt.Fprintf(&b, "unit %s (%s), pid %s, restarts %s\n", props["ActiveState"], props["SubState"], props["MainPID"], props["NRestarts"])
 		}
 	}
 	client := api.Dial(socket)

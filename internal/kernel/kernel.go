@@ -160,10 +160,14 @@ func WithLeaseTTL(d time.Duration) Option { return func(e *Engine) { e.leaseTTL 
 // WithClock sets the engine's clock.
 func WithClock(now func() time.Time) Option { return func(e *Engine) { e.now = now } }
 
+// DefaultLeaseTTL is how long a lease lasts without renewal. The engine
+// renews every third of it, so a dead daemon is noticed within this long.
+const DefaultLeaseTTL = 15 * time.Second
+
 // New returns an engine owned by owner, which names the process holding
-// leases. The default lease is 30 seconds, renewed every 10.
+// leases.
 func New(store *state.Store, registry Registry, owner string, opts ...Option) *Engine {
-	e := &Engine{store: store, registry: registry, owner: owner, leaseTTL: 30 * time.Second, now: func() time.Time { return time.Now().UTC() }}
+	e := &Engine{store: store, registry: registry, owner: owner, leaseTTL: DefaultLeaseTTL, now: func() time.Time { return time.Now().UTC() }}
 	for _, opt := range opts {
 		opt(e)
 	}
