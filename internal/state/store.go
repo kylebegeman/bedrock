@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // the pure-Go driver keeps the binary static
@@ -45,6 +46,13 @@ func Open(path string) (*Store, error) {
 
 // Path is where the database lives.
 func (s *Store) Path() string { return s.path }
+
+// BackupTo writes a consistent copy of the database to path.
+func (s *Store) BackupTo(ctx context.Context, path string) error {
+	_ = os.Remove(path)
+	_, err := s.db.ExecContext(ctx, "VACUUM INTO '"+strings.ReplaceAll(path, "'", "''")+"'")
+	return err
+}
 
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }
@@ -86,8 +94,10 @@ CREATE TABLE IF NOT EXISTS steps (
 	if err != nil {
 		return fmt.Errorf("migrate state: %w", err)
 	}
-	if err := s.migrateApps(ctx); err != nil {
-		return fmt.Errorf("migrate state: %w", err)
+	for _, step := range []func(context.Context) error{s.migrateApps, s.migrateBackups, s.migrateIncidents, s.migrateSignals} {
+		if err := step(ctx); err != nil {
+			return fmt.Errorf("migrate state: %w", err)
+		}
 	}
 	return nil
 }

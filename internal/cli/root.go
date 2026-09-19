@@ -61,7 +61,7 @@ func (a *app) runner(ctx context.Context, owner string) (api.Runner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &api.Local{Engine: kernel.New(store, daemon.Registry(store, a.secretsStore(), a.socket), owner), Store: store}, nil
+	return &api.Local{Engine: kernel.New(store, daemon.RegistryIn(store, a.secretsStore(), a.socket, a.stateDir), owner), Store: store}, nil
 }
 
 func newRoot(stdout, stderr io.Writer) *cobra.Command {
@@ -80,7 +80,7 @@ func newRoot(stdout, stderr io.Writer) *cobra.Command {
 	root.PersistentFlags().StringVar(&a.stateDir, "state-dir", envOr("QUARK_STATE_DIR", defaultStateDir()), "where quark keeps its state")
 	root.PersistentFlags().StringVar(&a.socket, "socket", envOr("QUARK_SOCKET", daemon.DefaultSocket), "the daemon's socket; the local kernel is used when nothing answers")
 	root.PersistentFlags().BoolVar(&a.json, "json", false, "print JSON, one object per line")
-	root.AddCommand(newVersion(a), newDoctor(a), newHost(a), newUpgrade(a), newDeploy(a), newRollback(a), newPs(a), newLogs(a), newExec(a), newGC(a), newSecret(a), newRun(a), newJobs(a), newPsql(a), newRemove(a), newHistory(a), newKernel(a), newDaemon(a))
+	root.AddCommand(newVersion(a), newDoctor(a), newHost(a), newUpgrade(a), newDeploy(a), newRollback(a), newLs(a), newStatus(a), newPs(a), newLogs(a), newExec(a), newGC(a), newSecret(a), newIntegration(a), newRun(a), newJobs(a), newPsql(a), newBackup(a), newBackups(a), newDrill(a), newRestore(a), newAlerts(a), newWatch(a), newRemove(a), newHistory(a), newKernel(a), newDaemon(a))
 	return root
 }
 

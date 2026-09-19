@@ -109,21 +109,39 @@ func ensurePostgres(ctx context.Context, e *docker.Engine, store *secrets.Store,
 	}
 	container := PostgresContainer(m.App)
 	image := "postgres:" + version + "-alpine"
+	volume := docker.VolumeName(m.App, postgresWorkload)
+	if err := startPostgres(ctx, e, container, image, dbName, password, volume, docker.AppNetwork(m.App), out); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "postgres %s ready as %s\n", version, container)
+	if dump == "" {
+		return nil
+	}
+	tables, err := restoreDump(ctx, e, container, dbName, dump)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "database restored from %s: %s tables\n", dump, tables)
+	return nil
+}
+
+// startPostgres runs a database container on a volume and network and
+// waits until it accepts connections.
+func startPostgres(ctx context.Context, e *docker.Engine, container, image, dbName, password, volume, network string, out io.Writer) error {
 	if !e.HasImage(ctx, image) {
 		if err := e.Pull(ctx, image, out); err != nil {
 			return err
 		}
 	}
-	volume := docker.VolumeName(m.App, postgresWorkload)
 	if err := e.EnsureVolume(ctx, volume); err != nil {
 		return err
 	}
-	err = e.Run(ctx, docker.Spec{
+	err := e.Run(ctx, docker.Spec{
 		Name:     container,
 		Image:    image,
 		Env:      []string{"POSTGRES_USER=" + dbName, "POSTGRES_DB=" + dbName, "POSTGRES_PASSWORD=" + password, "PGDATA=/var/lib/postgresql/data/pgdata"},
-		Labels:   map[string]string{docker.LabelApp: m.App, docker.LabelWorkload: postgresWorkload},
-		Networks: []string{docker.AppNetwork(m.App)},
+		Labels:   map[string]string{docker.LabelApp: appOf(container), docker.LabelWorkload: postgresWorkload},
+		Networks: []string{network},
 		Mounts:   []string{volume + ":/var/lib/postgresql/data"},
 		Restart:  true,
 	})
@@ -133,10 +151,10 @@ func ensurePostgres(ctx context.Context, e *docker.Engine, store *secrets.Store,
 	deadline := time.Now().Add(90 * time.Second)
 	for {
 		if _, err := e.Exec(ctx, container, nil, "pg_isready", "-U", dbName, "-d", dbName); err == nil {
-			break
+			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("postgres %s didn't become ready in 90s; see docker logs %s", version, container)
+			return fmt.Errorf("postgres didn't become ready in 90s; see docker logs %s", container)
 		}
 		select {
 		case <-ctx.Done():
@@ -144,28 +162,60 @@ func ensurePostgres(ctx context.Context, e *docker.Engine, store *secrets.Store,
 		case <-time.After(2 * time.Second):
 		}
 	}
-	fmt.Fprintf(out, "postgres %s ready as %s\n", version, container)
-	if dump == "" {
-		return nil
+}
+
+// appOf reads the app name back out of a quark container name.
+func appOf(container string) string {
+	name := strings.TrimPrefix(container, "quark-")
+	for _, suffix := range []string{"-drill-postgres", "-postgres"} {
+		if strings.HasSuffix(name, suffix) {
+			return strings.TrimSuffix(name, suffix)
+		}
 	}
-	tables, err := e.Exec(ctx, container, nil, "psql", "-U", dbName, "-d", dbName, "-tAc", "select count(*) from pg_tables where schemaname = 'public'")
+	return name
+}
+
+// restoreDump loads a pg_dump custom-format file into a database that
+// has no tables yet, and returns how many it has afterwards.
+func restoreDump(ctx context.Context, e *docker.Engine, container, dbName, dump string) (string, error) {
+	tables, err := tableCount(ctx, e, container, dbName)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if n, _ := strconv.Atoi(strings.TrimSpace(tables)); n > 0 {
-		return fmt.Errorf("the database already has %d tables; a restore is for an empty database", n)
+	if tables > 0 {
+		return "", fmt.Errorf("the database already has %d tables; a restore is for an empty database", tables)
 	}
 	f, err := os.Open(dump)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer f.Close()
 	if output, err := e.Exec(ctx, container, f, "pg_restore", "-U", dbName, "-d", dbName, "--no-owner", "--no-privileges"); err != nil {
-		return fmt.Errorf("pg_restore: %w\n%s", err, tail(output, 5))
+		return "", fmt.Errorf("pg_restore: %w\n%s", err, tail(output, 5))
 	}
-	tables, _ = e.Exec(ctx, container, nil, "psql", "-U", dbName, "-d", dbName, "-tAc", "select count(*) from pg_tables where schemaname = 'public'")
-	fmt.Fprintf(out, "database restored from %s: %s tables\n", dump, strings.TrimSpace(tables))
-	return nil
+	tables, err = tableCount(ctx, e, container, dbName)
+	if err != nil {
+		return "", err
+	}
+	return strconv.Itoa(tables), nil
+}
+
+// tableCount counts the public tables in a database.
+func tableCount(ctx context.Context, e *docker.Engine, container, dbName string) (int, error) {
+	out, err := scalar(ctx, e, container, dbName, "select count(*) from pg_tables where schemaname = 'public'")
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(out)
+}
+
+// scalar runs a query that returns one value.
+func scalar(ctx context.Context, e *docker.Engine, container, dbName, query string) (string, error) {
+	out, err := e.Exec(ctx, container, nil, "psql", "-U", dbName, "-d", dbName, "-tAc", query)
+	if err != nil {
+		return "", fmt.Errorf("query: %w", err)
+	}
+	return strings.TrimSpace(out), nil
 }
 
 func tail(s string, n int) string {

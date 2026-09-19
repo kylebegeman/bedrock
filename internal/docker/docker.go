@@ -93,6 +93,9 @@ type Spec struct {
 	NanoCPUs    int64
 	// Restart keeps the container running across reboots.
 	Restart bool
+	// HostNetwork puts the container on the machine's own network, for
+	// helpers that only make outbound connections.
+	HostNetwork bool
 }
 
 // Run creates and starts a container, or starts it if it already exists.
@@ -116,6 +119,9 @@ func (e *Engine) Run(ctx context.Context, spec Spec) error {
 	}
 	if spec.Restart {
 		hostConfig.RestartPolicy = container.RestartPolicy{Name: container.RestartPolicyUnlessStopped}
+	}
+	if spec.HostNetwork {
+		hostConfig.NetworkMode = "host"
 	}
 	exposed := network.PortSet{}
 	if len(spec.Publish) > 0 {
@@ -192,6 +198,11 @@ type Info struct {
 	Running bool
 	Status  string
 	Health  string
+	// Restarts counts the times Docker restarted it.
+	Restarts   int
+	ExitCode   int
+	StartedAt  time.Time
+	FinishedAt time.Time
 	// IPs by network.
 	IPs    map[string]string
 	Labels map[string]string
@@ -204,12 +215,14 @@ func (e *Engine) Inspect(ctx context.Context, name string) (*Info, error) {
 		return nil, err
 	}
 	c := res.Container
-	info := &Info{ID: c.ID, Name: strings.TrimPrefix(c.Name, "/"), IPs: map[string]string{}}
+	info := &Info{ID: c.ID, Name: strings.TrimPrefix(c.Name, "/"), IPs: map[string]string{}, Restarts: c.RestartCount}
 	if c.Config != nil {
 		info.Image, info.Labels = c.Config.Image, c.Config.Labels
 	}
 	if c.State != nil {
-		info.Running, info.Status = c.State.Running, string(c.State.Status)
+		info.Running, info.Status, info.ExitCode = c.State.Running, string(c.State.Status), c.State.ExitCode
+		info.StartedAt, _ = time.Parse(time.RFC3339Nano, c.State.StartedAt)
+		info.FinishedAt, _ = time.Parse(time.RFC3339Nano, c.State.FinishedAt)
 		if c.State.Health != nil {
 			info.Health = string(c.State.Health.Status)
 		}

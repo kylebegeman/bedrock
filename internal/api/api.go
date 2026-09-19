@@ -72,6 +72,14 @@ func (s *Server) Recover(ctx context.Context, emit func(kernel.Event)) (int, err
 	return s.Engine.Recover(ctx, emit)
 }
 
+// RunLocked runs an operation the daemon starts on its own clock, such as
+// a scheduled backup, one at a time with everything else the server runs.
+func (s *Server) RunLocked(ctx context.Context, kind string, input json.RawMessage, emit func(kernel.Event)) (*kernel.Receipt, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Engine.Run(ctx, kind, input, emit)
+}
+
 // Handler returns the HTTP routes.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()

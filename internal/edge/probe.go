@@ -81,6 +81,25 @@ func CertificateReady(ctx context.Context, host, addr string) (bool, string) {
 	return true, "issued by " + leaf.Issuer.CommonName
 }
 
+// CertificateExpiry returns when the certificate the edge serves for host
+// runs out, and whether one could be read at all.
+func CertificateExpiry(ctx context.Context, host, addr string) (time.Time, bool) {
+	dialer := &tls.Dialer{
+		NetDialer: &net.Dialer{Timeout: 5 * time.Second},
+		Config:    &tls.Config{ServerName: host, InsecureSkipVerify: true}, //nolint:gosec // we inspect the certificate ourselves
+	}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return time.Time{}, false
+	}
+	defer conn.Close()
+	certs := conn.(*tls.Conn).ConnectionState().PeerCertificates
+	if len(certs) == 0 {
+		return time.Time{}, false
+	}
+	return certs[0].NotAfter, true
+}
+
 // WaitCertificate polls until the edge serves a real certificate for
 // host, or the wait runs out.
 func WaitCertificate(ctx context.Context, host, addr string, limit time.Duration) (string, error) {

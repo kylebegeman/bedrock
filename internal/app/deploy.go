@@ -600,6 +600,21 @@ func waitReady(ctx context.Context, e *docker.Engine, container string, w manife
 	}
 }
 
+// ReloadEdge gives the edge the configuration the active revisions call
+// for, when it is up. The daemon does this at start, so a quark that
+// changed how it configures the edge takes effect without a deploy.
+func ReloadEdge(ctx context.Context, store *state.Store) error {
+	admin := edge.NewAdmin()
+	if !admin.Answers(ctx) {
+		return nil
+	}
+	cfg, err := edgeConfig(ctx, store)
+	if err != nil {
+		return err
+	}
+	return admin.Load(ctx, cfg)
+}
+
 // edgeConfig builds the edge's whole configuration from every active revision.
 func edgeConfig(ctx context.Context, store *state.Store) ([]byte, error) {
 	active, err := store.ActiveRevisions(ctx)
@@ -634,6 +649,10 @@ func checkTimeout(c manifest.Check) time.Duration {
 	}
 	return 10 * time.Second
 }
+
+// RunCheck performs one manifest check against the live URL, through the
+// edge, the way the watcher does between deploys.
+func RunCheck(ctx context.Context, c manifest.Check) error { return runCheck(ctx, c) }
 
 // runCheck performs one manifest check against the live URL, through the
 // edge, resolving the name the way the world does.

@@ -36,7 +36,54 @@ type Manifest struct {
 	Checks []Check `yaml:"checks,omitempty" json:"checks,omitempty"`
 	// Data is what the app keeps: a database and named volumes.
 	Data *Data `yaml:"data,omitempty" json:"data,omitempty"`
+	// Backup says when the data is backed up and drilled. An app with data
+	// is backed up nightly and drilled weekly unless this says otherwise.
+	Backup *Backup `yaml:"backup,omitempty" json:"backup,omitempty"`
 }
+
+// Backup is an app's backup policy.
+type Backup struct {
+	// Schedule is a five-field cron schedule, in UTC. Default "0 3 * * *".
+	Schedule string `yaml:"schedule,omitempty" json:"schedule,omitempty"`
+	// Drill is when the latest backup is restored beside the app and
+	// verified. Default "0 4 * * 0", Sunday.
+	Drill string `yaml:"drill,omitempty" json:"drill,omitempty"`
+	// Keep is how many daily, weekly and monthly backups stay. Default 7,
+	// 4 and 6.
+	Keep *Keep `yaml:"keep,omitempty" json:"keep,omitempty"`
+	// Verify is a query the drill runs on the restored database.
+	Verify *Verify `yaml:"verify,omitempty" json:"verify,omitempty"`
+	// Off turns backups off for an app whose data isn't worth keeping.
+	Off bool `yaml:"off,omitempty" json:"off,omitempty"`
+}
+
+// Keep is a retention policy.
+type Keep struct {
+	Daily   int `yaml:"daily,omitempty" json:"daily,omitempty"`
+	Weekly  int `yaml:"weekly,omitempty" json:"weekly,omitempty"`
+	Monthly int `yaml:"monthly,omitempty" json:"monthly,omitempty"`
+}
+
+// Verify is what a drill checks in the restored database.
+type Verify struct {
+	// SQL must return one number.
+	SQL string `yaml:"sql" json:"sql"`
+	// AtLeast is the smallest acceptable result. Default 1.
+	AtLeast int `yaml:"at_least,omitempty" json:"at_least,omitempty"`
+}
+
+// Defaults for backups.
+const (
+	DefaultBackupSchedule = "0 3 * * *"
+	DefaultDrillSchedule  = "0 4 * * 0"
+)
+
+// DefaultKeep is the retention an app gets unless it says otherwise.
+var DefaultKeep = Keep{Daily: 7, Weekly: 4, Monthly: 6}
+
+// ReservedApp is the name the machine's own things use, such as the
+// integration credentials. No app may take it.
+const ReservedApp = "quark"
 
 // Data is an app's state, kept across revisions.
 type Data struct {
@@ -194,6 +241,8 @@ func (m *Manifest) Validate() error {
 	fail := func(format string, args ...any) { errs = append(errs, fmt.Sprintf(format, args...)) }
 	if !namePattern.MatchString(m.App) {
 		fail("app: %q must be lowercase letters, digits and hyphens, up to 40 characters", m.App)
+	} else if m.App == ReservedApp {
+		fail("app: %q is quark's own name", m.App)
 	}
 	if len(m.Workloads) == 0 {
 		fail("workloads: an app needs at least one")
@@ -328,6 +377,40 @@ func (m *Manifest) Validate() error {
 			}
 		}
 	}
+	if b := m.Backup; b != nil {
+		if !m.HasData() && !b.Off {
+			fail("backup: the app keeps no data to back up; declare data first")
+		}
+		if b.Schedule != "" {
+			if _, err := ParseSchedule(b.Schedule); err != nil {
+				fail("backup.schedule: %v", err)
+			}
+		}
+		if b.Drill != "" {
+			if _, err := ParseSchedule(b.Drill); err != nil {
+				fail("backup.drill: %v", err)
+			}
+		}
+		if k := b.Keep; k != nil {
+			if k.Daily < 0 || k.Weekly < 0 || k.Monthly < 0 {
+				fail("backup.keep: counts can't be negative")
+			}
+			if k.Daily+k.Weekly+k.Monthly == 0 {
+				fail("backup.keep: keep at least one daily, weekly or monthly backup")
+			}
+		}
+		if v := b.Verify; v != nil {
+			if strings.TrimSpace(v.SQL) == "" {
+				fail("backup.verify: sql is required")
+			}
+			if m.PostgresVersion() == "" {
+				fail("backup.verify: a query needs a database; the app declares none")
+			}
+			if v.AtLeast < 0 {
+				fail("backup.verify.at_least: can't be negative")
+			}
+		}
+	}
 	for i, c := range m.Checks {
 		if !strings.HasPrefix(c.URL, "https://") && !strings.HasPrefix(c.URL, "http://") {
 			fail("checks[%d]: url must start with https:// or http://", i)
@@ -423,3 +506,50 @@ func (w Workload) Serves() bool { return w.Kind == Web || w.Kind == Static }
 
 // LongRunning reports whether a workload stays up between deploys.
 func (w Workload) LongRunning() bool { return w.Kind != Cron }
+
+// HasData reports whether the app keeps a database or volumes.
+func (m *Manifest) HasData() bool {
+	return m.Data != nil && (m.Data.Postgres != nil || len(m.Data.Volumes) > 0)
+}
+
+// BackedUp reports whether the app's data gets backed up.
+func (m *Manifest) BackedUp() bool {
+	return m.HasData() && (m.Backup == nil || !m.Backup.Off)
+}
+
+// BackupSchedule returns when backups run, with the default applied.
+func (m *Manifest) BackupSchedule() string {
+	if m.Backup != nil && m.Backup.Schedule != "" {
+		return m.Backup.Schedule
+	}
+	return DefaultBackupSchedule
+}
+
+// DrillSchedule returns when drills run, with the default applied.
+func (m *Manifest) DrillSchedule() string {
+	if m.Backup != nil && m.Backup.Drill != "" {
+		return m.Backup.Drill
+	}
+	return DefaultDrillSchedule
+}
+
+// KeepPolicy returns the retention, with the default applied.
+func (m *Manifest) KeepPolicy() Keep {
+	if m.Backup != nil && m.Backup.Keep != nil {
+		return *m.Backup.Keep
+	}
+	return DefaultKeep
+}
+
+// VerifyQuery returns the drill's query and its threshold, or "" when
+// the app declares none.
+func (m *Manifest) VerifyQuery() (string, int) {
+	if m.Backup == nil || m.Backup.Verify == nil {
+		return "", 0
+	}
+	atLeast := m.Backup.Verify.AtLeast
+	if atLeast == 0 {
+		atLeast = 1
+	}
+	return m.Backup.Verify.SQL, atLeast
+}

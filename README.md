@@ -45,6 +45,21 @@ workloads:
     kind: static
     dir: public            # served by a file server
     routes: [{host: www.example.com}]
+  nightly:
+    kind: cron
+    image: alpine:3.21
+    schedule: "0 2 * * *"  # five fields, UTC
+    command: [sh, -c, "echo tidy"]
+    mounts: [{volume: files, path: /files}]
+data:
+  postgres: {version: "16"}  # DATABASE_URL reaches every workload
+  volumes:
+    files: {description: What people upload}
+backup:                      # optional; an app with data is backed up
+  schedule: "0 3 * * *"      #   nightly at 03:00 UTC (the default)
+  drill: "0 4 * * 0"         #   restored and verified on Sundays (the default)
+  keep: {daily: 7, weekly: 4, monthly: 6}
+  verify: {sql: select count(*) from posts, at_least: 1}
 checks:
   - url: https://hello.example.com/
     contains: hello
@@ -56,6 +71,33 @@ switches the edge, waits for certificates, checks again through the edge
 and retires the replaced revision, which `quark rollback` can bring back.
 Every container is told its `QUARK_APP`, `QUARK_WORKLOAD` and
 `QUARK_REVISION`.
+
+## What quark keeps an eye on
+
+The daemon watches every app and the machine once a minute: containers
+running, health paths and checks answering through the edge, certificates
+valid and renewing, disk and memory, backups fresh and drills passing, and
+any URL added with `quark watch add` (the other machine's sites, say). A
+problem has to hold for three rounds before it becomes an alert, one alert
+per app, and you hear once when it starts and once when it recovers.
+`quark alerts` shows what is wrong now and what was; `quark status` shows
+health beside each app's requests, errors, p95 latency, CPU, memory and
+disk from the last day; `quark ls` is the registry: owner, hosts,
+repository, last deploy and last backup.
+
+Backups go to one bucket per app with restic, encrypted with a password
+made once per storage account. `quark backup <app>` runs one now,
+`quark drill <app>` restores the latest snapshot beside the app, starts the
+app on it, runs the verify query and cleans up, and `quark restore <app>`
+brings the data onto a machine that doesn't run the app yet, before
+`quark deploy`. `quark backup quark` snapshots the machine's own state and
+sealed secrets. `quark backups` lists what happened.
+
+The credentials quark itself uses are integrations, kept sealed like any
+secret: `quark integration set storage` (Backblaze B2 or any S3 store),
+`quark integration set email` (SMTP, for alerts) and
+`quark integration set cloudflare`. `quark integration list` shows which
+are set and when each was last used, never the values.
 
 ## Build
 

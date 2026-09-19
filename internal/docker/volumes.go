@@ -114,6 +114,37 @@ func (e *Engine) ImageUser(ctx context.Context, ref string) (string, error) {
 	return res.Config.User, nil
 }
 
+// ExecTo runs a command in a running container, streaming its stdout to
+// w. Its stderr comes back as text, for errors.
+func (e *Engine) ExecTo(ctx context.Context, container string, w io.Writer, cmd ...string) (string, error) {
+	args := append([]string{"exec", container}, cmd...)
+	c := exec.CommandContext(ctx, "docker", args...)
+	var stderr bytes.Buffer
+	c.Stdout, c.Stderr = w, &stderr
+	err := c.Run()
+	text := strings.TrimSpace(stderr.String())
+	if err != nil {
+		lines := strings.Split(text, "\n")
+		return text, fmt.Errorf("%s: %s", err, lines[len(lines)-1])
+	}
+	return text, nil
+}
+
+// VolumeExists reports whether a volume is there.
+func (e *Engine) VolumeExists(ctx context.Context, name string) bool {
+	_, err := e.cli.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
+	return err == nil
+}
+
+// VolumeMountpoint is where a volume's files live on the machine.
+func (e *Engine) VolumeMountpoint(ctx context.Context, name string) (string, error) {
+	res, err := e.cli.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
+	if err != nil {
+		return "", err
+	}
+	return res.Volume.Mountpoint, nil
+}
+
 // Exec runs a command in a running container and returns its output.
 func (e *Engine) Exec(ctx context.Context, container string, stdin io.Reader, cmd ...string) (string, error) {
 	args := []string{"exec"}

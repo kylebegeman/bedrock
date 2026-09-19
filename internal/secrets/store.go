@@ -166,6 +166,26 @@ func (s *Store) Set(app, name, value string) (int, error) {
 	return s.write(app, values)
 }
 
+// SetAll records several values in one new version. A nil value in the
+// map removes the name. Names outside the map are kept.
+func (s *Store) SetAll(app string, changes map[string]*string) (int, error) {
+	values, _, err := s.LoadCurrent(app)
+	if err != nil {
+		return 0, err
+	}
+	for name, value := range changes {
+		if !ValidName(name) {
+			return 0, fmt.Errorf("%q must be an UPPER_CASE name", name)
+		}
+		if value == nil {
+			delete(values, name)
+			continue
+		}
+		values[name] = *value
+	}
+	return s.write(app, values)
+}
+
 // Remove drops a name and returns the new version.
 func (s *Store) Remove(app, name string) (int, error) {
 	values, _, err := s.LoadCurrent(app)

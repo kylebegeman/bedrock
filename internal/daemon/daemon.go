@@ -21,8 +21,10 @@ import (
 	"github.com/kylebegeman/quark/internal/host"
 	"github.com/kylebegeman/quark/internal/kernel"
 	"github.com/kylebegeman/quark/internal/secrets"
+	"github.com/kylebegeman/quark/internal/signals"
 	"github.com/kylebegeman/quark/internal/state"
 	"github.com/kylebegeman/quark/internal/version"
+	"github.com/kylebegeman/quark/internal/watch"
 )
 
 // Config says where the daemon keeps things.
@@ -45,6 +47,15 @@ const DefaultStateDir = "/var/lib/quark"
 // Registry returns the operation kinds the daemon knows, for the machine
 // this process runs on.
 func Registry(store *state.Store, sec *secrets.Store, socket string) kernel.Registry {
+	return registry(store, sec, socket, DefaultStateDir)
+}
+
+// RegistryIn is Registry for a state directory other than the default.
+func RegistryIn(store *state.Store, sec *secrets.Store, socket, stateDir string) kernel.Registry {
+	return registry(store, sec, socket, stateDir)
+}
+
+func registry(store *state.Store, sec *secrets.Store, socket, stateDir string) kernel.Registry {
 	env := host.RealEnv()
 	reg := kernel.Registry{}
 	reg.Add(kernel.Exercise{})
@@ -54,7 +65,10 @@ func Registry(store *state.Store, sec *secrets.Store, socket string) kernel.Regi
 			return err
 		}
 		defer e.Close()
-		return edge.Ensure(ctx, e, out)
+		if err := edge.Ensure(ctx, e, out); err != nil {
+			return err
+		}
+		return app.ReloadEdge(ctx, store)
 	}})
 	reg.Add(host.Maintain{Env: env, Socket: socket})
 	reg.Add(host.Upgrade{Env: env})
@@ -64,7 +78,18 @@ func Registry(store *state.Store, sec *secrets.Store, socket string) kernel.Regi
 	reg.Add(app.GC{Store: store})
 	reg.Add(app.RunDefinition{Jobs: app.NewJobs(store, sec)})
 	reg.Add(app.Remove{Store: store})
+	reg.Add(app.Backup{Store: store, Secrets: sec, StateDir: stateDir, Hostname: hostname})
+	reg.Add(app.Drill{Store: store, Secrets: sec, StateDir: stateDir})
+	reg.Add(app.RestoreDef{Store: store, Secrets: sec, StateDir: stateDir})
 	return reg
+}
+
+func hostname() string {
+	h, err := os.Hostname()
+	if err != nil || h == "" {
+		return "quark"
+	}
+	return h
 }
 
 // Run serves until ctx ends. Log lines go to logw.
@@ -95,7 +120,7 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	}
 	defer store.Close()
 	sec := secrets.DefaultStore(cfg.StateDir)
-	engine := kernel.New(store, Registry(store, sec, cfg.Socket), cfg.Owner)
+	engine := kernel.New(store, RegistryIn(store, sec, cfg.Socket, cfg.StateDir), cfg.Owner)
 	logf("quark daemon %s, state %s, owner %s", version.Current().Version, store.Path(), cfg.Owner)
 
 	apiServer := &api.Server{Engine: engine, Store: store}
@@ -135,6 +160,12 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 		}
 	}()
 
+	// The edge gets the configuration this build of quark makes for the
+	// active revisions, in case the shape changed since the last deploy.
+	if err := app.ReloadEdge(ctx, store); err != nil {
+		logf("edge: %v", err)
+	}
+
 	// Cron workloads run on the daemon's clock, outside the operation lock.
 	jobs := app.NewJobs(store, sec)
 	go func() {
@@ -149,6 +180,25 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 			}
 		}
 	}()
+
+	// Watching, signals and scheduled backups run on their own clocks.
+	machine := hostname()
+	watcher := &watch.Watcher{Store: store, Notifier: watch.EmailNotifier{Secrets: sec, Store: store}, Hostname: machine, Log: logf}
+	prober := watch.NewProber(store)
+	go every(ctx, time.Minute, true, func(now time.Time) {
+		if err := watcher.Round(ctx, prober.Observe(ctx)); err != nil && ctx.Err() == nil {
+			logf("watch: %v", err)
+		}
+	})
+	sampler := signals.NewSampler(store)
+	sampler.Log = logf
+	go every(ctx, time.Minute, true, func(now time.Time) {
+		if err := sampler.Sample(ctx); err != nil && ctx.Err() == nil {
+			logf("signals: %v", err)
+		}
+	})
+	scheduler := &Scheduler{Store: store, Secrets: sec, Server: apiServer, Log: logf, Started: time.Now().UTC()}
+	go every(ctx, 30*time.Second, false, func(now time.Time) { scheduler.Tick(ctx, now) })
 
 	listener, err := api.Listen(cfg.Socket)
 	if err != nil {
@@ -182,4 +232,21 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	_ = server.Shutdown(shutdownCtx)
 	logf("stopped")
 	return nil
+}
+
+// every calls fn on a period until ctx ends, first right away when asked.
+func every(ctx context.Context, period time.Duration, now bool, fn func(time.Time)) {
+	if now {
+		fn(time.Now().UTC())
+	}
+	ticker := time.NewTicker(period)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case t := <-ticker.C:
+			fn(t.UTC())
+		}
+	}
 }

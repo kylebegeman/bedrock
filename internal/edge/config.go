@@ -64,13 +64,18 @@ func Config(routes []Route) ([]byte, error) {
 			"default": map[string]any{"writer": map[string]any{"output": "stdout"}, "encoder": map[string]any{"format": "json"}},
 		}},
 		"apps": map[string]any{
-			"http": map[string]any{"servers": map[string]any{
-				"quark": map[string]any{
-					"listen": []string{":80", ":443"},
-					"routes": serverRoutes,
-					"logs":   map[string]any{},
+			"http": map[string]any{
+				// Per-host counters and latency histograms on the admin
+				// API's /metrics: the traffic signals quark keeps per app.
+				"metrics": map[string]any{"per_host": true},
+				"servers": map[string]any{
+					"quark": map[string]any{
+						"listen": []string{":80", ":443"},
+						"routes": serverRoutes,
+						"logs":   map[string]any{},
+					},
 				},
-			}},
+			},
 		},
 	}
 	return json.MarshalIndent(cfg, "", "  ")

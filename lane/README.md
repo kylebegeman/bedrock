@@ -27,3 +27,24 @@ fresh OS, waits for SSH, and pins the new host key in `lane/known_hosts`
 
 Recreating the machine deletes everything on it, including snapshots. The
 script never asks; the caller decides.
+
+## Proofs
+
+Each milestone has a script that runs quark on the machine and checks the
+result from the outside. They build the binary, install it, and print what
+they see; a failure says `NOT proven` and stops.
+
+```sh
+lane/prove-m1.sh              # the kernel: journaling and recovery after a kill
+lane/prove-m2.sh              # the host: setup, a maintenance reboot, an upgrade rolled back
+lane/prove-m3.sh              # deploys: certificates, a second revision, a rollback, a failing check
+lane/prove-m4.sh <staging>    # secrets, cron, one-off commands, begamin and Dragon Writer from their archives
+lane/prove-m5.sh              # backups to per-app buckets, a drill, a restore, signals, one email per outage
+```
+
+`prove-m5.sh` needs the apps `prove-m4.sh` leaves behind. It runs two
+fixtures on the box that quark doesn't manage: a mail sink (mailpit on
+127.0.0.1:1025 and :8025) and an S3 store (MinIO on 127.0.0.1:9000), so the
+email and storage integrations have something to talk to without any real
+credential leaving the machine. On the real machines the same integrations
+point at a mail provider and Backblaze B2.
