@@ -20,6 +20,7 @@ import (
 	"github.com/kylebegeman/quark/internal/edge"
 	"github.com/kylebegeman/quark/internal/host"
 	"github.com/kylebegeman/quark/internal/kernel"
+	"github.com/kylebegeman/quark/internal/secrets"
 	"github.com/kylebegeman/quark/internal/state"
 	"github.com/kylebegeman/quark/internal/version"
 )
@@ -43,7 +44,7 @@ const DefaultStateDir = "/var/lib/quark"
 
 // Registry returns the operation kinds the daemon knows, for the machine
 // this process runs on.
-func Registry(store *state.Store, socket string) kernel.Registry {
+func Registry(store *state.Store, sec *secrets.Store, socket string) kernel.Registry {
 	env := host.RealEnv()
 	reg := kernel.Registry{}
 	reg.Add(kernel.Exercise{})
@@ -57,10 +58,11 @@ func Registry(store *state.Store, socket string) kernel.Registry {
 	}})
 	reg.Add(host.Maintain{Env: env, Socket: socket})
 	reg.Add(host.Upgrade{Env: env})
-	deploy := app.Deploy{Store: store, Addresses: func(ctx context.Context) []string { return host.Addresses(ctx, env) }}
+	deploy := app.Deploy{Store: store, Secrets: sec, Addresses: func(ctx context.Context) []string { return host.Addresses(ctx, env) }}
 	reg.Add(deploy)
 	reg.Add(app.Rollback{Deploy: deploy})
 	reg.Add(app.GC{Store: store})
+	reg.Add(app.RunDefinition{Jobs: app.NewJobs(store, sec)})
 	return reg
 }
 
@@ -91,7 +93,8 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 		return err
 	}
 	defer store.Close()
-	engine := kernel.New(store, Registry(store, cfg.Socket), cfg.Owner)
+	sec := secrets.DefaultStore(cfg.StateDir)
+	engine := kernel.New(store, Registry(store, sec, cfg.Socket), cfg.Owner)
 	logf("quark daemon %s, state %s, owner %s", version.Current().Version, store.Path(), cfg.Owner)
 
 	apiServer := &api.Server{Engine: engine, Store: store}
@@ -127,6 +130,21 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 				} else if n > 0 {
 					logf("recovered %d interrupted operation(s)", n)
 				}
+			}
+		}
+	}()
+
+	// Cron workloads run on the daemon's clock, outside the operation lock.
+	jobs := app.NewJobs(store, sec)
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-ticker.C:
+				jobs.Tick(ctx, now.UTC(), logf)
 			}
 		}
 	}()

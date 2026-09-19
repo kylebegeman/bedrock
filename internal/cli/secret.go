@@ -1,0 +1,157 @@
+package cli
+
+import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"text/tabwriter"
+
+	"github.com/spf13/cobra"
+	"golang.org/x/term"
+
+	"github.com/kylebegeman/quark/internal/secrets"
+)
+
+// secretsStore is the machine's store.
+func (a *app) secretsStore() *secrets.Store { return secrets.DefaultStore(a.stateDir) }
+
+func newSecret(a *app) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "secret",
+		Short: "Keep an app's secrets sealed on this machine.",
+	}
+	set := &cobra.Command{
+		Use:   "set <app> <NAME>",
+		Short: "Store a value, read from stdin or typed without echo. Never pass it as an argument.",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			appName, name := args[0], args[1]
+			if !secrets.ValidName(name) {
+				return fmt.Errorf("%q must be an UPPER_CASE name", name)
+			}
+			store := a.secretsStore()
+			if err := a.ensureSecretsKey(store); err != nil {
+				return err
+			}
+			value, err := readSecretValue(a)
+			if err != nil {
+				return err
+			}
+			version, err := store.Set(appName, name, value)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(a.stdout, "%s: %s set; secrets version %d. The next deploy uses it.\n", appName, name, version)
+			return nil
+		},
+	}
+	list := &cobra.Command{
+		Use:   "list <app>",
+		Short: "List the names in the current version. Values are never shown.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			names, version, err := a.secretsStore().Names(args[0])
+			if err != nil {
+				return err
+			}
+			if a.json {
+				return json.NewEncoder(a.stdout).Encode(struct {
+					Version int      `json:"version"`
+					Names   []string `json:"names"`
+				}{version, names})
+			}
+			if version == 0 {
+				fmt.Fprintf(a.stdout, "%s has no secrets yet\n", args[0])
+				return nil
+			}
+			fmt.Fprintf(a.stdout, "%s, secrets version %d:\n", args[0], version)
+			for _, n := range names {
+				fmt.Fprintf(a.stdout, "  %s\n", n)
+			}
+			return nil
+		},
+	}
+	remove := &cobra.Command{
+		Use:   "remove <app> <NAME>",
+		Short: "Drop a name from the next version.",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			version, err := a.secretsStore().Remove(args[0], args[1])
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(a.stdout, "%s: %s removed; secrets version %d\n", args[0], args[1], version)
+			return nil
+		},
+	}
+	versions := &cobra.Command{
+		Use:   "versions <app>",
+		Short: "List every version and the names it holds.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			vs, err := a.secretsStore().Versions(args[0])
+			if err != nil {
+				return err
+			}
+			if a.json {
+				return json.NewEncoder(a.stdout).Encode(vs)
+			}
+			if len(vs) == 0 {
+				fmt.Fprintf(a.stdout, "%s has no secrets yet\n", args[0])
+				return nil
+			}
+			w := tabwriter.NewWriter(a.stdout, 0, 4, 2, ' ', 0)
+			fmt.Fprintln(w, "VERSION\tWHEN\tNAMES")
+			for _, v := range vs {
+				fmt.Fprintf(w, "%d\t%s\t%s\n", v.Version, v.At.Local().Format("2006-01-02 15:04"), strings.Join(v.Names, ", "))
+			}
+			return w.Flush()
+		},
+	}
+	cmd.AddCommand(set, list, remove, versions)
+	return cmd
+}
+
+// ensureSecretsKey creates the machine's key on first use and shows the
+// recovery identity exactly once.
+func (a *app) ensureSecretsKey(store *secrets.Store) error {
+	_, created, identity, err := store.EnsureKey()
+	if err != nil {
+		return err
+	}
+	if created {
+		fmt.Fprintf(a.stderr, "This machine now has a secrets key at %s.\nIts recovery identity is shown once, here, and nowhere else. Keep it in your password manager:\n\n  %s\n\n", store.KeyPath, identity)
+	}
+	return nil
+}
+
+// readSecretValue takes the value from stdin: a line typed without echo
+// in a terminal, or everything piped in otherwise.
+func readSecretValue(a *app) (string, error) {
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		fmt.Fprint(a.stderr, "Value (not shown): ")
+		raw, err := term.ReadPassword(fd)
+		fmt.Fprintln(a.stderr)
+		if err != nil {
+			return "", err
+		}
+		if len(raw) == 0 {
+			return "", errors.New("nothing entered")
+		}
+		return string(raw), nil
+	}
+	raw, err := io.ReadAll(bufio.NewReader(os.Stdin))
+	if err != nil {
+		return "", err
+	}
+	value := strings.TrimRight(string(raw), "\r\n")
+	if value == "" {
+		return "", errors.New("nothing on stdin; pipe the value in, or run this in a terminal to type it")
+	}
+	return value, nil
+}

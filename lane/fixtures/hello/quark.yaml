@@ -11,10 +11,24 @@ workloads:
       - host: hello.lane.begam.in
     env:
       GREETING: hello
+    secrets: [SECRET_WORD]
     health:
       path: /healthz
     resources:
       memory: 64m
+  tick:
+    kind: cron
+    image: alpine:3.21
+    schedule: "* * * * *"
+    timeout: 1m
+    command: [sh, -c, "date -u >> /ticks/log && tail -n 1 /ticks/log"]
+    mounts:
+      - volume: ticks
+        path: /ticks
+data:
+  volumes:
+    ticks:
+      description: One line per cron run
 checks:
   - url: https://hello.lane.begam.in/
     contains: hello from quark

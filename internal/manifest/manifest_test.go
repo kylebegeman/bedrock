@@ -118,3 +118,64 @@ func TestWorkloadForPicksTheLongestPrefix(t *testing.T) {
 		t.Fatal("an unrouted host must not match")
 	}
 }
+
+const withData = `app: writer
+workloads:
+  web:
+    kind: web
+    image: x
+    port: 3000
+    routes: [{host: writer.example.com}]
+    mounts:
+      - volume: uploads
+        path: /app/public/uploads
+  backup:
+    kind: cron
+    image: x
+    schedule: "0 * * * *"
+    timeout: 30m
+    command: [sh, /app/backup.sh]
+    mounts:
+      - volume: uploads
+        path: /uploads
+data:
+  postgres:
+    version: "16"
+  volumes:
+    uploads:
+      description: Her drawings
+`
+
+func TestDataVolumesMountsAndCron(t *testing.T) {
+	m, err := Parse([]byte(withData))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.PostgresVersion() != "16" || len(m.Data.Volumes) != 1 || m.Workloads["web"].Mounts[0].Path != "/app/public/uploads" {
+		t.Fatalf("%+v", m)
+	}
+	if !m.Workloads["web"].LongRunning() || m.Workloads["backup"].LongRunning() || !m.Workloads["web"].Serves() || m.Workloads["backup"].Serves() {
+		t.Fatal("kinds")
+	}
+	if sched, err := ParseSchedule(m.Workloads["backup"].Schedule); err != nil || sched == nil {
+		t.Fatalf("schedule: %v", err)
+	}
+	plain, _ := Parse([]byte("app: a\nworkloads:\n  w:\n    kind: worker\n    image: x\n"))
+	if plain.PostgresVersion() != "" {
+		t.Fatal("no database by default")
+	}
+	cases := map[string]string{
+		"app: a\nworkloads:\n  w:\n    kind: cron\n    image: x\n":                                                                  "needs schedule",
+		"app: a\nworkloads:\n  w:\n    kind: cron\n    image: x\n    schedule: nope\n":                                              "schedule:",
+		"app: a\nworkloads:\n  w:\n    kind: cron\n    image: x\n    schedule: \"* * * * *\"\n    timeout: soon\n":                  "isn't a duration",
+		"app: a\nworkloads:\n  w:\n    kind: worker\n    image: x\n    schedule: \"* * * * *\"\n":                                   "for cron workloads",
+		"app: a\nworkloads:\n  w:\n    kind: worker\n    image: x\n    mounts: [{volume: nope, path: /x}]\n":                        "isn't declared under data.volumes",
+		"app: a\nworkloads:\n  w:\n    kind: worker\n    image: x\n    mounts: [{volume: v, path: x}]\ndata:\n  volumes: {v: {}}\n": "path must be absolute",
+		"app: a\nworkloads:\n  w:\n    kind: worker\n    image: x\ndata:\n  postgres: {version: \"9\"}\n":                           "supported major version",
+	}
+	for input, want := range cases {
+		if _, err := Parse([]byte(input)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("input:\n%s\nwant %q, got %v", input, want, err)
+		}
+	}
+}

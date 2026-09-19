@@ -11,7 +11,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/robfig/cron/v3"
 	"gopkg.in/yaml.v3"
 )
 
@@ -32,6 +34,34 @@ type Manifest struct {
 	Workloads map[string]Workload `yaml:"workloads" json:"workloads"`
 	// Checks run after every deploy and again as health.
 	Checks []Check `yaml:"checks,omitempty" json:"checks,omitempty"`
+	// Data is what the app keeps: a database and named volumes.
+	Data *Data `yaml:"data,omitempty" json:"data,omitempty"`
+}
+
+// Data is an app's state, kept across revisions.
+type Data struct {
+	// Postgres gives the app its own database. Its URL reaches every
+	// workload as DATABASE_URL.
+	Postgres *Postgres `yaml:"postgres,omitempty" json:"postgres,omitempty"`
+	// Volumes are named directories workloads mount.
+	Volumes map[string]Volume `yaml:"volumes,omitempty" json:"volumes,omitempty"`
+}
+
+// Postgres configures the app's database.
+type Postgres struct {
+	// Version is the major version. Default 16.
+	Version string `yaml:"version,omitempty" json:"version,omitempty"`
+}
+
+// Volume is a named directory an app keeps.
+type Volume struct {
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+}
+
+// Mount puts a volume in a workload.
+type Mount struct {
+	Volume string `yaml:"volume" json:"volume"`
+	Path   string `yaml:"path" json:"path"`
 }
 
 // Kind is what a workload is.
@@ -44,6 +74,8 @@ const (
 	Static Kind = "static"
 	// Worker runs without listening.
 	Worker Kind = "worker"
+	// Cron runs its command on a schedule and exits.
+	Cron Kind = "cron"
 )
 
 // Workload is one container the app runs.
@@ -69,6 +101,12 @@ type Workload struct {
 	Health *Health `yaml:"health,omitempty" json:"health,omitempty"`
 	// Resources bound what the workload may use.
 	Resources Resources `yaml:"resources,omitempty" json:"resources,omitempty"`
+	// Mounts put the app's volumes in this workload.
+	Mounts []Mount `yaml:"mounts,omitempty" json:"mounts,omitempty"`
+	// Schedule is a cron workload's five-field schedule, in UTC.
+	Schedule string `yaml:"schedule,omitempty" json:"schedule,omitempty"`
+	// Timeout is how long a cron run may take. Default 1h.
+	Timeout string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 }
 
 // Build says how to build a workload's image.
@@ -168,7 +206,7 @@ func (m *Manifest) Validate() error {
 			fail("%s: the name must be lowercase letters, digits and hyphens", at)
 		}
 		switch w.Kind {
-		case Web, Worker:
+		case Web, Worker, Cron:
 			if (w.Image == "") == (w.Build == nil) {
 				fail("%s: give either image or build", at)
 			}
@@ -183,9 +221,37 @@ func (m *Manifest) Validate() error {
 				fail("%s: a static workload has dir only, no image, build or port", at)
 			}
 		case "":
-			fail("%s: kind is required: web, static or worker", at)
+			fail("%s: kind is required: web, static, worker or cron", at)
 		default:
-			fail("%s: kind %q isn't one of web, static, worker", at, w.Kind)
+			fail("%s: kind %q isn't one of web, static, worker, cron", at, w.Kind)
+		}
+		if w.Kind == Cron {
+			if w.Schedule == "" {
+				fail("%s: a cron workload needs schedule, five fields such as \"0 3 * * *\"", at)
+			} else if _, err := ParseSchedule(w.Schedule); err != nil {
+				fail("%s.schedule: %v", at, err)
+			}
+			if len(w.Routes) > 0 || w.Port != 0 {
+				fail("%s: a cron workload has no routes or port", at)
+			}
+			if w.Timeout != "" {
+				if _, err := time.ParseDuration(w.Timeout); err != nil {
+					fail("%s.timeout: %q isn't a duration such as 30m", at, w.Timeout)
+				}
+			}
+		} else if w.Schedule != "" || w.Timeout != "" {
+			fail("%s: schedule and timeout are for cron workloads", at)
+		}
+		for i, mt := range w.Mounts {
+			ma := fmt.Sprintf("%s.mounts[%d]", at, i)
+			if m.Data == nil || m.Data.Volumes == nil {
+				fail("%s: volume %q isn't declared under data.volumes", ma, mt.Volume)
+			} else if _, ok := m.Data.Volumes[mt.Volume]; !ok {
+				fail("%s: volume %q isn't declared under data.volumes", ma, mt.Volume)
+			}
+			if !strings.HasPrefix(mt.Path, "/") {
+				fail("%s: path must be absolute", ma)
+			}
 		}
 		if w.Kind == Web {
 			if w.Port < 1 || w.Port > 65535 {
@@ -246,6 +312,20 @@ func (m *Manifest) Validate() error {
 		}
 		if w.Dir != "" && (strings.HasPrefix(w.Dir, "/") || strings.Contains(w.Dir, "..")) {
 			fail("%s.dir: must be inside the source", at)
+		}
+	}
+	if m.Data != nil {
+		for name := range m.Data.Volumes {
+			if !namePattern.MatchString(name) {
+				fail("data.volumes: %q must be lowercase letters, digits and hyphens", name)
+			}
+		}
+		if m.Data.Postgres != nil {
+			switch m.Data.Postgres.Version {
+			case "", "15", "16", "17", "18":
+			default:
+				fail("data.postgres.version: %q isn't a supported major version (15 to 18)", m.Data.Postgres.Version)
+			}
 		}
 	}
 	for i, c := range m.Checks {
@@ -320,3 +400,26 @@ func (m *Manifest) WorkloadFor(host, path string) (string, Workload, bool) {
 	}
 	return bestName, m.Workloads[bestName], true
 }
+
+// ParseSchedule parses a five-field cron schedule.
+func ParseSchedule(spec string) (cron.Schedule, error) {
+	return cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow).Parse(spec)
+}
+
+// PostgresVersion returns the app's database major version, or "" when it
+// has no database.
+func (m *Manifest) PostgresVersion() string {
+	if m.Data == nil || m.Data.Postgres == nil {
+		return ""
+	}
+	if m.Data.Postgres.Version == "" {
+		return "16"
+	}
+	return m.Data.Postgres.Version
+}
+
+// Serves reports whether a workload listens for the edge.
+func (w Workload) Serves() bool { return w.Kind == Web || w.Kind == Static }
+
+// LongRunning reports whether a workload stays up between deploys.
+func (w Workload) LongRunning() bool { return w.Kind != Cron }

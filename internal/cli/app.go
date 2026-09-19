@@ -4,7 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -17,7 +21,11 @@ import (
 )
 
 func newDeploy(a *app) *cobra.Command {
-	var planOnly bool
+	var (
+		planOnly        bool
+		restorePostgres string
+		restoreVolumes  []string
+	)
 	cmd := &cobra.Command{
 		Use:   "deploy <source-dir>",
 		Short: "Deploy the app in a source directory: build, start, check, switch the edge, retire the old revision.",
@@ -30,12 +38,115 @@ func newDeploy(a *app) *cobra.Command {
 			if _, err := manifest.Load(source); err != nil {
 				return err
 			}
-			revision := time.Now().UTC().Format("20060102-150405")
-			return a.operate(cmd.Context(), apps.DeployKind, apps.DeployInput{Source: source, Revision: revision}, planOnly)
+			in := apps.DeployInput{Source: source, Revision: time.Now().UTC().Format("20060102-150405")}
+			if restorePostgres != "" {
+				if in.Restore.Postgres, err = filepath.Abs(restorePostgres); err != nil {
+					return err
+				}
+			}
+			for _, rv := range restoreVolumes {
+				name, file, ok := strings.Cut(rv, "=")
+				if !ok {
+					return fmt.Errorf("--restore-volume wants name=file, not %q", rv)
+				}
+				if in.Restore.Volumes == nil {
+					in.Restore.Volumes = map[string]string{}
+				}
+				if in.Restore.Volumes[name], err = filepath.Abs(file); err != nil {
+					return err
+				}
+			}
+			return a.operate(cmd.Context(), apps.DeployKind, in, planOnly)
 		},
 	}
+	cmd.Flags().StringVar(&restorePostgres, "restore-postgres", "", "a pg_dump file to load into the app's empty database first")
+	cmd.Flags().StringArrayVar(&restoreVolumes, "restore-volume", nil, "name=file.tar.gz to unpack into an empty volume first")
 	a.mutatingFlags(cmd, &planOnly)
 	return cmd
+}
+
+func newRun(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "run <app> [workload] -- <command...>",
+		Short: "Run a one-off command with a workload's image, environment, secrets and volumes.",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dash := cmd.ArgsLenAtDash()
+			if dash < 1 || dash >= len(args) {
+				return fmt.Errorf("give the app, optionally the workload, then -- and the command")
+			}
+			in := apps.RunInput{App: args[0], Workload: optional(args[:dash], 1), Command: args[dash:]}
+			a.yes = true
+			return a.operate(cmd.Context(), apps.RunKind, in, false)
+		},
+	}
+}
+
+func newJobs(a *app) *cobra.Command {
+	var limit int
+	cmd := &cobra.Command{
+		Use:   "jobs <app> [workload]",
+		Short: "List recent cron runs and one-off commands.",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := a.openState()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+			runs, err := store.JobRuns(cmd.Context(), args[0], optional(args, 1), limit)
+			if err != nil {
+				return err
+			}
+			if a.json {
+				return json.NewEncoder(a.stdout).Encode(runs)
+			}
+			if len(runs) == 0 {
+				fmt.Fprintln(a.stdout, "no runs yet")
+				return nil
+			}
+			w := tabwriter.NewWriter(a.stdout, 0, 4, 2, ' ', 0)
+			fmt.Fprintln(w, "WORKLOAD\tKIND\tSTARTED\tTOOK\tRESULT")
+			for _, r := range runs {
+				result := "running"
+				took := ""
+				if !r.FinishedAt.IsZero() {
+					took = r.FinishedAt.Sub(r.StartedAt).Round(time.Millisecond).String()
+					result = "ok"
+					if r.Error != "" {
+						result = r.Error
+					}
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.Workload, r.Kind, r.StartedAt.Local().Format("2006-01-02 15:04:05"), took, result)
+			}
+			return w.Flush()
+		},
+	}
+	cmd.Flags().IntVar(&limit, "limit", 20, "how many runs to list")
+	return cmd
+}
+
+func newPsql(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "psql <app> [-- psql arguments]",
+		Short: "Open psql on the app's database.",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			appName := args[0]
+			dockerBin, err := exec.LookPath("docker")
+			if err != nil {
+				return err
+			}
+			db := strings.ReplaceAll(appName, "-", "_")
+			argv := []string{"docker", "exec", "-i"}
+			if a.tty {
+				argv = append(argv, "-t")
+			}
+			argv = append(argv, apps.PostgresContainer(appName), "psql", "-U", db, "-d", db)
+			argv = append(argv, args[1:]...)
+			return syscall.Exec(dockerBin, argv, os.Environ())
+		},
+	}
 }
 
 func newRollback(a *app) *cobra.Command {

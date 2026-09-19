@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/kylebegeman/quark/internal/edge"
 	"github.com/kylebegeman/quark/internal/kernel"
 	"github.com/kylebegeman/quark/internal/manifest"
+	"github.com/kylebegeman/quark/internal/secrets"
 	"github.com/kylebegeman/quark/internal/state"
 )
 
@@ -35,7 +37,8 @@ const RollbackKind = "app.rollback"
 
 // Deploy is the Definition for DeployKind.
 type Deploy struct {
-	Store *state.Store
+	Store   *state.Store
+	Secrets *secrets.Store
 	// Addresses are this machine's public addresses, for the DNS check.
 	Addresses func(ctx context.Context) []string
 }
@@ -46,6 +49,8 @@ type DeployInput struct {
 	Source string `json:"source"`
 	// Revision names the new revision; the CLI makes one from the clock.
 	Revision string `json:"revision"`
+	// Restore loads data before the first start.
+	Restore Restore `json:"restore,omitempty"`
 }
 
 var revisionPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{3,40}$`)
@@ -70,14 +75,15 @@ func (d Deploy) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 		return nil, err
 	}
 	commit := sourceCommit(ctx, in.Source)
-	return d.rollout(ctx, m, in.Revision, &buildFrom{source: in.Source, commit: commit})
+	return d.rollout(ctx, m, in.Revision, &buildFrom{source: in.Source, commit: commit, restore: in.Restore})
 }
 
 // buildFrom says images come from a source directory; nil means they are
 // already recorded (a rollback).
 type buildFrom struct {
-	source string
-	commit string
+	source  string
+	commit  string
+	restore Restore
 }
 
 // rollout is the plan both deploy and rollback share.
@@ -97,7 +103,9 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 	}
 	containers := map[string]string{}
 	for _, name := range m.WorkloadNames() {
-		containers[name] = docker.ContainerName(m.App, name, revision)
+		if m.Workloads[name].LongRunning() {
+			containers[name] = docker.ContainerName(m.App, name, revision)
+		}
 	}
 	hosts := m.Hosts()
 	target := fmt.Sprintf("%s %s", m.App, revision)
@@ -139,6 +147,23 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 			return e.EnsureNetwork(ctx, docker.AppNetwork(m.App))
 		},
 	})
+	if m.Data != nil {
+		var restore Restore
+		if from != nil {
+			restore = from.restore
+		}
+		add(kernel.Step{
+			Name: "data", Change: "keep the app's database and volumes" + dataSummary(m),
+			Note: restoreNote(restore),
+			Apply: func(ctx context.Context, out io.Writer) error {
+				e, err := connect(ctx)
+				if err != nil {
+					return err
+				}
+				return ensureData(ctx, e, d.Secrets, m, restore, out)
+			},
+		})
+	}
 	if from != nil {
 		for _, name := range m.WorkloadNames() {
 			w := m.Workloads[name]
@@ -192,6 +217,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 	}
 	add(kernel.Step{
 		Name: "start", Change: fmt.Sprintf("start %d container(s) for revision %s", len(containers), revision),
+		Note: secretsNote(m),
 		Apply: func(ctx context.Context, out io.Writer) error {
 			e, err := connect(ctx)
 			if err != nil {
@@ -201,13 +227,36 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 			if err != nil {
 				return err
 			}
+			// A deploy runs with the current secrets and pins that version;
+			// a rollback runs with the version the revision had.
+			values, version, err := d.secretsFor(rev, from == nil)
+			if err != nil {
+				return err
+			}
+			if err := checkSecrets(m, values); err != nil {
+				return err
+			}
+			if rev.SecretsVersion != version {
+				rev.SecretsVersion = version
+				if err := store.SaveRevision(ctx, *rev); err != nil {
+					return err
+				}
+			}
+			if from != nil && len(from.restore.Volumes) > 0 {
+				if err := fixVolumeOwners(ctx, e, m, rev.Images, from.restore.Volumes, out); err != nil {
+					return err
+				}
+			}
 			for _, name := range m.WorkloadNames() {
 				w := m.Workloads[name]
+				if !w.LongRunning() {
+					continue
+				}
 				image := rev.Images[name]
 				if image == "" {
 					return fmt.Errorf("no image recorded for %s", name)
 				}
-				spec, err := containerSpec(m, name, w, revision, image)
+				spec, err := containerSpec(m, name, w, revision, image, values)
 				if err != nil {
 					return err
 				}
@@ -215,6 +264,9 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 					return err
 				}
 				fmt.Fprintf(out, "%s running\n", spec.Name)
+			}
+			if version > 0 {
+				fmt.Fprintf(out, "secrets version %d\n", version)
 			}
 			return nil
 		},
@@ -228,7 +280,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 			}
 			for _, name := range m.WorkloadNames() {
 				w := m.Workloads[name]
-				if w.Kind == manifest.Worker {
+				if !w.Serves() {
 					continue
 				}
 				if err := waitReady(ctx, e, containers[name], w); err != nil {
@@ -430,7 +482,7 @@ func (f *lineFilter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func containerSpec(m *manifest.Manifest, name string, w manifest.Workload, revision, image string) (docker.Spec, error) {
+func containerSpec(m *manifest.Manifest, name string, w manifest.Workload, revision, image string, values map[string]string) (docker.Spec, error) {
 	spec := docker.Spec{
 		Name:     docker.ContainerName(m.App, name, revision),
 		Image:    image,
@@ -439,12 +491,21 @@ func containerSpec(m *manifest.Manifest, name string, w manifest.Workload, revis
 		Networks: []string{docker.AppNetwork(m.App)},
 		Restart:  true,
 	}
-	if w.Kind != manifest.Worker {
+	if w.Serves() {
 		spec.Networks = append(spec.Networks, docker.EdgeNetwork)
 	}
 	spec.Env = []string{"QUARK_APP=" + m.App, "QUARK_WORKLOAD=" + name, "QUARK_REVISION=" + revision}
-	for k, v := range w.Env {
-		spec.Env = append(spec.Env, k+"="+v)
+	for _, k := range sortedKeys(w.Env) {
+		spec.Env = append(spec.Env, k+"="+w.Env[k])
+	}
+	for _, k := range w.Secrets {
+		spec.Env = append(spec.Env, k+"="+values[k])
+	}
+	if m.PostgresVersion() != "" {
+		spec.Env = append(spec.Env, DatabaseURLName+"="+values[DatabaseURLName])
+	}
+	for _, mt := range w.Mounts {
+		spec.Mounts = append(spec.Mounts, docker.VolumeName(m.App, mt.Volume)+":"+mt.Path)
 	}
 	if w.Resources.Memory != "" {
 		bytes, err := parseSize(w.Resources.Memory)
@@ -748,4 +809,80 @@ func (r Rollback) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, 
 func publicTransport() *http.Transport {
 	dialer := &net.Dialer{Timeout: 10 * time.Second, Resolver: edge.PublicResolver}
 	return &http.Transport{DialContext: dialer.DialContext, TLSHandshakeTimeout: 10 * time.Second}
+}
+
+// secretsFor returns the values a revision runs with: the current version
+// for a deploy, the pinned one for a rollback.
+func (d Deploy) secretsFor(rev *state.Revision, pinned bool) (map[string]string, int, error) {
+	if pinned {
+		values, err := d.Secrets.Load(rev.App, rev.SecretsVersion)
+		return values, rev.SecretsVersion, err
+	}
+	return d.Secrets.LoadCurrent(rev.App)
+}
+
+// checkSecrets fails before anything starts when a workload's secrets
+// aren't all set.
+func checkSecrets(m *manifest.Manifest, values map[string]string) error {
+	var missing []string
+	for _, name := range m.WorkloadNames() {
+		for _, n := range secrets.Missing(values, m.Workloads[name].Secrets) {
+			missing = append(missing, fmt.Sprintf("%s (for %s)", n, name))
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("secrets not set: %s; set each with quark secret set %s NAME", strings.Join(missing, ", "), m.App)
+	}
+	return nil
+}
+
+func secretsNote(m *manifest.Manifest) string {
+	var names []string
+	for _, name := range m.WorkloadNames() {
+		names = append(names, m.Workloads[name].Secrets...)
+	}
+	if m.PostgresVersion() != "" {
+		names = append(names, DatabaseURLName)
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return "secrets: " + strings.Join(names, ", ")
+}
+
+func dataSummary(m *manifest.Manifest) string {
+	var parts []string
+	if v := m.PostgresVersion(); v != "" {
+		parts = append(parts, "postgres "+v)
+	}
+	for _, v := range sortedKeys(m.Data.Volumes) {
+		parts = append(parts, "volume "+v)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return ": " + strings.Join(parts, ", ")
+}
+
+func restoreNote(r Restore) string {
+	var parts []string
+	if r.Postgres != "" {
+		parts = append(parts, "database from "+r.Postgres)
+	}
+	for _, v := range sortedKeys(r.Volumes) {
+		parts = append(parts, v+" from "+r.Volumes[v])
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "restore " + strings.Join(parts, "; ")
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

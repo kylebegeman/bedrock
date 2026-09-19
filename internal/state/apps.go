@@ -32,7 +32,10 @@ type Revision struct {
 	Images     map[string]string `json:"images"`
 	Containers map[string]string `json:"containers"`
 	Source     string            `json:"source,omitempty"`
-	CreatedAt  time.Time         `json:"created_at"`
+	// SecretsVersion is the version of the app's secrets the revision was
+	// started with, so a rollback restores them too.
+	SecretsVersion int       `json:"secrets_version"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // App is one app quark runs.
@@ -57,9 +60,23 @@ CREATE TABLE IF NOT EXISTS revisions (
   images     TEXT NOT NULL,
   containers TEXT NOT NULL,
   source     TEXT NOT NULL DEFAULT '',
+  secrets_version INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   PRIMARY KEY (app, id)
-);`
+);
+CREATE TABLE IF NOT EXISTS job_runs (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  app         TEXT NOT NULL,
+  workload    TEXT NOT NULL,
+  revision    TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  started_at  INTEGER NOT NULL,
+  finished_at INTEGER NOT NULL DEFAULT 0,
+  exit_code   INTEGER NOT NULL DEFAULT -1,
+  error       TEXT NOT NULL DEFAULT '',
+  output      TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS job_runs_app ON job_runs (app, workload, started_at DESC);`
 	_, err := s.db.ExecContext(ctx, schema)
 	return err
 }
@@ -77,9 +94,9 @@ func (s *Store) SaveRevision(ctx context.Context, r Revision) error {
 	if r.Manifest == nil {
 		r.Manifest = json.RawMessage(`{}`)
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO revisions (app, id, status, manifest, images, containers, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(app, id) DO UPDATE SET status = excluded.status, manifest = excluded.manifest, images = excluded.images, containers = excluded.containers, source = excluded.source`,
-		r.App, r.ID, string(r.Status), string(r.Manifest), string(images), string(containers), r.Source, unix(r.CreatedAt))
+	_, err = s.db.ExecContext(ctx, `INSERT INTO revisions (app, id, status, manifest, images, containers, source, secrets_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(app, id) DO UPDATE SET status = excluded.status, manifest = excluded.manifest, images = excluded.images, containers = excluded.containers, source = excluded.source, secrets_version = excluded.secrets_version`,
+		r.App, r.ID, string(r.Status), string(r.Manifest), string(images), string(containers), r.Source, r.SecretsVersion, unix(r.CreatedAt))
 	return err
 }
 
@@ -114,13 +131,13 @@ func (s *Store) Activate(ctx context.Context, app, id string, now time.Time) err
 
 // GetRevision returns one revision.
 func (s *Store) GetRevision(ctx context.Context, app, id string) (*Revision, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT app, id, status, manifest, images, containers, source, created_at FROM revisions WHERE app = ? AND id = ?`, app, id)
+	row := s.db.QueryRowContext(ctx, `SELECT app, id, status, manifest, images, containers, source, secrets_version, created_at FROM revisions WHERE app = ? AND id = ?`, app, id)
 	return scanRevision(row)
 }
 
 // Revisions lists an app's revisions, newest first.
 func (s *Store) Revisions(ctx context.Context, app string) ([]Revision, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT app, id, status, manifest, images, containers, source, created_at FROM revisions WHERE app = ? ORDER BY created_at DESC, id DESC`, app)
+	rows, err := s.db.QueryContext(ctx, `SELECT app, id, status, manifest, images, containers, source, secrets_version, created_at FROM revisions WHERE app = ? ORDER BY created_at DESC, id DESC`, app)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +155,7 @@ func (s *Store) Revisions(ctx context.Context, app string) ([]Revision, error) {
 
 // RevisionWithStatus returns an app's revision in a status, or nil.
 func (s *Store) RevisionWithStatus(ctx context.Context, app string, status RevisionStatus) (*Revision, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT app, id, status, manifest, images, containers, source, created_at FROM revisions WHERE app = ? AND status = ? ORDER BY created_at DESC LIMIT 1`, app, string(status))
+	row := s.db.QueryRowContext(ctx, `SELECT app, id, status, manifest, images, containers, source, secrets_version, created_at FROM revisions WHERE app = ? AND status = ? ORDER BY created_at DESC LIMIT 1`, app, string(status))
 	r, err := scanRevision(row)
 	if errors.Is(err, ErrNotFound) {
 		return nil, nil
@@ -168,7 +185,7 @@ func (s *Store) Apps(ctx context.Context) ([]App, error) {
 
 // ActiveRevisions returns every app's active revision.
 func (s *Store) ActiveRevisions(ctx context.Context) ([]Revision, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT app, id, status, manifest, images, containers, source, created_at FROM revisions WHERE status = ? ORDER BY app`, string(RevisionActive))
+	rows, err := s.db.QueryContext(ctx, `SELECT app, id, status, manifest, images, containers, source, secrets_version, created_at FROM revisions WHERE status = ? ORDER BY app`, string(RevisionActive))
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +221,7 @@ func scanRevision(row scanner) (*Revision, error) {
 	var r Revision
 	var manifest, images, containers string
 	var created int64
-	err := row.Scan(&r.App, &r.ID, &r.Status, &manifest, &images, &containers, &r.Source, &created)
+	err := row.Scan(&r.App, &r.ID, &r.Status, &manifest, &images, &containers, &r.Source, &r.SecretsVersion, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -226,4 +243,73 @@ func scanRevision(row scanner) (*Revision, error) {
 func (s *Store) ForgetRevision(ctx context.Context, app, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM revisions WHERE app = ? AND id = ? AND status <> ?`, app, id, string(RevisionActive))
 	return err
+}
+
+// JobRun is one run of a cron workload or a one-off command.
+type JobRun struct {
+	ID         int64     `json:"id"`
+	App        string    `json:"app"`
+	Workload   string    `json:"workload"`
+	Revision   string    `json:"revision"`
+	Kind       string    `json:"kind"`
+	StartedAt  time.Time `json:"started_at"`
+	FinishedAt time.Time `json:"finished_at,omitempty"`
+	ExitCode   int       `json:"exit_code"`
+	Error      string    `json:"error,omitempty"`
+	Output     string    `json:"output,omitempty"`
+}
+
+// StartJobRun records that a run began and returns its id.
+func (s *Store) StartJobRun(ctx context.Context, run JobRun) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `INSERT INTO job_runs (app, workload, revision, kind, started_at) VALUES (?, ?, ?, ?, ?)`, run.App, run.Workload, run.Revision, run.Kind, unix(run.StartedAt))
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// FinishJobRun records how a run ended.
+func (s *Store) FinishJobRun(ctx context.Context, id int64, exitCode int, runErr, output string, finished time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE job_runs SET finished_at = ?, exit_code = ?, error = ?, output = ? WHERE id = ?`, unix(finished), exitCode, runErr, output, id)
+	return err
+}
+
+// LastJobRun returns the newest run of a workload, or nil.
+func (s *Store) LastJobRun(ctx context.Context, app, workload string) (*JobRun, error) {
+	rows, err := s.JobRuns(ctx, app, workload, 1)
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	return &rows[0], nil
+}
+
+// JobRuns lists runs, newest first. An empty workload means every workload.
+func (s *Store) JobRuns(ctx context.Context, app, workload string, limit int) ([]JobRun, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	query := `SELECT id, app, workload, revision, kind, started_at, finished_at, exit_code, error, output FROM job_runs WHERE app = ?`
+	args := []any{app}
+	if workload != "" {
+		query += ` AND workload = ?`
+		args = append(args, workload)
+	}
+	query += ` ORDER BY started_at DESC, id DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []JobRun
+	for rows.Next() {
+		var r JobRun
+		var started, finished int64
+		if err := rows.Scan(&r.ID, &r.App, &r.Workload, &r.Revision, &r.Kind, &started, &finished, &r.ExitCode, &r.Error, &r.Output); err != nil {
+			return nil, err
+		}
+		r.StartedAt, r.FinishedAt = fromUnix(started), fromUnix(finished)
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
