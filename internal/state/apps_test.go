@@ -2,7 +2,9 @@ package state
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -59,5 +61,36 @@ func TestActivateRotatesRevisions(t *testing.T) {
 	}
 	if apps, _ := s.Apps(ctx); len(apps) != 0 {
 		t.Fatal("app not removed")
+	}
+}
+
+func TestOpeningAnOlderStoreAddsNewColumns(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "state.db")
+	// A store from before secrets_version existed.
+	old, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.ExecContext(ctx, `CREATE TABLE revisions (app TEXT NOT NULL, id TEXT NOT NULL, status TEXT NOT NULL, manifest TEXT NOT NULL, images TEXT NOT NULL, containers TEXT NOT NULL, source TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, PRIMARY KEY (app, id));
+		INSERT INTO revisions (app, id, status, manifest, images, containers, created_at) VALUES ('site', 'r1', 'active', '{}', '{}', '{}', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	old.Close()
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	rev, err := s.GetRevision(ctx, "site", "r1")
+	if err != nil || rev.SecretsVersion != 0 {
+		t.Fatalf("old row: %v %+v", err, rev)
+	}
+	rev.SecretsVersion = 3
+	if err := s.SaveRevision(ctx, *rev); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := s.GetRevision(ctx, "site", "r1"); again.SecretsVersion != 3 {
+		t.Fatalf("column not usable: %+v", again)
 	}
 }

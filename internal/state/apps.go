@@ -77,7 +77,33 @@ CREATE TABLE IF NOT EXISTS job_runs (
   output      TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS job_runs_app ON job_runs (app, workload, started_at DESC);`
-	_, err := s.db.ExecContext(ctx, schema)
+	if _, err := s.db.ExecContext(ctx, schema); err != nil {
+		return err
+	}
+	// Columns added after a table first shipped.
+	return s.ensureColumn(ctx, "revisions", "secrets_version", "INTEGER NOT NULL DEFAULT 0")
+}
+
+// ensureColumn adds a column to a table that predates it.
+func (s *Store) ensureColumn(ctx context.Context, table, column, definition string) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, definition))
 	return err
 }
 
