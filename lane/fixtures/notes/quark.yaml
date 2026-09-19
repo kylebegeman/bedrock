@@ -1,0 +1,70 @@
+app: notes
+description: The lane's fixture shaped like Loom's Core
+owner: personal
+workloads:
+  api:
+    kind: web
+    build: {context: ., target: server}
+    port: 8000
+    aliases: [front]
+    grace: 20s
+    env: {NOTE: first}
+    secrets: [NOTES_DATABASE_URL]
+    routes:
+      - host: notes.lane.begam.in
+      - host: notes-control.lane.begam.in
+        port: 8001
+    health: {path: /healthz}
+    resources: {memory: 64m}
+  worker:
+    kind: worker
+    build: {context: ., target: server}
+    command: [/notes, worker]
+    singleton: true
+    grace: 15s
+    health:
+      command: [/notes, check, "http://front:8000/healthz"]
+      timeout: 30s
+    resources: {memory: 64m, pids: 64}
+  buckets:
+    kind: release
+    order: 1
+    image: quay.io/minio/mc@sha256:aead63c77f9db9107f1696fb08ecb0faeda23729cde94b0f663edf4fe09728e3
+    command: [mb, --ignore-existing, LOCAL/notes]
+    env: {MC_CONFIG_DIR: /tmp/mc}
+    secrets: [MC_HOST_LOCAL]
+    timeout: 2m
+  migrate:
+    kind: release
+    order: 2
+    image: postgres:17-alpine
+    command: [psql, -v, ON_ERROR_STOP=1, -c, "create table if not exists notes (id serial primary key, body text not null); grant select, insert on notes to notes_app; grant usage on sequence notes_id_seq to notes_app; insert into notes (body) values ('deployed')"]
+    env: {PGHOST: quark-notes-postgres, PGUSER: notes_owner, PGDATABASE: notes}
+    secrets: [PGPASSWORD]
+    timeout: 2m
+data:
+  postgres:
+    version: "17"
+    image: pgvector/pgvector@sha256:feb68f4f15446397d8cac7f4fe48fe4586de83160d1fc48b46283312d1a33966
+    user: notes_admin
+    database: notes
+    init: deploy/postgres
+    env: {POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"}
+    secrets: [NOTES_OWNER_PASSWORD, NOTES_APP_PASSWORD]
+    database_url: false
+  objects: {}
+secrets:
+  generate:
+    NOTES_OWNER_PASSWORD: hex:24
+    NOTES_APP_PASSWORD: hex:24
+  derive:
+    NOTES_DATABASE_URL: "postgres://notes_app:{NOTES_APP_PASSWORD}@{postgres}:5432/notes"
+    PGPASSWORD: "{NOTES_OWNER_PASSWORD}"
+    MC_HOST_LOCAL: "http://{MINIO_ROOT_USER}:{MINIO_ROOT_PASSWORD}@{objects}:9000"
+backup:
+  verify: {sql: "select count(*) from notes", at_least: 1}
+checks:
+  - url: https://notes.lane.begam.in/
+    contains: notes api
+  - url: https://notes-control.lane.begam.in/
+    contains: notes control

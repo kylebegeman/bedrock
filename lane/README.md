@@ -41,6 +41,7 @@ lane/prove-m3.sh              # deploys: certificates, a second revision, a roll
 lane/prove-m4.sh <staging>    # secrets, cron, one-off commands, begamin and Dragon Writer from their archives
 lane/prove-m5.sh              # backups to per-app buckets, a drill, a restore, signals, one email per outage
 lane/prove-m6.sh [begamin]    # git push deploys begamin with its records, no app reaches another, dns point, a webhook
+lane/prove-m7.sh              # a Core-shaped app: made secrets, releases, singletons, an object store, back from its bucket
 ```
 
 `prove-m5.sh` needs the apps `prove-m4.sh` leaves behind. It runs two
@@ -55,3 +56,13 @@ default `~/Developer/active/begamin`) into a temporary directory and commits
 a lane manifest there; nothing is pushed anywhere but the box. It runs a
 stand-in for Cloudflare's API on the box (`lane/fixtures/fakeflare`, on
 127.0.0.1:8788), and makes a throwaway SSH key for the pushes.
+
+`prove-m7.sh` deploys `lane/fixtures/notes`, an app shaped like Loom's
+Core: pgvector's image with its own superuser and first-run scripts, an
+object store, two release workloads, one image for two workloads, and a
+singleton worker whose health goes through the API's alias. It breaks the
+worker and a release on purpose, then backs the app up, drills it, removes
+it with its data and restores it from the bucket. It needs the storage
+integration `prove-m5.sh` sets up. Loom's own Core is M7's other half:
+`pnpm loom core create` from the Loom repository, against
+core.lane.begam.in.
