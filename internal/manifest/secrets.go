@@ -99,6 +99,11 @@ func Derive(derive map[string]string, values map[string]string, hosts map[string
 		if v, ok := out[name]; ok {
 			return v, true
 		}
+		// A derived dependency must come from this evaluation. Its saved
+		// value may belong to an older source secret, or conceal a cycle.
+		if _, derived := derive[name]; derived {
+			return "", false
+		}
 		v, ok := values[name]
 		return v, ok
 	}

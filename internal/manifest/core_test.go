@@ -137,6 +137,20 @@ func TestSecretFormats(t *testing.T) {
 	}
 }
 
+func TestDerivationNeverUsesSavedDerivedDependencies(t *testing.T) {
+	got, err := Derive(map[string]string{"A": "{Z}", "Z": "{SOURCE}"}, map[string]string{
+		"SOURCE": "new", "Z": "old", "A": "old",
+	}, nil)
+	if err != nil || got["A"] != "new" || got["Z"] != "new" {
+		t.Fatalf("derived chain did not follow the new source: %v %v", got, err)
+	}
+	for _, cycle := range []map[string]string{{"A": "{A}"}, {"A": "{Z}", "Z": "{A}"}} {
+		if _, err := Derive(cycle, map[string]string{"A": "old", "Z": "old"}, nil); err == nil {
+			t.Fatal("saved values concealed a dependency cycle")
+		}
+	}
+}
+
 func TestCoreManifestMistakesAreNamed(t *testing.T) {
 	cases := []struct{ from, to, want string }{
 		{"aliases: [mail-broker]", "aliases: [processor]", "already processor's name"},
