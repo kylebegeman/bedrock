@@ -1,0 +1,184 @@
+package host
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/kylebegeman/quark/internal/kernel"
+	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/quark/internal/version"
+)
+
+func maintainRegistry(m *fakeMachine) kernel.Registry {
+	reg := kernel.Registry{}
+	reg.Add(Maintain{Env: m.env()})
+	reg.Add(Upgrade{Env: m.env()})
+	return reg
+}
+
+func TestMaintainUpdatesRebootsWhenAskedAndVerifies(t *testing.T) {
+	m := setUpBox(t)
+	allowEverything(m)
+	m.answers["dpkg-query *"] = ""
+	m.answers["apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold dist-upgrade"] = "Reading...\n3 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.\n"
+	m.answers["systemctl is-active docker"] = "active"
+	m.write("/var/run/reboot-required", "")
+	engine := kernel.New(openStore(t), maintainRegistry(m), "test")
+	input, _ := json.Marshal(MaintainInput{Reboot: true})
+	var lines []string
+	receipt, err := engine.Run(context.Background(), MaintainKind, input, func(ev kernel.Event) {
+		if ev.Type == kernel.EventStepOutput {
+			lines = append(lines, ev.Line)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Status != state.Succeeded {
+		t.Fatalf("receipt: %+v", receipt)
+	}
+	if !m.ranCommand("apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold dist-upgrade") || !m.ranCommand("reboot") || !m.ranCommand("apt-get -y autoremove") {
+		t.Fatalf("commands: %v", m.commands())
+	}
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "3 upgraded") || !strings.Contains(joined, "rebooting") || !strings.Contains(joined, "doctor: ") {
+		t.Fatalf("output:\n%s", joined)
+	}
+}
+
+func TestMaintainWithoutRebootOnlyReports(t *testing.T) {
+	m := setUpBox(t)
+	allowEverything(m)
+	m.answers["dpkg-query *"] = ""
+	m.answers["systemctl is-active docker"] = "active"
+	m.write("/var/run/reboot-required", "")
+	engine := kernel.New(openStore(t), maintainRegistry(m), "test")
+	var lines []string
+	receipt, err := engine.Run(context.Background(), MaintainKind, json.RawMessage(`{}`), func(ev kernel.Event) {
+		if ev.Type == kernel.EventStepOutput {
+			lines = append(lines, ev.Line)
+		}
+	})
+	if err != nil || receipt.Status != state.Succeeded {
+		t.Fatalf("%v %+v", err, receipt)
+	}
+	if m.ranCommand("reboot") || !strings.Contains(strings.Join(lines, "\n"), "a reboot is pending; run maintain with --reboot") {
+		t.Fatalf("commands %v\noutput %v", m.commands(), lines)
+	}
+}
+
+func TestMaintainFailsWhenTheDoctorFindsSomethingBroken(t *testing.T) {
+	m := setUpBox(t)
+	allowEverything(m)
+	m.answers["dpkg-query *"] = ""
+	m.answers["systemctl is-active docker"] = "active"
+	m.answers["ufw status"] = "Status: inactive"
+	engine := kernel.New(openStore(t), maintainRegistry(m), "test")
+	receipt, err := engine.Run(context.Background(), MaintainKind, json.RawMessage(`{}`), func(kernel.Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Status != state.Failed || !strings.Contains(receipt.Error, "firewall: ufw inactive") {
+		t.Fatalf("receipt: %+v", receipt)
+	}
+}
+
+func upgradeInput(t *testing.T, path string) json.RawMessage {
+	t.Helper()
+	b, _ := json.Marshal(UpgradeInput{Path: path})
+	return b
+}
+
+func TestUpgradeStagesSwitchesRestartsAndVerifies(t *testing.T) {
+	m := setUpBox(t)
+	allowEverything(m)
+	m.write(BinaryPath, "old binary")
+	m.write("/tmp/quark-new", "new binary")
+	// The candidate reports the build this test process will "become".
+	m.answers["/tmp/quark-new version --json"] = `{"version":"0.7.0-test","commit":"aaaaaaaaaaaa","go":"go1.26","os":"linux","arch":"amd64"}`
+	running := m.runningVersion()
+	running.Commit = "000000000000"
+	env := m.env()
+	env.RunningVersion = func() version.Info { return running }
+	reg := kernel.Registry{}
+	reg.Add(Upgrade{Env: env})
+	engine := kernel.New(openStore(t), reg, "test")
+
+	view, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/quark-new"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Steps) != 4 || !strings.Contains(view.Steps[0].Change, "stage 0.7.0-test (aaaaaaaaaaaa)") || view.Steps[0].Note != "replacing 0.7.0-test (000000000000)" {
+		t.Fatalf("plan: %+v", view)
+	}
+
+	// Run with the old build: stage, switch, and the restart that ends the
+	// process. The fake's restart returns, so the step reports it restarted.
+	var seen []string
+	receipt, err := engine.Run(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/quark-new"), func(ev kernel.Event) {
+		if ev.Type == kernel.EventStepFinished {
+			seen = append(seen, ev.Step.Name+":"+string(ev.Step.Status))
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// After the restart the old build is still "running" here, so verify fails
+	// the way it would when the rollback unit had put the old binary back.
+	if receipt.Status != state.Failed || !strings.Contains(receipt.Error, "verify: running 0.7.0-test (000000000000), not 0.7.0-test (aaaaaaaaaaaa)") {
+		t.Fatalf("receipt: %+v (%v)", receipt, seen)
+	}
+	if m.read(BinaryPath) != "new binary" || m.read(PreviousBinary) != "old binary" || strings.TrimSpace(m.read(StagedMarker)) != "0.7.0-test@aaaaaaaaaaaa" {
+		t.Fatalf("files: bin=%q previous=%q staged=%q", m.read(BinaryPath), m.read(PreviousBinary), m.read(StagedMarker))
+	}
+	if !m.ranCommand("systemctl restart quark.service") {
+		t.Fatalf("commands: %v", m.commands())
+	}
+}
+
+func TestUpgradeResumedOnTheNewBuildSucceeds(t *testing.T) {
+	m := setUpBox(t)
+	allowEverything(m)
+	m.write(BinaryPath, "new binary")
+	m.write(PreviousBinary, "old binary")
+	m.write(StagedMarker, "0.7.0-test@aaaaaaaaaaaa\n")
+	m.write("/tmp/quark-new", "new binary")
+	m.answers["/tmp/quark-new version --json"] = `{"version":"0.7.0-test","commit":"aaaaaaaaaaaa","go":"go1.26","os":"linux","arch":"amd64"}`
+	// This process is the new build now. The plan says so in a note, its
+	// digest is unchanged, and the restart step sees no restart to do.
+	reg := kernel.Registry{}
+	reg.Add(Upgrade{Env: m.env()})
+	engine := kernel.New(openStore(t), reg, "test")
+	view, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/quark-new"))
+	if err != nil || view.Steps[0].Note != "already the running build" {
+		t.Fatalf("%v %+v", err, view)
+	}
+	receipt, err := engine.Run(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/quark-new"), func(kernel.Event) {})
+	if err != nil || receipt.Status != state.Succeeded {
+		t.Fatalf("%v %+v", err, receipt)
+	}
+	if m.ranCommand("systemctl restart") {
+		t.Fatal("no restart when the new build is already running")
+	}
+}
+
+func TestUpgradeRefusesWrongBinaries(t *testing.T) {
+	m := setUpBox(t)
+	allowEverything(m)
+	m.write(BinaryPath, "old binary")
+	reg := kernel.Registry{}
+	reg.Add(Upgrade{Env: m.env()})
+	engine := kernel.New(openStore(t), reg, "test")
+	if _, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/not-quark")); err == nil || !strings.Contains(err.Error(), "doesn't run as quark") {
+		t.Fatalf("not quark: %v", err)
+	}
+	m.answers["/tmp/quark-mac version --json"] = `{"version":"0.7.1","commit":"bbbbbbbbbbbb","go":"go1.26","os":"darwin","arch":"arm64"}`
+	if _, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/quark-mac")); err == nil || !strings.Contains(err.Error(), "built for darwin/arm64") {
+		t.Fatalf("wrong platform: %v", err)
+	}
+	if _, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "relative/path")); err == nil {
+		t.Fatal("relative paths must be refused")
+	}
+}

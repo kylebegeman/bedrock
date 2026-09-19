@@ -166,7 +166,11 @@ func (r *Renderer) Plan(view *kernel.PlanView) {
 	}
 	r.println(fmt.Sprintf("%s on %s: %d steps, %s on interruption", view.Kind, view.Target, len(view.Steps), recoveryWord(view.Recovery)))
 	for _, st := range view.Steps {
-		r.println(fmt.Sprintf("  %2d. %s", st.Index+1, orName(st.Change, st.Name)))
+		line := fmt.Sprintf("  %2d. %s", st.Index+1, orName(st.Change, st.Name))
+		if st.Note != "" {
+			line += " (" + st.Note + ")"
+		}
+		r.println(line)
 	}
 	r.println("plan digest " + view.Digest)
 }

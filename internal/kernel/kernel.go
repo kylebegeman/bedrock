@@ -28,6 +28,10 @@ type Step struct {
 	Name string
 	// Change says what the step does, for plans and receipts.
 	Change string
+	// Note says what the planner saw, such as "already installed". It is
+	// shown in plans and left out of the plan digest, because the world can
+	// change between planning and a resume without changing the plan.
+	Note string
 	// Apply does the work. After a crash it may run again, so it must be
 	// safe to repeat.
 	Apply func(ctx context.Context, out io.Writer) error
@@ -107,6 +111,7 @@ type PlanStepView struct {
 	Index  int    `json:"index"`
 	Name   string `json:"name"`
 	Change string `json:"change"`
+	Note   string `json:"note,omitempty"`
 }
 
 // StepView is a step's state as reported in events and receipts.
@@ -214,7 +219,7 @@ func (e *Engine) plan(ctx context.Context, kind string, input json.RawMessage) (
 			return nil, nil, fmt.Errorf("plan %s: step name %q repeats", kind, st.Name)
 		}
 		seen[st.Name] = true
-		view.Steps = append(view.Steps, PlanStepView{Index: i, Name: st.Name, Change: st.Change})
+		view.Steps = append(view.Steps, PlanStepView{Index: i, Name: st.Name, Change: st.Change, Note: st.Note})
 	}
 	view.Digest = digestPlan(view)
 	return plan, view, nil
@@ -310,6 +315,16 @@ func describeRecovery(r Recovery) string {
 // errCrashed is what the test hook makes apply return.
 var errCrashed = errors.New("simulated crash")
 
+type attemptKey struct{}
+
+// Attempt is which attempt of its step the calling Apply is: 1 the first
+// time, 2 when a resumed operation runs the step again. Zero outside a
+// step.
+func Attempt(ctx context.Context) int {
+	n, _ := ctx.Value(attemptKey{}).(int)
+	return n
+}
+
 // apply runs the steps that haven't succeeded, under a lease it keeps renewing.
 func (e *Engine) apply(ctx context.Context, op *state.Operation, plan *Plan, view *PlanView, emit func(Event)) (*Receipt, error) {
 	ctx, cancel := context.WithCancel(ctx)
@@ -333,7 +348,7 @@ func (e *Engine) apply(ctx context.Context, op *state.Operation, plan *Plan, vie
 		out := newLineWriter(func(line string) {
 			emit(Event{Type: EventStepOutput, Operation: op.ID, At: e.now(), Step: &StepView{Index: i, Name: st.Name}, Line: line})
 		})
-		stepErr := st.Apply(ctx, out)
+		stepErr := st.Apply(context.WithValue(ctx, attemptKey{}, steps[i].Attempts+1), out)
 		out.Flush()
 		finished := e.now()
 		status, errText := state.StepSucceeded, ""

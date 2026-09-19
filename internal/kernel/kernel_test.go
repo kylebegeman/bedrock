@@ -274,3 +274,29 @@ func TestIDsSortByTimeAndDiffer(t *testing.T) {
 		t.Fatal("ids at the same instant must differ")
 	}
 }
+
+type attemptRecorder struct{ attempts []int }
+
+func (attemptRecorder) Kind() string { return "test.attempts" }
+func (r *attemptRecorder) Plan(context.Context, json.RawMessage) (*Plan, error) {
+	return &Plan{Target: "x", Steps: []Step{{Name: "only", Apply: func(ctx context.Context, _ io.Writer) error {
+		r.attempts = append(r.attempts, Attempt(ctx))
+		return nil
+	}}}}, nil
+}
+
+func TestStepsKnowTheirAttempt(t *testing.T) {
+	if Attempt(context.Background()) != 0 {
+		t.Fatal("no attempt outside a step")
+	}
+	rec := &attemptRecorder{}
+	reg := Registry{}
+	reg.Add(rec)
+	e := New(newStore(t), reg, "test")
+	if _, err := e.Run(context.Background(), "test.attempts", json.RawMessage(`{}`), func(Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.attempts) != 1 || rec.attempts[0] != 1 {
+		t.Fatalf("attempts: %v", rec.attempts)
+	}
+}

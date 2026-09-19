@@ -72,6 +72,12 @@ func (a *app) operate(ctx context.Context, kind string, input any, planOnly bool
 	return nil
 }
 
+// mutatingFlags adds --plan and --yes to a command that changes the machine.
+func (a *app) mutatingFlags(cmd *cobra.Command, planOnly *bool) {
+	cmd.Flags().BoolVar(planOnly, "plan", false, "show the plan and change nothing")
+	cmd.Flags().BoolVar(&a.yes, "yes", false, "apply without asking")
+}
+
 func newHistory(a *app) *cobra.Command {
 	var limit int
 	cmd := &cobra.Command{
@@ -134,8 +140,7 @@ func newKernel(a *app) *cobra.Command {
 	exercise.Flags().StringVar(&in.StepDuration, "step-duration", "0s", "how long each step takes")
 	exercise.Flags().IntVar(&in.FailAt, "fail-at", 0, "make this step fail (1-based)")
 	exercise.Flags().StringVar(&recovery, "recovery", "resume", "resume or compensate after an interruption")
-	exercise.Flags().BoolVar(&planOnly, "plan", false, "show the plan and change nothing")
-	exercise.Flags().BoolVar(&a.yes, "yes", false, "apply without asking")
+	a.mutatingFlags(exercise, &planOnly)
 	_ = exercise.MarkFlagRequired("dir")
 	kernelCmd.AddCommand(exercise)
 	return kernelCmd

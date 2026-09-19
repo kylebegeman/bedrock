@@ -61,7 +61,7 @@ func (a *app) runner(ctx context.Context, owner string) (api.Runner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &api.Local{Engine: kernel.New(store, daemon.Registry(), owner), Store: store}, nil
+	return &api.Local{Engine: kernel.New(store, daemon.Registry(a.socket), owner), Store: store}, nil
 }
 
 func newRoot(stdout, stderr io.Writer) *cobra.Command {
@@ -80,7 +80,7 @@ func newRoot(stdout, stderr io.Writer) *cobra.Command {
 	root.PersistentFlags().StringVar(&a.stateDir, "state-dir", envOr("QUARK_STATE_DIR", defaultStateDir()), "where quark keeps its state")
 	root.PersistentFlags().StringVar(&a.socket, "socket", envOr("QUARK_SOCKET", daemon.DefaultSocket), "the daemon's socket; the local kernel is used when nothing answers")
 	root.PersistentFlags().BoolVar(&a.json, "json", false, "print JSON, one object per line")
-	root.AddCommand(newVersion(a), newHistory(a), newKernel(a), newDaemon(a))
+	root.AddCommand(newVersion(a), newDoctor(a), newHost(a), newUpgrade(a), newHistory(a), newKernel(a), newDaemon(a))
 	return root
 }
 

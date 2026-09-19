@@ -1,0 +1,190 @@
+package host
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+
+	"github.com/kylebegeman/quark/internal/kernel"
+	"github.com/kylebegeman/quark/internal/version"
+)
+
+// UpgradeKind replaces the quark binary with a staged one and restarts the
+// daemon. If the new daemon can't start, systemd runs the rollback unit,
+// which puts the previous binary back; the resumed operation then reports
+// that.
+const UpgradeKind = "host.upgrade"
+
+// Where the binary and its spares live.
+const (
+	BinaryPath     = "/usr/local/bin/quark"
+	LibDir         = "/usr/local/lib/quark"
+	PreviousBinary = LibDir + "/previous"
+	StagedMarker   = LibDir + "/staged"
+	RollbackScript = LibDir + "/rollback.sh"
+)
+
+// Upgrade is the Definition for UpgradeKind.
+type Upgrade struct {
+	Env Env
+}
+
+// UpgradeInput says which binary to install.
+type UpgradeInput struct {
+	// Path is a quark binary already on this machine.
+	Path string `json:"path"`
+}
+
+// Kind implements kernel.Definition.
+func (Upgrade) Kind() string { return UpgradeKind }
+
+// Plan implements kernel.Definition.
+func (u Upgrade) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, error) {
+	var in UpgradeInput
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return nil, fmt.Errorf("upgrade input: %w", err)
+	}
+	if in.Path == "" || !filepath.IsAbs(in.Path) {
+		return nil, errors.New("upgrade needs the absolute path of the new binary")
+	}
+	env := u.Env
+	if !env.Privileged {
+		return nil, errors.New("upgrading needs root")
+	}
+	running := env.RunningVersion()
+	target, err := probeVersion(ctx, env, in.Path)
+	if err != nil {
+		return nil, err
+	}
+	// The plan is re-built when the operation resumes on the new daemon, so
+	// nothing in a step's Change may depend on which build is running now;
+	// that goes in the notes.
+	described := fmt.Sprintf("%s (%s)", target.Version, target.Commit)
+	plan := &kernel.Plan{Target: BinaryPath, Recovery: kernel.Resume}
+	plan.Steps = append(plan.Steps,
+		kernel.Step{
+			Name: "stage", Change: "keep the running binary as the previous one and stage " + described,
+			Note: doneIf(identity(target) == identity(running), "already the running build", fmt.Sprintf("replacing %s (%s)", running.Version, running.Commit)),
+			Apply: func(_ context.Context, out io.Writer) error {
+				if err := os.MkdirAll(env.Path(LibDir), 0o755); err != nil {
+					return err
+				}
+				if err := copyFile(env.Path(BinaryPath), env.Path(PreviousBinary)); err != nil {
+					return fmt.Errorf("keep the previous binary: %w", err)
+				}
+				if _, err := env.WriteFile(StagedMarker, identity(target)+"\n", 0o644); err != nil {
+					return err
+				}
+				fmt.Fprintf(out, "previous build kept at %s\n", PreviousBinary)
+				return nil
+			},
+		},
+		kernel.Step{
+			Name: "switch", Change: "put the new binary at " + BinaryPath,
+			Apply: func(_ context.Context, out io.Writer) error {
+				tmp := env.Path(BinaryPath) + ".new"
+				if err := copyFile(env.Path(in.Path), tmp); err != nil {
+					return err
+				}
+				if err := os.Chmod(tmp, 0o755); err != nil {
+					return err
+				}
+				if err := os.Rename(tmp, env.Path(BinaryPath)); err != nil {
+					return err
+				}
+				fmt.Fprintf(out, "%s is now %s (%s)\n", BinaryPath, target.Version, target.Commit)
+				return nil
+			},
+		},
+		kernel.Step{
+			Name: "restart", Change: "restart the daemon on the new binary",
+			// The first attempt restarts the daemon, which ends this process.
+			// The second attempt is the resumed operation: on the new daemon
+			// (done), or on the old one that systemd's rollback put back
+			// (failed).
+			Apply: func(ctx context.Context, out io.Writer) error {
+				now := env.RunningVersion()
+				if identity(now) == identity(target) {
+					fmt.Fprintf(out, "running %s (%s)\n", now.Version, now.Commit)
+					return nil
+				}
+				if kernel.Attempt(ctx) <= 1 {
+					fmt.Fprintln(out, "restarting the daemon; the operation resumes on the new build")
+					_, err := env.Run(ctx, "systemctl", "restart", "quark.service")
+					// A real restart ends the process before this returns.
+					return err
+				}
+				return fmt.Errorf("the new build %s (%s) didn't start; systemd put %s (%s) back", target.Version, target.Commit, now.Version, now.Commit)
+			},
+		},
+		kernel.Step{
+			Name: "verify", Change: "confirm the daemon runs the new build",
+			Apply: func(_ context.Context, out io.Writer) error {
+				now := env.RunningVersion()
+				if identity(now) != identity(target) {
+					return fmt.Errorf("running %s (%s), not %s (%s)", now.Version, now.Commit, target.Version, target.Commit)
+				}
+				fmt.Fprintf(out, "upgraded to %s (%s)\n", now.Version, now.Commit)
+				return nil
+			},
+		},
+	)
+	return plan, nil
+}
+
+// identity names a build. Two builds of one commit can differ (a release
+// stamp, a lane fixture), so the version is part of it.
+func identity(v version.Info) string { return v.Version + "@" + v.Commit }
+
+// probeVersion runs a candidate binary's version command and checks that
+// it is a quark build for this machine.
+func probeVersion(ctx context.Context, env Env, path string) (version.Info, error) {
+	out, err := env.Run(ctx, path, "version", "--json")
+	if err != nil {
+		return version.Info{}, fmt.Errorf("%s doesn't run as quark: %w", path, err)
+	}
+	var info version.Info
+	if err := json.Unmarshal([]byte(lastLine(out)), &info); err != nil || info.Version == "" {
+		return version.Info{}, fmt.Errorf("%s doesn't report a quark version", path)
+	}
+	running := env.RunningVersion()
+	if info.OS != running.OS || info.Arch != running.Arch {
+		return version.Info{}, fmt.Errorf("%s is built for %s/%s; this machine is %s/%s", path, info.OS, info.Arch, running.OS, running.Arch)
+	}
+	return info, nil
+}
+
+func copyFile(from, to string) error {
+	data, err := os.ReadFile(from)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		return err
+	}
+	tmp := to + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o755); err != nil {
+		return err
+	}
+	return os.Rename(tmp, to)
+}
+
+// RollbackScriptContent is what systemd runs when the daemon can't start:
+// it puts the previous binary back and starts the daemon again. It must not
+// depend on the quark binary, which is the thing that's broken.
+const RollbackScriptContent = `#!/bin/sh
+# Installed by quark. Runs when quark.service hits its start limit.
+set -eu
+if [ -f /usr/local/lib/quark/previous ]; then
+  cp /usr/local/lib/quark/previous /usr/local/bin/quark.rollback
+  chmod 755 /usr/local/bin/quark.rollback
+  mv -f /usr/local/bin/quark.rollback /usr/local/bin/quark
+  echo "quark: put the previous binary back"
+fi
+systemctl reset-failed quark.service
+systemctl start quark.service
+`

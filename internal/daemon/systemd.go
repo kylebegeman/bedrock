@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kylebegeman/quark/internal/api"
+	"github.com/kylebegeman/quark/internal/host"
 )
 
 // UnitPath is where the daemon's systemd unit lives.
@@ -21,6 +22,9 @@ Description=Quark host daemon
 Documentation=https://github.com/kylebegeman/quark
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+OnFailure=quark-rollback.service
 
 [Service]
 Type=notify
@@ -40,8 +44,19 @@ TimeoutStopSec=60
 WantedBy=multi-user.target
 `
 
-// Install writes the unit for this binary, enables it, starts it, and waits
-// for the daemon to answer. It needs root and systemd.
+// RollbackUnitPath is the unit systemd runs when the daemon can't start.
+const RollbackUnitPath = "/etc/systemd/system/quark-rollback.service"
+
+const rollbackUnit = `[Unit]
+Description=Put the previous quark binary back after a failed start
+
+[Service]
+Type=oneshot
+ExecStart=` + host.RollbackScript + `
+`
+
+// Install writes the units for this binary, enables the daemon, starts it,
+// and waits for it to answer. It needs root and systemd.
 func Install(ctx context.Context, out io.Writer) error {
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("installing the daemon needs root")
@@ -56,13 +71,22 @@ func Install(ctx context.Context, out io.Writer) error {
 	if exe, err = filepath.EvalSymlinks(exe); err != nil {
 		return err
 	}
-	unit := fmt.Sprintf(unitTemplate, exe)
-	current, _ := os.ReadFile(UnitPath)
-	if string(current) != unit {
-		if err := os.WriteFile(UnitPath, []byte(unit), 0o644); err != nil {
+	if err := os.MkdirAll(host.LibDir, 0o755); err != nil {
+		return err
+	}
+	for path, content := range map[string]string{UnitPath: fmt.Sprintf(unitTemplate, exe), RollbackUnitPath: rollbackUnit} {
+		if current, _ := os.ReadFile(path); string(current) != content {
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "wrote %s\n", path)
+		}
+	}
+	if current, _ := os.ReadFile(host.RollbackScript); string(current) != host.RollbackScriptContent {
+		if err := os.WriteFile(host.RollbackScript, []byte(host.RollbackScriptContent), 0o755); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "wrote %s\n", UnitPath)
+		fmt.Fprintf(out, "wrote %s\n", host.RollbackScript)
 	}
 	for _, args := range [][]string{{"daemon-reload"}, {"enable", "quark.service"}, {"restart", "quark.service"}} {
 		if err := systemctl(ctx, args...); err != nil {

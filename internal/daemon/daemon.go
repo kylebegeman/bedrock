@@ -11,9 +11,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kylebegeman/quark/internal/api"
+	"github.com/kylebegeman/quark/internal/host"
 	"github.com/kylebegeman/quark/internal/kernel"
 	"github.com/kylebegeman/quark/internal/state"
 	"github.com/kylebegeman/quark/internal/version"
@@ -36,10 +38,15 @@ const DefaultSocket = "/run/quark/quark.sock"
 // DefaultStateDir is where the daemon keeps its store on a machine it manages.
 const DefaultStateDir = "/var/lib/quark"
 
-// Registry returns the operation kinds the daemon knows.
-func Registry() kernel.Registry {
+// Registry returns the operation kinds the daemon knows, for the machine
+// this process runs on.
+func Registry(socket string) kernel.Registry {
+	env := host.RealEnv()
 	reg := kernel.Registry{}
 	reg.Add(kernel.Exercise{})
+	reg.Add(host.Setup{Env: env, Socket: socket})
+	reg.Add(host.Maintain{Env: env, Socket: socket})
+	reg.Add(host.Upgrade{Env: env})
 	return reg
 }
 
@@ -59,13 +66,18 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 		cfg.SweepInterval = 5 * time.Second
 	}
 	logf := func(format string, args ...any) { fmt.Fprintf(logw, format+"\n", args...) }
+	// A build whose version says "-broken" is the lane's fixture for a bad
+	// upgrade: it must fail to start so systemd rolls the binary back.
+	if strings.Contains(version.Current().Version, "-broken") {
+		return errors.New("this build is deliberately broken (a lane fixture) and refuses to start")
+	}
 
 	store, err := state.Open(filepath.Join(cfg.StateDir, "state.db"))
 	if err != nil {
 		return err
 	}
 	defer store.Close()
-	engine := kernel.New(store, Registry(), cfg.Owner)
+	engine := kernel.New(store, Registry(cfg.Socket), cfg.Owner)
 	logf("quark daemon %s, state %s, owner %s", version.Current().Version, store.Path(), cfg.Owner)
 
 	apiServer := &api.Server{Engine: engine, Store: store}
