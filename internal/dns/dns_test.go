@@ -140,3 +140,11 @@ func TestLookAndAudit(t *testing.T) {
 		}
 	}
 }
+
+func TestDepthBelowTheZone(t *testing.T) {
+	for host, want := range map[string]int{"api.begam.in": 1, "api.lane.begam.in": 2, "begam.in": 0} {
+		if got := (Outcome{Host: host, Zone: "begam.in"}).Depth(); got != want {
+			t.Errorf("%s: depth %d, want %d", host, got, want)
+		}
+	}
+}

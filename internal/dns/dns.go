@@ -73,6 +73,18 @@ type Outcome struct {
 	Action  string // "made", "updated", "kept"
 	Content string
 	Proxied bool
+	// Zone is the zone the record is in.
+	Zone string
+}
+
+// Depth is how many labels a host has below its zone: one for
+// api.begam.in in begam.in, two for api.lane.begam.in.
+func (o Outcome) Depth() int {
+	rest := strings.TrimSuffix(o.Host, "."+o.Zone)
+	if rest == o.Host || rest == "" {
+		return 0
+	}
+	return strings.Count(rest, ".") + 1
 }
 
 func (o Outcome) String() string {
@@ -125,7 +137,7 @@ func (m *Manager) Ensure(ctx context.Context, app, host string, mode manifest.DN
 		if _, err := m.CF.Create(ctx, z.ID, want); err != nil {
 			return Outcome{}, err
 		}
-		return Outcome{Host: host, Action: "made", Content: ip, Proxied: proxied}, nil
+		return Outcome{Host: host, Action: "made", Content: ip, Proxied: proxied, Zone: z.Name}, nil
 	}
 	if a.Content != ip && !take {
 		where := a.Content
@@ -135,13 +147,13 @@ func (m *Manager) Ensure(ctx context.Context, app, host string, mode manifest.DN
 		return Outcome{}, fmt.Errorf("%s %w: at %s, not this machine (%s); when it is time to move it, run quark dns point %s", host, ErrElsewhere, where, ip, host)
 	}
 	if a.Content == ip && a.Proxied == proxied && a.Comment == want.Comment {
-		return Outcome{Host: host, Action: "kept", Content: ip, Proxied: proxied}, nil
+		return Outcome{Host: host, Action: "kept", Content: ip, Proxied: proxied, Zone: z.Name}, nil
 	}
 	want.ID = a.ID
 	if err := m.CF.Update(ctx, z.ID, want); err != nil {
 		return Outcome{}, err
 	}
-	return Outcome{Host: host, Action: "updated", Content: ip, Proxied: proxied}, nil
+	return Outcome{Host: host, Action: "updated", Content: ip, Proxied: proxied, Zone: z.Name}, nil
 }
 
 // Remove deletes the records quark made for an app on this machine. A

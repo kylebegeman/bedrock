@@ -66,6 +66,9 @@ func keepRecords(ctx context.Context, sec *secrets.Store, m *manifest.Manifest, 
 				return err
 			}
 			fmt.Fprintln(out, outcome)
+			if outcome.Proxied && outcome.Depth() > 1 {
+				fmt.Fprintf(out, "note: Cloudflare's free certificate covers names one level below %s, so HTTPS to %s through the proxy fails unless the zone has Advanced Certificate Manager; dns: direct avoids it\n", outcome.Zone, host)
+			}
 		}
 	}
 	for _, host := range m.Hosts() {
