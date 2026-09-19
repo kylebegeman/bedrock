@@ -148,6 +148,9 @@ type Spec struct {
 	// Stdin, when set, is copied to the container's standard input, which
 	// is closed at its end.
 	Stdin io.Reader
+	// NoHealthcheck turns off the image's own HEALTHCHECK, for a container
+	// whose health quark checks its own way.
+	NoHealthcheck bool
 }
 
 // DefaultPidsLimit bounds every isolated container's processes.
@@ -221,6 +224,9 @@ func (e *Engine) Run(ctx context.Context, spec Spec) error {
 		endpoints[spec.Networks[0]] = &network.EndpointSettings{Aliases: spec.Aliases}
 	}
 	config := &container.Config{Image: spec.Image, Cmd: spec.Cmd, Env: spec.Env, Labels: labels, ExposedPorts: exposed, User: spec.User}
+	if spec.NoHealthcheck {
+		config.Healthcheck = &container.HealthConfig{Test: []string{"NONE"}}
+	}
 	if spec.Stdin != nil {
 		config.OpenStdin, config.StdinOnce, config.AttachStdin = true, true, true
 	}

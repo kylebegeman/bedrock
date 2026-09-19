@@ -291,10 +291,10 @@ func newPs(a *app) *cobra.Command {
 					return err
 				}
 				for _, name := range m.WorkloadNames() {
-					if m.Workloads[name].Kind == manifest.Cron {
-						status := "cron, never run"
+					if kind := m.Workloads[name].Kind; kind == manifest.Cron || kind == manifest.Release {
+						status := string(kind) + ", never run"
 						if last, err := store.LastJobRun(ctx, rev.App, name); err == nil && last != nil {
-							status = "cron, last run " + last.StartedAt.Local().Format("15:04:05")
+							status = string(kind) + ", last run " + last.StartedAt.Local().Format("15:04:05")
 							switch {
 							case last.FinishedAt.IsZero():
 								status += " running"

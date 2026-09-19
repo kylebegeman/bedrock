@@ -258,6 +258,9 @@ func TestContainerSpecsCarryNamesLimitsAndOnlyTheirOwnSecrets(t *testing.T) {
 	if runner.PidsLimit != 2048 {
 		t.Fatalf("pids %d", runner.PidsLimit)
 	}
+	if !runner.NoHealthcheck || spec.NoHealthcheck {
+		t.Fatalf("the image's HEALTHCHECK is off only where the manifest checks health: runner %v, core-api %v", runner.NoHealthcheck, spec.NoHealthcheck)
+	}
 	for _, kv := range runner.Env {
 		if strings.HasPrefix(kv, "DATABASE_URL=") || strings.HasPrefix(kv, "LOOM_CORE_API_DATABASE_URL=") {
 			t.Fatalf("the runner got another workload's secret: %s", kv)
@@ -355,5 +358,18 @@ func TestARollbackMakesNoSecretsAndRunsNoReleases(t *testing.T) {
 	want := []string{"edge", "dns", "data", "start", "ready", "switch", "certificates", "retire"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("rollback steps\n %v\nwant\n %v", names, want)
+	}
+}
+
+func TestAFailedContainerIsExplainedByItsErrorNotItsLastBrace(t *testing.T) {
+	logs := "[20:17:18.450] ERROR (#2): ~effect/cli/CliError/UserError: \n    at catch (file:///app/dist/bin.mjs:72339:20)\n  [cause]: Error: LOOM_RUNNER_CORE_CONTROL_URL is required.\n      at causePrettyError (file:///x.js:228:13)\n}\n"
+	if got := lastWords(logs); got != "[cause]: Error: LOOM_RUNNER_CORE_CONTROL_URL is required." {
+		t.Fatalf("got %q", got)
+	}
+	if got := lastWords("listening on 8000\n}\n"); got != "listening on 8000" {
+		t.Fatalf("got %q", got)
+	}
+	if got := lastWords("\n\n"); got != "it wrote nothing; see quark logs" {
+		t.Fatalf("got %q", got)
 	}
 }

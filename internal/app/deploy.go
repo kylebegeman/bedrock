@@ -426,6 +426,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 					continue
 				}
 				if err := waitReady(ctx, e, containers[name], w); err != nil {
+					showLastLines(ctx, e, containers[name], name, out)
 					// The new containers never went live; take them down.
 					abandon(ctx, e, out)
 					return fmt.Errorf("%s: %w", name, err)
@@ -690,6 +691,9 @@ func containerSpec(m *manifest.Manifest, name string, w manifest.Workload, revis
 		Aliases:   append([]string{name}, w.Aliases...),
 		Restart:   true,
 		PidsLimit: w.Resources.Pids,
+		// The manifest's health is the one that counts; an image's own
+		// HEALTHCHECK, written for another role of it, would only mislead.
+		NoHealthcheck: w.Health != nil,
 	}
 	if w.Serves() {
 		// The one network it shares with the edge, and with no other app.
@@ -757,7 +761,7 @@ func waitReady(ctx context.Context, e *docker.Engine, container string, w manife
 		case !info.Running || info.Restarts > 0:
 			// Its last words say why, isolation included (a binary that
 			// wants a capability, a write to a read-only path).
-			words := lastWords(e.LogTail(ctx, container, 5))
+			words := lastWords(e.LogTail(ctx, container, 30))
 			return fmt.Errorf("the container exited (exit code %d, restarted %d times): %s", info.ExitCode, info.Restarts, words)
 		default:
 			ok, why := probeReady(ctx, e, container, info, w)
@@ -915,15 +919,40 @@ func EdgeConfig(ctx context.Context, store *state.Store) ([]byte, error) {
 // HookRoute is the path webhooks arrive on, as the edge routes it.
 const HookRoute = "/_quark/hook/"
 
-// lastWords picks the last line a container wrote, for an error message.
+// lastWords picks the line of a container's output that best says why it
+// stopped, for an error message: the last one that names an error, or else
+// the last one with words in it, not a stack trace's closing brace.
 func lastWords(logs string) string {
 	lines := strings.Split(strings.TrimSpace(logs), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
-		if l := strings.TrimSpace(lines[i]); l != "" {
+		if l := strings.TrimSpace(lines[i]); errorLine.MatchString(l) {
+			return l
+		}
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		if l := strings.TrimSpace(lines[i]); wordy.MatchString(l) {
 			return l
 		}
 	}
 	return "it wrote nothing; see quark logs"
+}
+
+var (
+	errorLine = regexp.MustCompile(`(?i)\b(error|exception|fatal|panic)\b.*[a-z]{3}`)
+	wordy     = regexp.MustCompile(`[A-Za-z]{3}`)
+)
+
+// showLastLines writes a container's last lines to a step's output, so the
+// record says why it failed after the container is gone.
+func showLastLines(ctx context.Context, e *docker.Engine, container, name string, out io.Writer) {
+	tail := strings.TrimSpace(e.LogTail(ctx, container, 30))
+	if tail == "" {
+		return
+	}
+	fmt.Fprintf(out, "%s's last lines:\n", name)
+	for _, line := range strings.Split(tail, "\n") {
+		fmt.Fprintf(out, "  %s\n", line)
+	}
 }
 
 // edgeConfig builds the edge's whole configuration from every active revision.
