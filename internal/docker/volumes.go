@@ -172,3 +172,24 @@ func cliOutput(ctx context.Context, stdin io.Reader, name string, args ...string
 	}
 	return text, nil
 }
+
+// RemoveVolume deletes a volume and reports whether there was one.
+func (e *Engine) RemoveVolume(ctx context.Context, name string) (bool, error) {
+	_, err := e.cli.VolumeRemove(ctx, name, client.VolumeRemoveOptions{Force: true})
+	if IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("remove volume %s: %w", name, err)
+	}
+	return true, nil
+}
+
+// RemoveNetwork deletes a network. Missing is fine.
+func (e *Engine) RemoveNetwork(ctx context.Context, name string) error {
+	_, err := e.cli.NetworkRemove(ctx, name, client.NetworkRemoveOptions{})
+	if err != nil && !IsNotFound(err) {
+		return fmt.Errorf("remove network %s: %w", name, err)
+	}
+	return nil
+}

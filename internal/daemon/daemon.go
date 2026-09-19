@@ -63,6 +63,7 @@ func Registry(store *state.Store, sec *secrets.Store, socket string) kernel.Regi
 	reg.Add(app.Rollback{Deploy: deploy})
 	reg.Add(app.GC{Store: store})
 	reg.Add(app.RunDefinition{Jobs: app.NewJobs(store, sec)})
+	reg.Add(app.Remove{Store: store})
 	return reg
 }
 

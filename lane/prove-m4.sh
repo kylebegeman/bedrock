@@ -32,6 +32,9 @@ run 'mkdir -p /srv/lane/archives'
 for f in "$stage"/archives/*; do put "$f" "/srv/lane/archives/$(basename "$f")"; done
 run 'ls -la /srv/lane/archives'
 
+echo "== start clean: remove the apps and their lane data if a previous run left them"
+for a in hello begamin dragon-writer; do run "quark remove $a --data --yes >/dev/null 2>&1 || true"; done
+
 echo "== secrets: the first set makes the machine's key"
 run 'printf alpha | quark secret set hello SECRET_WORD' 2>&1 | sed 's/AGE-SECRET-KEY-1[A-Z0-9]*/AGE-SECRET-KEY-1.../'
 run 'quark secret list hello; quark secret versions hello'
@@ -134,8 +137,11 @@ run "quark psql dragon-writer -- -tAc \"select (select count(*) from story_chapt
 chapters=$(run "quark psql dragon-writer -- -tAc 'select count(*) from story_chapters'")
 [[ "$chapters" == "36" ]] || { echo "M4 NOT proven: expected 36 chapters, got $chapters" >&2; exit 1; }
 
-echo "== a one-off command in the app's environment: the migration check"
-run 'quark run dragon-writer web -- npm run db:migrate:check' | quiet | tail -6
+echo "== a one-off command in the app's environment, with its database and secrets"
+run 'quark run dragon-writer web -- sh -c "psql \"\$DATABASE_URL\" -tAc \"select count(*) || chr(32) || chr(39)stories reachable from a one-off command as chr(39) || current_user\""' | quiet | tail -4
+echo "-- and the app's own migration check, whose verdict is the app's (the July database was migrated with drizzle-kit push, so its journal is short):"
+run 'quark run dragon-writer web -- npm run db:migrate:check' 2>&1 | quiet | grep -E "baseline|Pending|exited" || true
+run 'quark jobs dragon-writer web --limit 2'
 
 echo "== the cron workload ran"
 sleep 75

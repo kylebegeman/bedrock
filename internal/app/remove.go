@@ -1,0 +1,178 @@
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"time"
+
+	"github.com/kylebegeman/quark/internal/docker"
+	"github.com/kylebegeman/quark/internal/edge"
+	"github.com/kylebegeman/quark/internal/kernel"
+	"github.com/kylebegeman/quark/internal/manifest"
+	"github.com/kylebegeman/quark/internal/state"
+)
+
+// RemoveKind takes an app off the machine: its routes, containers, images
+// and network. Its data stays unless asked for.
+const RemoveKind = "app.remove"
+
+// Remove is the Definition for RemoveKind.
+type Remove struct {
+	Store *state.Store
+}
+
+// RemoveInput says which app, and whether its data goes too.
+type RemoveInput struct {
+	App string `json:"app"`
+	// Data also removes the app's volumes and database. There is no way
+	// back from that except a backup.
+	Data bool `json:"data,omitempty"`
+}
+
+// Kind implements kernel.Definition.
+func (Remove) Kind() string { return RemoveKind }
+
+// Plan implements kernel.Definition.
+func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, error) {
+	var in RemoveInput
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return nil, fmt.Errorf("remove input: %w", err)
+	}
+	if in.App == "" {
+		return nil, errors.New("which app?")
+	}
+	revs, err := r.Store.Revisions(ctx, in.App)
+	if err != nil {
+		return nil, err
+	}
+	if len(revs) == 0 {
+		return nil, fmt.Errorf("%s isn't on this machine", in.App)
+	}
+	var m manifest.Manifest
+	for _, rev := range revs {
+		if rev.Status == state.RevisionActive {
+			_ = json.Unmarshal(rev.Manifest, &m)
+		}
+	}
+	if m.App == "" {
+		_ = json.Unmarshal(revs[0].Manifest, &m)
+	}
+	store := r.Store
+	plan := &kernel.Plan{Target: in.App, Recovery: kernel.Resume}
+	plan.Steps = append(plan.Steps,
+		kernel.Step{
+			Name: "unroute", Change: "take the app's routes off the edge",
+			Apply: func(ctx context.Context, out io.Writer) error {
+				for _, rev := range revs {
+					if rev.Status == state.RevisionActive || rev.Status == state.RevisionPrevious {
+						if err := store.SetRevisionStatus(ctx, in.App, rev.ID, state.RevisionRetired); err != nil {
+							return err
+						}
+					}
+				}
+				cfg, err := edgeConfig(ctx, store)
+				if err != nil {
+					return err
+				}
+				admin := edge.NewAdmin()
+				if admin.Answers(ctx) {
+					if err := admin.Load(ctx, cfg); err != nil {
+						return err
+					}
+				}
+				fmt.Fprintln(out, "routes removed")
+				return nil
+			},
+		},
+		kernel.Step{
+			Name: "containers", Change: "stop and remove the app's containers and images",
+			Apply: func(ctx context.Context, out io.Writer) error {
+				e, err := docker.Connect(ctx)
+				if err != nil {
+					return err
+				}
+				defer e.Close()
+				owned, err := e.Owned(ctx)
+				if err != nil {
+					return err
+				}
+				for _, c := range owned {
+					if c.Labels[docker.LabelApp] != in.App {
+						continue
+					}
+					if c.Labels[docker.LabelWorkload] == postgresWorkload && !in.Data {
+						if err := e.Remove(ctx, c.Name, 30*time.Second); err != nil {
+							return err
+						}
+						fmt.Fprintf(out, "%s stopped; its volume stays\n", c.Name)
+						continue
+					}
+					if err := e.Remove(ctx, c.Name, 10*time.Second); err != nil {
+						return err
+					}
+					fmt.Fprintf(out, "%s removed\n", c.Name)
+				}
+				images, err := e.OwnedImages(ctx)
+				if err != nil {
+					return err
+				}
+				for _, img := range images {
+					if img.Labels[docker.LabelApp] == in.App {
+						_ = e.RemoveImage(ctx, img.ID)
+					}
+				}
+				return nil
+			},
+		},
+	)
+	if in.Data {
+		plan.Steps = append(plan.Steps, kernel.Step{
+			Name: "data", Change: "remove the app's volumes and database (no way back except a backup)",
+			Apply: func(ctx context.Context, out io.Writer) error {
+				e, err := docker.Connect(ctx)
+				if err != nil {
+					return err
+				}
+				defer e.Close()
+				names := []string{docker.VolumeName(in.App, postgresWorkload)}
+				if m.Data != nil {
+					for v := range m.Data.Volumes {
+						names = append(names, docker.VolumeName(in.App, v))
+					}
+				}
+				for _, v := range names {
+					removed, err := e.RemoveVolume(ctx, v)
+					if err != nil {
+						return err
+					}
+					if removed {
+						fmt.Fprintf(out, "%s removed\n", v)
+					}
+				}
+				return nil
+			},
+		})
+	}
+	plan.Steps = append(plan.Steps, kernel.Step{
+		Name: "forget", Change: "remove the app's network and forget it",
+		Apply: func(ctx context.Context, out io.Writer) error {
+			e, err := docker.Connect(ctx)
+			if err != nil {
+				return err
+			}
+			defer e.Close()
+			if err := e.RemoveNetwork(ctx, docker.AppNetwork(in.App)); err != nil {
+				return err
+			}
+			if err := store.RemoveApp(ctx, in.App); err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "%s forgotten\n", in.App)
+			return nil
+		},
+	})
+	return plan, nil
+}

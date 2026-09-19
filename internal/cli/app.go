@@ -203,6 +203,22 @@ func newPs(a *app) *cobra.Command {
 					return err
 				}
 				for _, name := range m.WorkloadNames() {
+					if m.Workloads[name].Kind == manifest.Cron {
+						status := "cron, never run"
+						if last, err := store.LastJobRun(ctx, rev.App, name); err == nil && last != nil {
+							status = "cron, last run " + last.StartedAt.Local().Format("15:04:05")
+							switch {
+							case last.FinishedAt.IsZero():
+								status += " running"
+							case last.Error != "":
+								status += " failed"
+							default:
+								status += " ok"
+							}
+						}
+						rows = append(rows, row{rev.App, name, rev.ID, "", status, rev.Images[name]})
+						continue
+					}
 					container := rev.Containers[name]
 					status := "missing"
 					if info, err := engine.Inspect(ctx, container); err == nil {
@@ -301,4 +317,22 @@ func (a *app) resolveContainer(ctx context.Context, appName, workload string) (s
 		return "", fmt.Errorf("%s has no workload named %s", appName, workload)
 	}
 	return container, nil
+}
+
+func newRemove(a *app) *cobra.Command {
+	var (
+		planOnly bool
+		data     bool
+	)
+	cmd := &cobra.Command{
+		Use:   "remove <app>",
+		Short: "Take an app off this machine. Its volumes and database stay unless --data is given.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.operate(cmd.Context(), apps.RemoveKind, apps.RemoveInput{App: args[0], Data: data}, planOnly)
+		},
+	}
+	cmd.Flags().BoolVar(&data, "data", false, "also remove the app's volumes and database; only a backup brings them back")
+	a.mutatingFlags(cmd, &planOnly)
+	return cmd
 }
