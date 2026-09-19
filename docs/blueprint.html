@@ -1,0 +1,279 @@
+<title>Ophelia 0.7 Blueprint</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+  :root {
+    --ground: #f4f5f1;
+    --surface: #ffffff;
+    --ink: #1b2129;
+    --muted: #59636e;
+    --rule: #d8ddd6;
+    --accent: #1f6f64;
+    --accent-soft: #e3efeb;
+    --amber: #9a5b10;
+    --amber-soft: #f6ead8;
+    --sans: "IBM Plex Sans", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --cond: "IBM Plex Sans Condensed", "Arial Narrow", "IBM Plex Sans", -apple-system, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #111519;
+      --surface: #171c21;
+      --ink: #e6e9ec;
+      --muted: #9aa4ae;
+      --rule: #2b323a;
+      --accent: #5cbfae;
+      --accent-soft: #16302c;
+      --amber: #e2a24f;
+      --amber-soft: #33261a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #111519;
+    --surface: #171c21;
+    --ink: #e6e9ec;
+    --muted: #9aa4ae;
+    --rule: #2b323a;
+    --accent: #5cbfae;
+    --accent-soft: #16302c;
+    --amber: #e2a24f;
+    --amber-soft: #33261a;
+  }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font: 400 16px/1.6 var(--sans);
+    padding-inline: 20px;
+    padding-block: 40px 72px;
+  }
+  main { max-width: 780px; margin: 0 auto; display: grid; gap: 56px; }
+  section { display: grid; gap: 16px; }
+  h1, h2, h3 { font-family: var(--cond); font-weight: 600; text-wrap: balance; margin: 0; line-height: 1.15; }
+  h1 { font-size: clamp(2.2rem, 6vw, 3.1rem); letter-spacing: -0.01em; }
+  h2 { font-size: 1.6rem; }
+  h3 { font-size: 1.15rem; font-weight: 500; }
+  p { margin: 0; max-width: 66ch; }
+  .eyebrow { font: 500 0.78rem/1.4 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
+  .lead { font-size: 1.15rem; color: var(--ink); }
+  .muted { color: var(--muted); }
+  code, .cmd { font-family: var(--mono); font-size: 0.88em; background: var(--accent-soft); color: var(--ink); padding: 0.08em 0.35em; border-radius: 4px; }
+  header { display: grid; gap: 14px; border-bottom: 1px solid var(--rule); padding-bottom: 32px; }
+
+  .fleet { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .box { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 16px; display: grid; gap: 8px; align-content: start; }
+  .box .role { font: 500 0.72rem/1.3 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  .box h3 { font-size: 1.1rem; }
+  .box .spec { font: 400 0.8rem/1.4 var(--mono); color: var(--muted); }
+  .box ul { margin: 0; padding-left: 1.1em; font-size: 0.93rem; display: grid; gap: 2px; }
+  .box.personal { border-color: var(--accent); }
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 0.94rem; }
+  th, td { text-align: left; vertical-align: top; padding: 12px 14px; border-bottom: 1px solid var(--rule); }
+  tr:last-child td { border-bottom: none; }
+  th { font: 500 0.74rem/1.3 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); background: var(--ground); }
+  td.what { color: var(--muted); width: 46%; }
+  td.what strong { color: var(--ink); font-weight: 500; }
+  td.ver { font-family: var(--mono); font-weight: 500; white-space: nowrap; color: var(--accent); }
+  .tag { display: inline-block; font: 500 0.7rem/1.5 var(--mono); letter-spacing: 0.04em; padding: 0 6px; border-radius: 4px; background: var(--amber-soft); color: var(--amber); margin-right: 6px; }
+
+  .groups { display: grid; gap: 28px; }
+  .group { display: grid; gap: 10px; }
+  .group ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; }
+  .group li { display: grid; gap: 2px; padding-left: 14px; border-left: 2px solid var(--rule); }
+  .group li b { font-weight: 600; }
+
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .split ul { margin: 0; padding-left: 1.1em; display: grid; gap: 6px; }
+
+  ol.decisions { margin: 0; padding-left: 1.4em; display: grid; gap: 14px; }
+  ol.decisions li::marker { font-family: var(--mono); color: var(--accent); }
+  ol.decisions .pick { display: block; color: var(--muted); font-size: 0.93rem; }
+
+  .sources { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 20px; display: grid; gap: 6px; }
+  .sources ul { margin: 0; padding-left: 1.1em; display: grid; gap: 4px; }
+
+  @media (max-width: 720px) {
+    .fleet { grid-template-columns: 1fr; }
+    .split { grid-template-columns: 1fr; }
+  }
+</style>
+
+<main>
+  <header>
+    <div class="eyebrow">Draft for decision · September 18, 2026</div>
+    <h1>Ophelia 0.7 Blueprint</h1>
+    <p class="lead">Rewrite Ophelia as one small Go program on each machine. It installs and runs everything the machine needs: builds, certificates, secrets, backups, health checks and alerts. Loom is where you see and approve it all.</p>
+    <p class="muted">This week's recovery and cleanup showed what's missing. The largest gaps are in watching, backing up and retiring things, not in deploying them. Most of the business-launch features were already specified in Ophelia's docs, but never built: moving apps between machines (major features 1 to 4) and builds from git with previews (strategy phase P4).</p>
+  </header>
+
+  <section>
+    <div class="eyebrow">The shape</div>
+    <h2>Two machines, one agent, one place to look</h2>
+    <div class="fleet">
+      <div class="box">
+        <div class="role">Your Mac</div>
+        <h3>Loom</h3>
+        <ul>
+          <li>See every machine and app</li>
+          <li>Approve deploys and restores</li>
+          <li>Get alerts</li>
+        </ul>
+      </div>
+      <div class="box personal">
+        <div class="role">Personal</div>
+        <h3>Hostinger</h3>
+        <div class="spec">4 fast vCPU · 16 GB · 200 GB NVMe</div>
+        <ul>
+          <li>Loom Core</li>
+          <li>Dragon Writer</li>
+          <li>kylebegeman.com and the Battered Baker</li>
+          <li>begam.in</li>
+          <li>Personal projects</li>
+        </ul>
+      </div>
+      <div class="box">
+        <div class="role">BrainTreeLabs</div>
+        <h3>OVH</h3>
+        <div class="spec">6 vCPU · 12 GB · 100 GB</div>
+        <ul>
+          <li>The launchpad: new products go live here</li>
+          <li>Products with traction graduate to their own machine</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">What 0.7 is</div>
+    <h2>One Go program, a fraction of the size</h2>
+    <p>0.7 is a single <code>ophelia</code> program that works as both the command-line tool and the service running on each machine. It replaces about 80,000 lines of Python, plus the 12,000 lines of glue Loom wraps around Ophelia today (<code>run-cloud-deploy.sh</code> alone is 3,441). There's one app format, one layout on disk and one way to install.</p>
+    <p>It keeps what worked: app manifests, the host service as the single authority on its machine, recorded releases with real rollback, Caddy at the edge, Docker underneath, and the outbound link to Loom.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Lessons from this week</div>
+    <h2>What happened, and what 0.7 does about it</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>What happened</th><th>What 0.7 does</th></tr></thead>
+        <tbody>
+          <tr><td class="what"><strong>Dragon Writer went down on July 5</strong>, and its backups stopped the same day. Nobody noticed for 75 days.</td><td>Every app gets health checks and a check that its backups are recent. Alerts reach Loom and your phone the same day.</td></tr>
+          <tr><td class="what"><strong>Olive's work survived</strong> only because Dragon Writer wrote its own backup script. Ophelia checks the off-site backup settings in an app's manifest but never runs them, so begam.in's settings do nothing.</td><td>Backups are built in, and they run. Any app with data gets scheduled off-site backups and a weekly restore drill that proves they open.</td></tr>
+          <tr><td class="what"><strong>Nobody knew what ran where:</strong> a forgotten Spaceship server, dead Vultr boxes, leftover apps.</td><td>A fleet inventory in Loom shows every machine, app and domain, with its last deploy, last backup and health.</td></tr>
+          <tr><td class="what"><strong>A fresh server needed Loom's own installer</strong>, because host setup was a deferred item on Ophelia's roadmap.</td><td><code>ophelia host setup</code> installs and maintains Docker, the firewall, swap, Caddy, a local image registry and OS updates. Running it again is always safe.</td></tr>
+          <tr><td class="what"><strong>Retiring two apps took an hour</strong> of hand-archiving, and the deletes still had to be done by hand.</td><td><code>ophelia app retire</code> archives an app's data and config to cold storage, verifies the archive, removes the app and cleans up its DNS.</td></tr>
+          <tr><td class="what"><strong>Loom carries workarounds</strong>: a 2,000-line rollback script that reaches into Ophelia's internals, a wait for the first certificate, and image-pull steps.</td><td>Rollback, certificate readiness and image handling are part of every deploy.</td></tr>
+          <tr><td class="what"><strong>A host-wide image prune</strong> could delete other apps' images, and image builds share memory with live sites.</td><td>Every image, volume and network belongs to one app. Each app gets resource limits, and builds run at low priority.</td></tr>
+          <tr><td class="what"><strong>Secrets were written straight into files</strong> and ended up inside backups.</td><td>An encrypted secrets store. Set and rotate secrets from the command line or Loom; they never appear in logs or on command lines.</td></tr>
+          <tr><td class="what"><strong>Both of your servers</strong> had updates waiting on a reboot.</td><td>Maintenance windows: install updates, reboot, and check that every app came back.</td></tr>
+          <tr><td class="what"><strong>A GitHub Actions budget</strong> blocked a release, and a machine can't build its own image, because production requires a registry digest.</td><td>Deploy without Actions: the machine builds from git and keeps images in its own registry, so a push can be a deploy.</td></tr>
+          <tr><td class="what"><strong>Ophelia has three places it keeps state</strong>, two web servers that both claim ports 80 and 443, and two APIs, one of them unauthenticated.</td><td>One layout on disk, one edge, and one authenticated API.</td></tr>
+          <tr><td class="what"><strong>Nothing tests Ophelia on a real server.</strong> Its CI has no Docker or VPS lane, and the watchdog bug only showed up in production.</td><td>Every release is proven on a machine that's wiped and rebuilt from scratch, running every workflow from setup to restore.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">New capabilities</div>
+    <h2>What becomes possible</h2>
+    <div class="groups">
+      <div class="group">
+        <h3>The BrainTreeLabs launchpad</h3>
+        <ul>
+          <li><b><code>ophelia launch</code></b><span>Take a product from a repo to live in one step: domain, certificate, database, backups and health checks.</span></li>
+          <li><b>Preview deploys</b><span>Every branch gets its own throwaway subdomain, removed when the branch merges.</span></li>
+          <li><b>Traction signals</b><span>Requests, resource use and storage per product over time: the evidence for deciding what graduates.</span></li>
+          <li><b><code>ophelia graduate</code></b><span>Move a product and its data to its own machine with a restore drill, a cutover and a way back. These are Ophelia's specified but unbuilt major features 1 to 4.</span></li>
+          <li><b>Forge to launchpad</b><span>Products built in Loom's Forge deploy straight onto this machine.</span></li>
+        </ul>
+      </div>
+      <div class="group">
+        <h3>Every app</h3>
+        <ul>
+          <li><b>Managed Postgres</b><span>Its own database and role, with backups and restore drills. SQLite apps get continuous off-site copies.</span></li>
+          <li><b>Jobs and one-off tasks</b><span>Scheduled jobs, migrations and admin commands, such as Loom's owner code, without improvised containers.</span></li>
+          <li><b>DNS that follows the app</b><span>Cloudflare records are created, checked and removed along with the app.</span></li>
+          <li><b>Logs and metrics</b><span>For each app, with bounded log sizes, streamed to Loom. No renderer sets log rotation today.</span></li>
+        </ul>
+      </div>
+      <div class="group">
+        <h3>Every machine</h3>
+        <ul>
+          <li><b>Machines watch each other</b><span>Each box checks the other's apps from outside, so a dead machine can't hide its own outage.</span></li>
+          <li><b>Capacity warnings</b><span>CPU, memory and disk headroom, with a warning well before a disk fills.</span></li>
+          <li><b>Joins Loom and upgrades itself</b><span>Enrollment through Loom's fleet control, and self-upgrades that roll back if the new version fails.</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Keep and drop</div>
+    <h2>What carries over</h2>
+    <div class="split">
+      <div>
+        <h3>Keep the ideas</h3>
+        <ul>
+          <li>App manifests, in one new format, with a converter for today's files</li>
+          <li>One service per machine as the authority</li>
+          <li>Recorded releases, receipts and real rollback</li>
+          <li>Caddy at the edge, Docker underneath</li>
+          <li>The outbound, mutually authenticated link to Loom</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Drop the baggage</h3>
+        <ul>
+          <li>Python and its per-release virtual environments</li>
+          <li>The launcher chain behind the 0.6.18 watchdog bug</li>
+          <li>The split between the v1 and v2 layouts and formats, the three state locations and the second web server</li>
+          <li>The unauthenticated local HTTP API (<code>ship api serve</code>)</li>
+          <li>Loom's deploy glue: the deploy script, the rollback script, the data-authority scripts and the Cloudflare origin copy</li>
+          <li>Features nothing uses (to confirm feature by feature)</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Release path</div>
+    <h2>From 0.7 to 1.0</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Release</th><th>Goal</th><th>Contents</th></tr></thead>
+        <tbody>
+          <tr><td class="ver">0.7</td><td>Run the personal machine</td><td>Host setup; web, worker, static, scheduled and one-off workloads; builds from git with a local registry; certificate readiness; secrets store; backups with restore drills; health checks and alerts; deploy and rollback; retire. Loom installs through it. A test lane that wipes and rebuilds a real machine.</td></tr>
+          <tr><td class="ver">0.8</td><td>See everything</td><td>Fleet view in Loom (inventory, health, logs, backups, deploys), DNS automation, managed Postgres, metrics.</td></tr>
+          <tr><td class="ver">0.9</td><td>Launch and graduate</td><td>Launch, preview deploys, traction signals, graduate, Forge integration, machines watching each other, maintenance windows.</td></tr>
+          <tr><td class="ver">1.0</td><td>Keep the promise</td><td>A stable app format and API, upgrade guarantees, a security review, docs.</td></tr>
+          <tr><td class="ver">Later</td><td>AI workloads</td><td>The strategy's phase P5: agent and model workloads as a first-class app shape.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Decisions for you</div>
+    <h2>Five calls before building</h2>
+    <ol class="decisions">
+      <li>Build it in the same repository under the same name, or start a new one?<span class="pick">My pick: the same repo and name, with the Python code archived at 0.6.x.</span></li>
+      <li>Where should alerts go: Loom push notifications, email, or a phone service such as Pushover?<span class="pick">My pick: Loom first, with email as a fallback.</span></li>
+      <li>Should Ophelia manage your Cloudflare DNS records using a zone-scoped API token?<span class="pick">My pick: yes, for begam.in and each product domain.</span></li>
+      <li>Where should backups go: Backblaze B2 for every app, with a bucket per app or one bucket with a folder per app?<span class="pick">My pick: a bucket per app, so an app's keys can't reach another app's backups.</span></li>
+      <li>Build 0.7 before moving the personal apps, or move them now on 0.6 and migrate later?<span class="pick">My pick: build 0.7 first, and bring Dragon Writer back on today's OVH box in the meantime.</span></li>
+    </ol>
+  </section>
+
+  <footer class="sources">
+    <div class="eyebrow">Sources</div>
+    <ul>
+      <li>Ophelia <code>docs/ROADMAP.md</code>, <code>docs/product/ophelia-platform-strategy.md</code>, <code>docs/features/portability-major-features.md</code>, <code>docs/daemon.md</code> and <code>docs/manifest-spec.md</code> on <code>next</code> (commit dc358e5), checked against <code>src/</code></li>
+      <li>Loom <code>deploy/ophelia/</code> (58 files, about 12,000 lines) and Ledger 2950, 2952, 2955 and 2965</li>
+      <li>The read-only server audit and Dragon Writer recovery on September 18, 2026</li>
+    </ul>
+  </footer>
+</main>

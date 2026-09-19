@@ -1,0 +1,281 @@
+<title>Quark 0.7 Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+  :root {
+    --ground: #f4f5f1; --surface: #ffffff; --ink: #1b2129; --muted: #59636e; --rule: #d8ddd6;
+    --accent: #1f6f64; --accent-soft: #e3efeb; --amber: #9a5b10; --amber-soft: #f6ead8;
+    --sans: "IBM Plex Sans", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --cond: "IBM Plex Sans Condensed", "Arial Narrow", "IBM Plex Sans", -apple-system, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #111519; --surface: #171c21; --ink: #e6e9ec; --muted: #9aa4ae; --rule: #2b323a;
+      --accent: #5cbfae; --accent-soft: #16302c; --amber: #e2a24f; --amber-soft: #33261a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #111519; --surface: #171c21; --ink: #e6e9ec; --muted: #9aa4ae; --rule: #2b323a;
+    --accent: #5cbfae; --accent-soft: #16302c; --amber: #e2a24f; --amber-soft: #33261a;
+  }
+  body { background: var(--ground); color: var(--ink); font: 400 16px/1.6 var(--sans); padding-inline: 20px; padding-block: 40px 72px; }
+  main { max-width: 820px; margin: 0 auto; display: grid; gap: 52px; }
+  section { display: grid; gap: 16px; }
+  h1, h2, h3 { font-family: var(--cond); font-weight: 600; text-wrap: balance; margin: 0; line-height: 1.15; }
+  h1 { font-size: clamp(2.2rem, 6vw, 3.1rem); letter-spacing: -0.01em; }
+  h2 { font-size: 1.7rem; }
+  h3 { font-size: 1.15rem; }
+  p { margin: 0; max-width: 68ch; }
+  a { color: var(--accent); }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .eyebrow { font: 500 0.78rem/1.4 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
+  .lead { font-size: 1.15rem; }
+  .muted { color: var(--muted); }
+  code { font-family: var(--mono); font-size: 0.88em; background: var(--accent-soft); color: var(--ink); padding: 0.08em 0.35em; border-radius: 4px; }
+  header { display: grid; gap: 14px; border-bottom: 1px solid var(--rule); padding-bottom: 32px; }
+  ul.rules { margin: 0; padding-left: 1.1em; display: grid; gap: 6px; max-width: 68ch; }
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 0.94rem; }
+  th, td { text-align: left; vertical-align: top; padding: 11px 14px; border-bottom: 1px solid var(--rule); }
+  tr:last-child td { border-bottom: none; }
+  th { font: 500 0.74rem/1.3 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); background: var(--ground); }
+  td.k { font-family: var(--mono); font-weight: 500; white-space: nowrap; color: var(--accent); }
+  td.items { font-family: var(--mono); font-size: 0.85rem; color: var(--muted); }
+
+  .milestones { display: grid; gap: 12px; }
+  .ms { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 16px 18px; display: grid; gap: 10px; }
+  .ms-head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline; }
+  .ms-head .id { font: 500 0.95rem/1.4 var(--mono); color: var(--accent); }
+  .ms-head h3 { flex: 1 1 auto; }
+  .chip { font: 500 0.7rem/1.6 var(--mono); letter-spacing: 0.04em; padding: 0 7px; border-radius: 4px; border: 1px solid var(--rule); color: var(--muted); background: var(--ground); }
+  .chip.items { border-style: dashed; }
+  dl { margin: 0; display: grid; grid-template-columns: 6em 1fr; gap: 4px 14px; font-size: 0.95rem; }
+  dt { font: 500 0.72rem/1.9 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+  dd { margin: 0; max-width: 64ch; }
+
+  ol.steps { margin: 0; padding-left: 1.5em; display: grid; gap: 12px; max-width: 68ch; }
+  ol.steps li::marker { font-family: var(--mono); color: var(--accent); }
+  .who { display: inline-block; font: 500 0.68rem/1.6 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; padding: 0 6px; border-radius: 4px; margin-right: 6px; vertical-align: 2px; }
+  .who.kyle { background: var(--amber-soft); color: var(--amber); }
+  .who.me { background: var(--accent-soft); color: var(--accent); }
+
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .two ul { margin: 0; padding-left: 1.1em; display: grid; gap: 6px; font-size: 0.95rem; }
+  .box { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 16px; display: grid; gap: 10px; align-content: start; }
+
+  .sources { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 20px; display: grid; gap: 6px; }
+  .sources ul { margin: 0; padding-left: 1.1em; display: grid; gap: 4px; }
+
+  @media (max-width: 720px) {
+    .two { grid-template-columns: 1fr; }
+    dl { grid-template-columns: 1fr; gap: 2px; }
+    dt { margin-top: 8px; }
+  }
+</style>
+
+<main>
+  <header>
+    <div class="eyebrow">Plan for execution · September 19, 2026</div>
+    <h1>Quark 0.7 Plan</h1>
+    <p class="lead">Thirty-four locked items, in an order where every milestone leaves the test bed running something real. 0.7 runs the personal machine. 0.8 wires Loom. 0.9 opens the launchpad. 1.0 keeps the promise.</p>
+    <p class="muted">Item numbers refer to <a href="https://claude.ai/artifact/8CkxxhsT75mKX5EB8t7z8H">Quark Ideas</a>. Dropped: 5, 13 and 17. Background is in the <a href="https://claude.ai/artifact/BUCyRXjPV4bqHRm2p5v6U6">blueprint</a>.</p>
+  </header>
+
+  <section>
+    <div class="eyebrow">Ground rules</div>
+    <h2>How the work runs</h2>
+    <ul class="rules">
+      <li>One binary. A milestone counts only when the test lane (36) has proven it on a machine wiped and rebuilt for the purpose.</li>
+      <li>Python Ophelia is frozen at 0.6.x. It gets only the fixes needed to keep today's production up until moving day.</li>
+      <li>Every operation leaves a receipt. Secrets never appear in arguments, logs, receipts or backups.</li>
+      <li>The old machines keep running until each replacement is live and checked. Kyle runs the permanent deletes and the DNS switches; the plan says when.</li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="eyebrow">Technical choices</div>
+    <h2>Decided, and changeable if a milestone proves one wrong</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Area</th><th>Choice</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td class="k">Language</td><td>Go, current stable. One module, <code>github.com/kylebegeman/quark</code>. Static builds for linux/amd64 (the machines) and darwin/arm64 (the Mac CLI).</td><td>One file per machine, no runtime to install.</td></tr>
+          <tr><td class="k">CLI</td><td>cobra. Every command takes <code>--json</code>; every mutating command takes <code>--plan</code> and <code>--yes</code>.</td><td>Scripts and agents get the same surface people do.</td></tr>
+          <tr><td class="k">State</td><td>SQLite through a pure-Go driver, WAL mode, one file: <code>/var/lib/quark/state.db</code>.</td><td>A crash-safe journal without cgo, so the binary stays static.</td></tr>
+          <tr><td class="k">Containers</td><td>The Docker Engine API through the official Go client. Never the CLI.</td><td>Typed calls and streaming, no output parsing.</td></tr>
+          <tr><td class="k">Edge</td><td>Caddy in a container, configured through its admin API. Quark owns the whole config.</td><td>Atomic traffic switches, readable certificate state, no snippet files.</td></tr>
+          <tr><td class="k">Builds</td><td>BuildKit through the Engine API, into a local registry on <code>127.0.0.1:5000</code>, pinned by digest, at low priority.</td><td>Builds on the machine; no Actions in the path.</td></tr>
+          <tr><td class="k">Backups</td><td>restic, a pinned binary Quark installs; one repository per app in its own B2 bucket.</td><td>Encrypted, deduplicated, proven. Drills restore from it.</td></tr>
+          <tr><td class="k">Secrets</td><td>An age-sealed store; the host key in <code>/etc/quark</code>, a recovery key shown once.</td><td>Small and auditable.</td></tr>
+          <tr><td class="k">DNS</td><td>The Cloudflare API with a zone-scoped token.</td><td>Records follow the manifest.</td></tr>
+          <tr><td class="k">Service</td><td>A systemd unit with <code>Type=notify</code>; the daemon's own loop pings the watchdog.</td><td>Ends the 0.6.18 bug class.</td></tr>
+          <tr><td class="k">Loom link</td><td>Outbound mutual TLS, signed scoped commands, sequence replay (0.8).</td><td>The protocol shape Ophelia proved, without the fleet-control baggage.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Release map</div>
+    <h2>What ships when</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Release</th><th>Goal</th><th>Items</th></tr></thead>
+        <tbody>
+          <tr><td class="k">0.7</td><td>Run the personal machine. All four apps and Loom on Quark, backups and alerts on, OVH set up empty as the business machine.</td><td class="items">20 21 22 23 24 25 26 27 28 29 33a 36 37 · 1 2 3 4 6 7 8 9 10 11 12 14 15 16 18 19</td></tr>
+          <tr><td class="k">0.8</td><td>Wire Loom. Enrollment, the fleet view, alerts as push, the Core's lifecycle from the app, agent approvals, Loom sign-in for routes.</td><td class="items">32 33b 34 35 · 25 to push, 19 in the fleet view</td></tr>
+          <tr><td class="k">0.9</td><td>Open the launchpad. Launch, previews, graduate.</td><td class="items">30 31</td></tr>
+          <tr><td class="k">1.0</td><td>Keep the promise. Stable manifest and API, upgrade guarantees, a security review, docs.</td><td class="items"></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted">33 splits: 33a (the Core runs as Quark apps and <code>loom core create</code> drives Quark) is needed for moving day; 33b (upgrade, rollback and backups from inside the app) needs the Loom link. Alerts are email in 0.7 and push once the link exists.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">0.7 milestones</div>
+    <h2>Eight milestones, each one leaving something live</h2>
+    <div class="milestones">
+
+      <div class="ms">
+        <div class="ms-head"><span class="id">M0</span><h3>Repo and lane</h3><span class="chip">Small</span><span class="chip items">36</span></div>
+        <dl>
+          <dt>Builds</dt><dd>The repo renamed to <code>quark</code>; the Python code archived on a branch <code>ophelia-0.6</code> and a tag; a Go scaffold with build, vet and test in CI; the test lane, which rents an hourly VM (or resets the Hostinger box), installs the binary and runs a smoke; the blueprint, ideas and this plan moved into <code>docs/</code>.</dd>
+          <dt>Proof</dt><dd><code>quark version</code> runs on a fresh VM the lane created.</dd>
+        </dl>
+      </div>
+
+      <div class="ms">
+        <div class="ms-head"><span class="id">M1</span><h3>Kernel</h3><span class="chip">Large</span><span class="chip items">20 · 3 · 4</span></div>
+        <dl>
+          <dt>Builds</dt><dd>The operation journal (plan, steps, receipt, leases), the renderer, <code>--plan</code>, <code>quark history</code>, the Unix-socket API, the systemd unit with its watchdog.</dd>
+          <dt>Proof</dt><dd>An operation killed halfway resumes or compensates on restart, and <code>history</code> shows exactly what happened.</dd>
+        </dl>
+      </div>
+
+      <div class="ms">
+        <div class="ms-head"><span class="id">M2</span><h3>Host</h3><span class="chip">Medium</span><span class="chip items">21 · 1 · 16 · 18 · 9</span></div>
+        <dl>
+          <dt>Builds</dt><dd><code>host setup</code> and <code>reconcile</code>, <code>doctor</code>, <code>host maintain</code>, self-upgrade with rollback and rings, owned-only <code>gc</code>.</dd>
+          <dt>Proof</dt><dd>Fresh Ubuntu to a green <code>doctor</code>; <code>maintain</code> reboots and everything returns; an upgrade to a deliberately broken build rolls back; <code>gc</code> removes only labeled leftovers.</dd>
+        </dl>
+      </div>
+
+      <div class="ms">
+        <div class="ms-head"><span class="id">M3</span><h3>First apps</h3><span class="chip">Large</span><span class="chip items">22 · 23 · 2 · 7 · 8 · 6</span></div>
+        <dl>
+          <dt>Builds</dt><dd>The manifest and its converter, static and web workloads, the Caddy edge, builds into the registry, certificate readiness, verify checks, readable names, the everyday commands, log and resource defaults, real rollback.</dd>
+          <dt>Live</dt><dd>kylebegeman.com and the Battered Baker (its image loaded from the Dropbox archive) on a test hostname.</dd>
+          <dt>Proof</dt><dd>Deploy, verify, roll back, each with a receipt; a wrong DNS record is reported in plain words.</dd>
+        </dl>
+      </div>
+
+      <div class="ms">
+        <div class="ms-head"><span class="id">M4</span><h3>Data</h3><span class="chip">Large</span><span class="chip items">26 · 27 · 10 · 12</span></div>
+        <dl>
+          <dt>Builds</dt><dd>The secrets store, managed Postgres and object storage, cron and <code>run</code>, deploy from a backup.</dd>
+          <dt>Live</dt><dd>begamin with its data volume from the archive, and Dragon Writer on Postgres 16 restored from the July 5 backup, on test hostnames.</dd>
+          <dt>Proof</dt><dd>Olive's 24 chapters count; <code>quark run</code> executes a migration; a rollback restores the previous secrets version.</dd>
+        </dl>
+      </div>
+
+      <div class="ms">
+        <div class="ms-head"><span class="id">M5</span><h3>Backups and watching</h3><span class="chip">Large</span><span class="chip items">24 · 25 · 14 · 15 · 19</span></div>
+        <dl>
+          <dt>Builds</dt><dd>Backups to a bucket per app, freshness, restore drills, health checks, alerts by email, the app registry, integration credentials, traffic and resource signals.</dd>
+          <dt>Proof</dt><dd>Each app backs up on schedule; a drill restores and verifies; a killed container produces one email within minutes, and the other machine's external check reports it too.</dd>
+        </dl>
+      </div>
+
+      <div class="ms">
+        <div class="ms-head"><span class="id">M6</span><h3>DNS, isolation, git</h3><span class="chip">Medium</span><span class="chip items">11 · 28 · 29</span></div>
+        <dl>
+          <dt>Builds</dt><dd>Cloudflare records from the manifest, isolation defaults and the exposure report, push-to-deploy.</dd>
+          <dt>Proof</dt><dd><code>git push quark main</code> deploys begamin; its record appears and disappears with the app; no app can reach another's network.</dd>
+        </dl>
+      </div>
+
+      <div class="ms">
+        <div class="ms-head"><span class="id">M7</span><h3>Loom Core and moving day</h3><span class="chip">Large</span><span class="chip items">33a · 37</span></div>
+        <dl>
+          <dt>Builds</dt><dd>One Loom manifest (Core, processor, Runner, data) replacing the four Ophelia manifests and the data-authority scripts; <code>loom core create</code> keeps its host-key pinning, DNS check and owner code and drives Quark for the rest; the moving-day tooling.</dd>
+          <dt>Proof</dt><dd>A Core created on the test bed passes CORE-02's verification and the Mac connects to it. Then moving day, below.</dd>
+        </dl>
+      </div>
+
+    </div>
+    <p class="muted">0.7 ships when the personal machine runs all four apps and Loom on Quark with backups and alerts on, and OVH is set up empty as the business machine.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Moving day</div>
+    <h2>The sequence, and who does each step</h2>
+    <ol class="steps">
+      <li><span class="who kyle">Kyle</span>Reinstall the Hostinger box with Ubuntu 24.04 and the <code>bagel-box-deploy</code> key. <span class="who me">Claude</span>Run <code>quark host setup</code>.</li>
+      <li><span class="who me">Claude</span>Deploy kylebegeman.com, begamin and Dragon Writer from the Dropbox archives on test hostnames. Run a drill for each. Check every page.</li>
+      <li><span class="who kyle">Kyle</span>Switch the three sites' DNS records, one at a time. <span class="who me">Claude</span>Verify each, then stop the OVH copies. Nothing is deleted yet.</li>
+      <li><span class="who me">Claude</span>Create a Core on a test hostname, walk the first run, tear it down. Then, in one sitting: take the old Core's final archive with its services stopped, to Dropbox, and stop it. <span class="who kyle">Kyle</span>Point <code>core.begam.in</code> at Hostinger. <span class="who me">Claude</span>Create the final Core at <code>core.begam.in</code>. <span class="who kyle">Kyle</span>Enroll the Mac with the owner code and your passkey. The hostname has to be final before the Mac enrolls, because device secrets are keyed to it. Loom is down for the few hours in between. That's the fresh start.</li>
+      <li><span class="who me">Claude</span>Take the final OVH archive. <span class="who kyle">Kyle</span>Reinstall OVH. <span class="who me">Claude</span>Run <code>quark host setup</code> as the business machine. Until 0.9, products deploy there with <code>quark deploy</code>.</li>
+      <li><span class="who kyle">Kyle</span>Delete the read-only Backblaze key, and retire the Spaceship servers whenever you're ready.</li>
+    </ol>
+  </section>
+
+  <section>
+    <div class="eyebrow">Loom</div>
+    <h2>What changes on Loom's side</h2>
+    <div class="two">
+      <div class="box">
+        <h3>In 0.7</h3>
+        <ul>
+          <li><code>packages/core-provisioning</code> keeps connect, host-key trust, the DNS check and the owner code; its prepare, build, manifest and deploy steps become calls to <code>quark</code>.</li>
+          <li><code>deploy/ophelia/</code> (58 files, about 12,000 lines) is deleted after moving day, along with the Ophelia pin in <code>toolchain.json</code>.</li>
+          <li>The Runner is declared as a privileged workload in the Loom manifest.</li>
+          <li>CORE-05, the fresh start, is moving day.</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>In 0.8</h3>
+        <ul>
+          <li>CORE-03 (set up a new Core from the app) and CORE-04 (upgrade, rollback, status and backups from the app) build on Quark's API and the enrollment link.</li>
+          <li>A Fleet view: machines, apps, health, deploys, backups, drills, alerts, logs, approvals.</li>
+          <li>Alerts become push notifications.</li>
+          <li>Two Core endpoints for Loom sign-in on routes (35), and approval records for agent-run operations (34).</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Risks</div>
+    <h2>What could go wrong, and the answer</h2>
+    <ul class="rules">
+      <li><b>A lot of build before the payoff.</b> Each milestone leaves something live on the test bed, and the old machines stay up until moving day, so nothing is at risk while it's built.</li>
+      <li><b>Quark owns Caddy's whole config</b>, so every site on a machine must be a Quark app. On these two machines that's true by design.</li>
+      <li><b>Postgres major upgrades.</b> 0.7 answers with dump and restore through the backup path; in-place upgrades come later.</li>
+      <li><b>The Runner needs privileges.</b> Isolation (28) lands before previews from anyone else's branches, which is 0.9, not before your own.</li>
+      <li><b>The Loom link (32) is the largest Loom-side item.</b> 0.7 doesn't wait on it; alerts go by email until it exists.</li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="eyebrow">Next</div>
+    <h2>First steps</h2>
+    <ol class="steps">
+      <li><span class="who kyle">Kyle</span>Give the go for the repo rename. GitHub redirects the old name, so Loom's current pins keep working.</li>
+      <li><span class="who me">Claude</span>M0: the Go scaffold, CI and the test lane on an hourly VM.</li>
+      <li><span class="who me">Claude</span>M1: the kernel.</li>
+    </ol>
+  </section>
+
+  <footer class="sources">
+    <div class="eyebrow">Sources</div>
+    <ul>
+      <li><a href="https://claude.ai/artifact/8CkxxhsT75mKX5EB8t7z8H">Quark Ideas</a> (items 1 to 37) and the <a href="https://claude.ai/artifact/BUCyRXjPV4bqHRm2p5v6U6">blueprint</a></li>
+      <li>Loom's core-provisioning charter (CORE-01 to CORE-06), <code>packages/core-provisioning/</code> and <code>deploy/ophelia/</code></li>
+      <li>The September 18 server audit and the Dragon Writer recovery</li>
+    </ul>
+  </footer>
+</main>

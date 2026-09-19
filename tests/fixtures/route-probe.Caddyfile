@@ -1,5 +1,0 @@
-route-probe.ophelia.test {
-  tls internal
-  respond /ophelia "authenticated boundary" 401
-  respond "healthy" 200
-}

@@ -1,9 +1,6 @@
+/bin/
+/dist/
+/lane/known_hosts
+*.test
+coverage.out
 .DS_Store
-.venv/
-__pycache__/
-*.pyc
-*.egg-info/
-build/
-dist/
-ophelia_runtime/
-_worktrees/

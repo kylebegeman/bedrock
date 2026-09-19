@@ -1,1 +1,0 @@
-"""Packaged Ophelia runtime resources."""

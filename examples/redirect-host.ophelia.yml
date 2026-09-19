@@ -1,8 +1,0 @@
-version: 1
-app: portfolio-www
-kind: redirect
-redirect_to: https://portfolio.example.com{uri}
-redirect_status: 308
-
-routes:
-  - domain: www.portfolio.example.com

@@ -1,0 +1,634 @@
+<title>Quark Ideas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+  :root {
+    --ground: #f4f5f1;
+    --surface: #ffffff;
+    --ink: #1b2129;
+    --muted: #59636e;
+    --rule: #d8ddd6;
+    --accent: #1f6f64;
+    --accent-soft: #e3efeb;
+    --amber: #9a5b10;
+    --amber-soft: #f6ead8;
+    --sans: "IBM Plex Sans", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --cond: "IBM Plex Sans Condensed", "Arial Narrow", "IBM Plex Sans", -apple-system, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #111519; --surface: #171c21; --ink: #e6e9ec; --muted: #9aa4ae; --rule: #2b323a;
+      --accent: #5cbfae; --accent-soft: #16302c; --amber: #e2a24f; --amber-soft: #33261a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #111519; --surface: #171c21; --ink: #e6e9ec; --muted: #9aa4ae; --rule: #2b323a;
+    --accent: #5cbfae; --accent-soft: #16302c; --amber: #e2a24f; --amber-soft: #33261a;
+  }
+  body { background: var(--ground); color: var(--ink); font: 400 16px/1.6 var(--sans); padding-inline: 20px; padding-block: 40px 72px; }
+  main { max-width: 820px; margin: 0 auto; display: grid; gap: 56px; }
+  h1, h2, h3 { font-family: var(--cond); font-weight: 600; text-wrap: balance; margin: 0; line-height: 1.15; }
+  h1 { font-size: clamp(2.2rem, 6vw, 3.1rem); letter-spacing: -0.01em; }
+  h2 { font-size: 1.7rem; }
+  h3 { font-size: 1.2rem; font-weight: 600; }
+  p { margin: 0; max-width: 68ch; }
+  a { color: var(--accent); }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .eyebrow { font: 500 0.78rem/1.4 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
+  .lead { font-size: 1.15rem; }
+  .muted { color: var(--muted); }
+  code { font-family: var(--mono); font-size: 0.88em; background: var(--accent-soft); color: var(--ink); padding: 0.08em 0.35em; border-radius: 4px; }
+  header { display: grid; gap: 14px; border-bottom: 1px solid var(--rule); padding-bottom: 32px; }
+  header ul { margin: 0; padding-left: 1.1em; color: var(--muted); max-width: 68ch; }
+
+  .index { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .index h3 { font-size: 1rem; color: var(--muted); font-weight: 500; margin-bottom: 8px; }
+  .index ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 0.93rem; }
+  .index li { display: grid; grid-template-columns: 2.2em 1fr; gap: 6px; }
+  .index li span { font-family: var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+  .index a { text-decoration: none; color: var(--ink); }
+  .index a:hover { text-decoration: underline; color: var(--accent); }
+
+  section.group { display: grid; gap: 20px; }
+  section.group > p { color: var(--muted); }
+  .items { display: grid; gap: 14px; }
+  .item { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 18px 20px; display: grid; gap: 14px; scroll-margin-top: 16px; }
+  .item-head { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start; }
+  .num { font: 500 0.95rem/1.5 var(--mono); color: var(--accent); font-variant-numeric: tabular-nums; padding-top: 2px; }
+  .item-head h3 { margin: 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .chip { font: 500 0.7rem/1.6 var(--mono); letter-spacing: 0.04em; padding: 0 7px; border-radius: 4px; border: 1px solid var(--rule); color: var(--muted); background: var(--ground); }
+  .chip.impact-high { border-color: var(--accent); color: var(--accent); background: var(--surface); }
+  .chip.impact-top { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--accent); }
+  .chip.cx-massive { background: var(--amber-soft); border-color: var(--amber-soft); color: var(--amber); }
+  dl { margin: 0; display: grid; grid-template-columns: 7.5em 1fr; gap: 6px 14px; font-size: 0.95rem; }
+  dt { font: 500 0.72rem/1.9 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+  dd { margin: 0; max-width: 62ch; }
+
+  .closing { display: grid; gap: 18px; }
+  .closing-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .box { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 16px; display: grid; gap: 10px; align-content: start; }
+  .box.lead-box { border-color: var(--accent); }
+  .box h3 { font-size: 1.05rem; }
+  .box ol { margin: 0; padding-left: 1.4em; display: grid; gap: 6px; font-size: 0.93rem; }
+  .box li::marker { font-family: var(--mono); color: var(--accent); }
+  .box .why { color: var(--muted); font-size: 0.88rem; }
+
+  .sources { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 20px; display: grid; gap: 6px; }
+  .sources ul { margin: 0; padding-left: 1.1em; display: grid; gap: 4px; }
+
+  @media (max-width: 720px) {
+    .index { grid-template-columns: 1fr; }
+    .closing-grid { grid-template-columns: 1fr; }
+    dl { grid-template-columns: 1fr; gap: 2px; }
+    dt { margin-top: 8px; }
+    .item-head { grid-template-columns: 1fr; gap: 4px; }
+  }
+</style>
+
+<main>
+  <header>
+    <div class="eyebrow">Exploration for review · September 19, 2026</div>
+    <h1>Quark Ideas</h1>
+    <p class="lead">Thirty-seven ways Quark, the Go rewrite of Ophelia, could be better than a straight port. Nothing here is committed. Review each one, ask, push back, and pick.</p>
+    <ul>
+      <li>Items 1 to 19 are smaller improvements; 20 to 37 are systems and refactors.</li>
+      <li>Complexity: Small, Medium, Large, Massive. Impact: Low, Medium, High, Transformational.</li>
+      <li>Most items trace to something that went wrong this week or to a plan Ophelia wrote down and never built. The <a href="https://claude.ai/artifact/BUCyRXjPV4bqHRm2p5v6U6">blueprint</a> has that background.</li>
+    </ul>
+  </header>
+
+  <section>
+    <div class="eyebrow">Index</div>
+    <div class="index">
+      <div>
+        <h3>Minor features and improvements</h3>
+        <ol>
+          <li><span>1</span><a href="#i1"><code>quark doctor</code></a></li>
+          <li><span>2</span><a href="#i2">Everyday commands with readable names</a></li>
+          <li><span>3</span><a href="#i3">One line per step, a receipt per operation</a></li>
+          <li><span>4</span><a href="#i4"><code>--plan</code> on everything that changes something</a></li>
+          <li><span>5</span><a href="#i5">Manifest schema for your editor, and <code>quark check</code></a></li>
+          <li><span>6</span><a href="#i6">Verification checks in the manifest</a></li>
+          <li><span>7</span><a href="#i7">Certificate readiness inside the deploy</a></li>
+          <li><span>8</span><a href="#i8">Bounded logs, resource limits, low-priority builds</a></li>
+          <li><span>9</span><a href="#i9">Garbage collection that only touches what Quark owns</a></li>
+          <li><span>10</span><a href="#i10">Scheduled jobs and one-off tasks as workloads</a></li>
+          <li><span>11</span><a href="#i11">Cloudflare DNS that follows the app</a></li>
+          <li><span>12</span><a href="#i12">Deploy from a backup</a></li>
+          <li><span>13</span><a href="#i13">Bandwidth-aware backups and drills</a></li>
+          <li><span>14</span><a href="#i14">App registry with purpose and provenance</a></li>
+          <li><span>15</span><a href="#i15">Integration credentials in one place</a></li>
+          <li><span>16</span><a href="#i16">Maintenance windows</a></li>
+          <li><span>17</span><a href="#i17">Environments and promotion</a></li>
+          <li><span>18</span><a href="#i18">One-line install, self-upgrade with rings</a></li>
+          <li><span>19</span><a href="#i19">Traffic and resource signals per app</a></li>
+        </ol>
+      </div>
+      <div>
+        <h3>Major features, systems and refactors</h3>
+        <ol>
+          <li><span>20</span><a href="#i20">One binary, one kernel</a></li>
+          <li><span>21</span><a href="#i21">Host setup and reconcile</a></li>
+          <li><span>22</span><a href="#i22">One app manifest, with a converter</a></li>
+          <li><span>23</span><a href="#i23">Deploy pipeline with real rollback</a></li>
+          <li><span>24</span><a href="#i24">Backups that run, drills that prove them</a></li>
+          <li><span>25</span><a href="#i25">Health, observation and alerts, Loom first</a></li>
+          <li><span>26</span><a href="#i26">Encrypted secrets store</a></li>
+          <li><span>27</span><a href="#i27">Managed data services per app</a></li>
+          <li><span>28</span><a href="#i28">Per-app isolation</a></li>
+          <li><span>29</span><a href="#i29">Git-native deploys</a></li>
+          <li><span>30</span><a href="#i30">Launchpad: <code>quark launch</code> and previews</a></li>
+          <li><span>31</span><a href="#i31"><code>quark graduate</code></a></li>
+          <li><span>32</span><a href="#i32">Quark and Loom: enrollment and the fleet view</a></li>
+          <li><span>33</span><a href="#i33">Loom Core's own lifecycle on Quark</a></li>
+          <li><span>34</span><a href="#i34">Agent-safe operation</a></li>
+          <li><span>35</span><a href="#i35">Loom sign-in for any route</a></li>
+          <li><span>36</span><a href="#i36">Real-host test lane</a></li>
+          <li><span>37</span><a href="#i37">Ophelia to Quark migration</a></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section class="group" id="minor">
+    <div class="eyebrow">Items 1 to 19</div>
+    <h2>Minor features and improvements</h2>
+    <p>Quality of life, workflow and maintainability. Most are small once the kernel exists, and several are the difference between a tool you tolerate and one you reach for.</p>
+    <div class="items">
+
+      <article class="item" id="i1">
+        <div class="item-head"><div class="num">1</div><div><h3><code>quark doctor</code></h3><div class="chips"><span class="chip">Small</span><span class="chip">Impact: Medium</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>One read-only command that checks a machine the way I checked yours by hand this week.</dd>
+          <dt>How it works</dt><dd>Runs the daemon's own probes on demand: Docker and Caddy state, ports 80 and 443, disk, memory and swap, pending updates and reboot-required, certificate expiry, DNS agreement for every route, backup freshness, and anything running that Quark doesn't own. Prints pass, warn or fail with the fix for each; <code>--json</code> for scripts.</dd>
+          <dt>Experience</dt><dd>On a fresh box it tells you what setup will change. On a live box it's the first command when something feels off.</dd>
+          <dt>Why</dt><dd>The audit took a hand-written script, and it found updates waiting on a reboot on both machines that nobody knew about.</dd>
+          <dt>Unlocks</dt><dd>The same probes feed alerts (25) and the fleet view (32).</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i2">
+        <div class="item-head"><div class="num">2</div><div><h3>Everyday commands with readable names</h3><div class="chips"><span class="chip">Small</span><span class="chip impact-high">Impact: High</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd><code>quark ps</code>, <code>quark logs &lt;app&gt; [workload]</code>, <code>quark exec</code> and <code>quark status</code>, with every container, network and volume named <code>quark-&lt;app&gt;-&lt;workload&gt;</code>.</dd>
+          <dt>How it works</dt><dd>Revisions live in Quark's state, not in names; the new container takes the name when traffic switches. The commands are thin wrappers over Docker that resolve app and workload names.</dd>
+          <dt>Experience</dt><dd><code>quark logs dragon-writer web -f</code> instead of ssh, <code>docker ps</code> and copying <code>ophelia-loom-production-production-c1afaf88aaf5-core-api-1</code>. <code>quark status</code> shows apps, health, version, last deploy, certificate expiry and disk on one screen.</dd>
+          <dt>Why</dt><dd>These are the commands you run every day, and today they need Docker knowledge and long names.</dd>
+          <dt>Unlocks</dt><dd>Everything else feels smaller once this exists. Loom's log view (32) uses the same name resolution.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i3">
+        <div class="item-head"><div class="num">3</div><div><h3>One line per step, a receipt per operation</h3><div class="chips"><span class="chip">Small</span><span class="chip">Impact: Medium</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>CLI output like <code>loom core create</code>: one line per step that updates in a terminal and prints in full in logs. Every operation writes a JSON receipt, and <code>quark history</code> lists them.</dd>
+          <dt>How it works</dt><dd>One renderer shared by all commands. Receipts record inputs, digests, timings, outcome and the exact changes, with secrets redacted, kept locally and synced to Loom.</dd>
+          <dt>Experience</dt><dd>A deploy reads as a short story, and any past deploy can be reopened.</dd>
+          <dt>Why</dt><dd>Ophelia's plans and receipts were its best idea, buried under verbose output. Keep the record, fix the reading.</dd>
+          <dt>Unlocks</dt><dd>Agent-safe operation (34) is built on receipts; the fleet view (32) shows them.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i4">
+        <div class="item-head"><div class="num">4</div><div><h3><code>--plan</code> on everything that changes something</h3><div class="chips"><span class="chip">Small</span><span class="chip">Impact: Medium</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>Any mutating command prints the exact changes and exits; <code>--yes</code> for scripts.</dd>
+          <dt>How it works</dt><dd>Every operation is built as a plan (containers, files, DNS records, secret names, cron entries) before it's applied. <code>--plan</code> stops after building it and shows a diff.</dd>
+          <dt>Experience</dt><dd><code>quark deploy begamin --plan</code> shows the image, the routes, the DNS record it would create and the secrets it would inject, and changes nothing.</dd>
+          <dt>Why</dt><dd>Ophelia's dry run survives, without the confirmation-token ceremony around it.</dd>
+          <dt>Unlocks</dt><dd>Plan digests are what approvals (34) bind to.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i5">
+        <div class="item-head"><div class="num">5</div><div><h3>Manifest schema for your editor, and <code>quark check</code></h3><div class="chips"><span class="chip">Small</span><span class="chip">Impact: Medium</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>Publish the manifest's JSON Schema so editors autocomplete and flag mistakes as you type. <code>quark check</code> validates a repository before any push.</dd>
+          <dt>How it works</dt><dd>The schema is generated from the Go types. <code>check</code> validates the manifest, confirms the Dockerfile and health path exist, that declared secrets have names, and that ports and routes don't collide.</dd>
+          <dt>Experience</dt><dd>Red squiggles in the editor instead of a failed deploy ten minutes later.</dd>
+          <dt>Why</dt><dd>Catches most manifest mistakes before they reach a machine.</dd>
+          <dt>Unlocks</dt><dd>Templates (30) and the converter (22) produce schema-valid files.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i6">
+        <div class="item-head"><div class="num">6</div><div><h3>Verification checks in the manifest</h3><div class="chips"><span class="chip">Small</span><span class="chip">Impact: Medium</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>Keep kylebegeman.com's <code>verify</code> list and extend it: a URL returns a status, contains text, a JSON path equals a value, or answers within a time limit.</dd>
+          <dt>How it works</dt><dd>Checks run after every deploy against the new revision before traffic switches, and again on a schedule as health.</dd>
+          <dt>Experience</dt><dd>A deploy that renders the wrong page never goes live. You see "career-data: ok, 84 ms".</dd>
+          <dt>Why</dt><dd>Only static v1 apps have this today, and it's the cheapest proof that a deploy did what it should.</dd>
+          <dt>Unlocks</dt><dd>Health and alerts (25) reuse the same checks.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i7">
+        <div class="item-head"><div class="num">7</div><div><h3>Certificate readiness inside the deploy</h3><div class="chips"><span class="chip">Small</span><span class="chip">Impact: Medium</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>Before traffic switches to a new hostname, Quark waits until Caddy holds its certificate, with a clear status line.</dd>
+          <dt>How it works</dt><dd>Quark checks DNS first and then asks Caddy's admin API for the certificate state, so a wrong record reads "loom.begam.in points at 1.2.3.4; this machine is 5.6.7.8" instead of a five-minute timeout.</dd>
+          <dt>Experience</dt><dd>The first deploy of a new domain works the first time.</dd>
+          <dt>Why</dt><dd>Replaces Loom's certificate warm-up hack and the single-check race that caused rollbacks.</dd>
+          <dt>Unlocks</dt><dd>Previews (30) create hostnames constantly and need this to be boring.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i8">
+        <div class="item-head"><div class="num">8</div><div><h3>Bounded logs, resource limits, low-priority builds</h3><div class="chips"><span class="chip">Small</span><span class="chip">Impact: Medium</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>Every container gets log rotation, a memory limit, CPU shares and a restart policy by default. Image builds run at low priority.</dd>
+          <dt>How it works</dt><dd>Defaults in Quark, overridable per workload. Builds get a CPU weight and I/O priority below live workloads.</dd>
+          <dt>Experience</dt><dd>A build doesn't stall Dragon Writer, and a chatty app can't fill the disk with logs.</dd>
+          <dt>Why</dt><dd>No Ophelia renderer sets log rotation, and Loom's builds share memory with your sites.</dd>
+          <dt>Unlocks</dt><dd>Capacity signals (19) mean something once limits exist.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i9">
+        <div class="item-head"><div class="num">9</div><div><h3>Garbage collection that only touches what Quark owns</h3><div class="chips"><span class="chip">Small</span><span class="chip">Impact: Medium</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd><code>quark gc</code> removes retired revisions' images, volumes, networks and build cache by retention, and never runs a host-wide prune.</dd>
+          <dt>How it works</dt><dd>Everything Quark creates carries labels for app and revision. GC walks its own state, reports reclaimable space, and runs on a schedule or when disk crosses a threshold.</dd>
+          <dt>Experience</dt><dd>"Reclaimed 4.1 GB: 6 images and 12 volumes from revisions older than 14 days."</dd>
+          <dt>Why</dt><dd>145 orphaned volumes on the personal box, 30 GB of build cache elsewhere, and a <code>prune --all</code> in Loom's deploy that could delete other apps' images.</dd>
+          <dt>Unlocks</dt><dd>Safe multi-app hosts.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i10">
+        <div class="item-head"><div class="num">10</div><div><h3>Scheduled jobs and one-off tasks as workloads</h3><div class="chips"><span class="chip">Medium</span><span class="chip impact-high">Impact: High</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd><code>kind: cron</code> with a schedule, overlap policy, timeout, missed-run catch-up and failure alerts. <code>quark run &lt;app&gt; -- &lt;cmd&gt;</code> for migrations and admin commands.</dd>
+          <dt>How it works</dt><dd>Cron workloads are containers Quark starts on schedule with the app's image, env, secrets and network, journaled like deploys. <code>run</code> does the same once, streams output and records a receipt.</dd>
+          <dt>Experience</dt><dd>Dragon Writer's hourly backup becomes three lines of manifest. Loom's owner code is <code>quark run loom-core -- deployment-bootstrap issue</code>.</dd>
+          <dt>Why</dt><dd>Today those are a <code>while true; sleep</code> container and an improvised <code>docker run</code> on the data network.</dd>
+          <dt>Unlocks</dt><dd>Backups (24) and drills are cron workloads themselves.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i11">
+        <div class="item-head"><div class="num">11</div><div><h3>Cloudflare DNS that follows the app</h3><div class="chips"><span class="chip">Medium</span><span class="chip impact-high">Impact: High</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>Routes in the manifest create, verify and remove their DNS records. <code>quark dns audit</code> finds records that point nowhere.</dd>
+          <dt>How it works</dt><dd>A zone-scoped token in the secrets store. Each route declares proxied or DNS-only. The deploy refuses when a record disagrees with the machine, and retiring an app removes its records.</dd>
+          <dt>Experience</dt><dd>No more Cloudflare dashboard trips. <code>begam.in</code> answering 525 would have shown up as "record without a route".</dd>
+          <dt>Why</dt><dd>You said yes to this, and previews need to create hostnames on the fly.</dd>
+          <dt>Unlocks</dt><dd>Previews and launch (30), graduate (31).</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i12">
+        <div class="item-head"><div class="num">12</div><div><h3>Deploy from a backup</h3><div class="chips"><span class="chip">Small to Medium</span><span class="chip impact-high">Impact: High</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd><code>quark deploy dragon-writer --restore &lt;archive&gt;</code> seeds the database and volumes before the first start.</dd>
+          <dt>How it works</dt><dd>The same restore path a drill uses, pointed at a local archive or a Backblaze snapshot, run before the app's first revision starts. The manifest's verify command confirms the data.</dd>
+          <dt>Experience</dt><dd>Dragon Writer's return to the final box is one command, and disaster recovery onto a fresh machine is the same command.</dd>
+          <dt>Why</dt><dd>This week's restore was <code>psql</code> by hand.</dd>
+          <dt>Unlocks</dt><dd>Depends on the backup format (24). Graduate (31) is this plus a cutover.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i13">
+        <div class="item-head"><div class="num">13</div><div><h3>Bandwidth-aware backups and drills</h3><div class="chips"><span class="chip">Small</span><span class="chip">Impact: Medium</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>Backups upload only what changed, drills download only what they need, and Quark tracks the daily download budget and warns before a cap.</dd>
+          <dt>How it works</dt><dd>restic's deduplication keeps hourly backups small. Drills use the latest snapshot. A per-provider budget is tracked in the state store, with a monthly cost estimate per app.</dd>
+          <dt>Experience</dt><dd>A restore drill never uses up the day's download allowance the way today's mirror did.</dd>
+          <dt>Why</dt><dd>The Backblaze download cap stopped the mirror at 7.1 of 10 GB.</dd>
+          <dt>Unlocks</dt><dd>Restore drills (24) can run weekly without surprises.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i14">
+        <div class="item-head"><div class="num">14</div><div><h3>App registry with purpose and provenance</h3><div class="chips"><span class="chip">Small</span><span class="chip">Impact: Medium</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>Every app records its repository, a one-line purpose, its owner (personal or BrainTreeLabs), domains, last deploy (commit, who, when), last backup and machine.</dd>
+          <dt>How it works</dt><dd>Fields in the manifest plus facts Quark records. <code>quark ls</code> shows them, and anything running that Quark doesn't own is listed as unmanaged.</dd>
+          <dt>Experience</dt><dd>One list answers "what runs where, and why", the question that took a day this week.</dd>
+          <dt>Why</dt><dd>A forgotten Spaceship server and five dead Vultr addresses in your SSH files.</dd>
+          <dt>Unlocks</dt><dd>The fleet view (32) is this list across machines.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i15">
+        <div class="item-head"><div class="num">15</div><div><h3>Integration credentials in one place</h3><div class="chips"><span class="chip">Small</span><span class="chip">Impact: Medium</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>Cloudflare, Backblaze, GitHub deploy keys and registry credentials live in the secrets store, scoped to the apps that use them, with an audit of use and age.</dd>
+          <dt>How it works</dt><dd><code>quark integrations</code> lists each credential, which apps use it, when it was last used and rotated. Rotation updates every use.</dd>
+          <dt>Experience</dt><dd>The VPS_HOST and VPS_SSH_KEY secrets in four repositories go away. One place to rotate a Cloudflare token.</dd>
+          <dt>Why</dt><dd>"Too many random pieces across accounts and logins."</dd>
+          <dt>Unlocks</dt><dd>Depends on the secrets store (26).</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i16">
+        <div class="item-head"><div class="num">16</div><div><h3>Maintenance windows</h3><div class="chips"><span class="chip">Small to Medium</span><span class="chip">Impact: Medium</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd><code>quark host maintain</code>, on demand or scheduled: apply OS updates, reboot if required, bring apps back in order, run every verify check, report.</dd>
+          <dt>How it works</dt><dd>Drain new deploys, snapshot state, update, reboot, then start workloads in dependency order and run health and verify checks. Alert on anything that didn't come back.</dd>
+          <dt>Experience</dt><dd>Reboots stop being something you hope about.</dd>
+          <dt>Why</dt><dd>Both machines had a reboot pending.</dd>
+          <dt>Unlocks</dt><dd>Quark's own upgrade (18) uses the same window.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i17">
+        <div class="item-head"><div class="num">17</div><div><h3>Environments and promotion</h3><div class="chips"><span class="chip">Medium</span><span class="chip">Impact: Medium</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>An app can have <code>staging</code> and <code>production</code>, on the same or different machines. <code>quark promote</code> moves the exact image digest and shows the config diff.</dd>
+          <dt>How it works</dt><dd>Environments share one manifest with per-environment overrides. Promotion reuses the built image and runs the same verify checks.</dd>
+          <dt>Experience</dt><dd>Loom's staging-to-production flow without copying manifests. Dragon Writer's staging file becomes an override block.</dd>
+          <dt>Why</dt><dd>Today's staging is a second copy of everything.</dd>
+          <dt>Unlocks</dt><dd>Previews (30) are environments that appear and disappear.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i18">
+        <div class="item-head"><div class="num">18</div><div><h3>One-line install, self-upgrade with rings</h3><div class="chips"><span class="chip">Small</span><span class="chip">Impact: Medium</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>One static binary. <code>quark upgrade</code> stages the new version, restarts, and rolls back if the new daemon fails to start. The business machine upgrades a day before the personal one unless you say otherwise.</dd>
+          <dt>How it works</dt><dd>Two binaries on disk, an atomic symlink switch, a health check inside the systemd start timeout, rollback on failure. Loom shows the version per machine.</dd>
+          <dt>Experience</dt><dd>An upgrade is a line in the changelog, not a per-release Python environment.</dd>
+          <dt>Why</dt><dd>Ophelia's install grew a launcher chain that broke the watchdog.</dd>
+          <dt>Unlocks</dt><dd>The test lane (36) exercises upgrade and rollback on every release.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i19">
+        <div class="item-head"><div class="num">19</div><div><h3>Traffic and resource signals per app</h3><div class="chips"><span class="chip">Medium</span><span class="chip">Impact: Medium</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>Requests per day, approximate visitors, p95 latency, CPU, memory and disk per app, kept as 90-day rollups.</dd>
+          <dt>How it works</dt><dd>Parsed from Caddy's access logs and container stats by the daemon, stored locally, shown in <code>quark status</code> and Loom.</dd>
+          <dt>Experience</dt><dd>"begam.in: 1,200 requests a day, 40 MB, 2% CPU" beside every app.</dd>
+          <dt>Why</dt><dd>Capacity warnings, and the evidence for graduating a product.</dd>
+          <dt>Unlocks</dt><dd>Graduate (31) decisions and capacity alerts (25).</dd>
+        </dl>
+      </article>
+
+    </div>
+  </section>
+
+  <section class="group" id="major">
+    <div class="eyebrow">Items 20 to 37</div>
+    <h2>Major features, systems and refactors</h2>
+    <p>The systems that make Quark a platform rather than a deploy script: the kernel, the contracts, and the four capabilities Ophelia specified but never built.</p>
+    <div class="items">
+
+      <article class="item" id="i20">
+        <div class="item-head"><div class="num">20</div><div><h3>One binary, one kernel</h3><div class="chips"><span class="chip cx-massive">Massive</span><span class="chip impact-top">Impact: Transformational</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd><code>quark</code> is one static Go program: the CLI, the host daemon and the same code on your Mac. One state store, one layout on disk, one authenticated API.</dd>
+          <dt>How it works</dt><dd>SQLite journals every operation as plan, steps and receipt, with leases so a crash resumes or compensates. <code>/var/lib/quark</code> and <code>/etc/quark</code> are the only paths. The daemon owns Docker and Caddy and pings systemd's watchdog itself. A Unix socket locally, mutual TLS outbound to Loom, nothing unauthenticated.</dd>
+          <dt>Experience</dt><dd>Copy one file, run <code>quark host setup</code>, deploy. Upgrading is replacing the file.</dd>
+          <dt>Why</dt><dd>Removes per-release Python environments, three state roots, two edges on the same ports, two APIs and the launcher chain behind the 0.6.18 watchdog bug.</dd>
+          <dt>Unlocks</dt><dd>Everything below.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i21">
+        <div class="item-head"><div class="num">21</div><div><h3>Host setup and reconcile</h3><div class="chips"><span class="chip">Large</span><span class="chip impact-high">Impact: High</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd><code>quark host setup</code> turns a fresh Ubuntu or Debian box into a Quark host in minutes. <code>quark host reconcile</code> detects drift and repairs it.</dd>
+          <dt>How it works</dt><dd>Docker CE, the Caddy edge, UFW, swap, NTP, unattended security updates, key-only SSH, fail2ban, the local image registry, journald limits and the hostname, from a stored profile. Safe to rerun. <code>host inventory</code> reports what's there.</dd>
+          <dt>Experience</dt><dd>OS reinstall to first deploy in under ten minutes, on either machine, as many times as you like.</dd>
+          <dt>Why</dt><dd>Ophelia listed this as deferred, so Loom's installer had to write its own.</dd>
+          <dt>Unlocks</dt><dd>The test lane (36), launch (30), graduate (31).</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i22">
+        <div class="item-head"><div class="num">22</div><div><h3>One app manifest, with a converter</h3><div class="chips"><span class="chip">Large</span><span class="chip impact-high">Impact: High</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>A single manifest format covering what v1 and v2 each had half of: workloads, data, routes, secrets, checks, backups, resources, environments and the registry fields.</dd>
+          <dt>How it works</dt><dd>Strict validation with helpful errors and a published schema. <code>quark manifest convert</code> reads an Ophelia v1 or v2 file and writes the new one with a diff that explains each change.</dd>
+          <dt>Experience</dt><dd>One file per app that reads top to bottom: what it runs, where it lives, what it needs, how it's checked, how it's backed up.</dd>
+          <dt>Why</dt><dd>v1 had backups, packs and add-ons. v2 had the kernel semantics. Nothing had both.</dd>
+          <dt>Unlocks</dt><dd>Every feature reads this one contract.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i23">
+        <div class="item-head"><div class="num">23</div><div><h3>Deploy pipeline with real rollback</h3><div class="chips"><span class="chip">Large</span><span class="chip impact-high">Impact: High</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>Build from git on the host (or pull an image), start the new revision beside the old, gate on health, verify checks and certificate readiness, switch traffic atomically, record a receipt. <code>quark rollback</code> in seconds.</dd>
+          <dt>How it works</dt><dd>Images build into the local registry and are pinned by digest. A revision bundles image, config and secrets version. Rollback re-points to the previous revision, including its secrets. N revisions are retained. Migrations are a gated step with a backup taken first.</dd>
+          <dt>Experience</dt><dd>Push, watch one line per step, done. If it's wrong: <code>quark rollback begamin</code>.</dd>
+          <dt>Why</dt><dd>Replaces the 3,441-line deploy script and the 2,034-line rollback script that imports Ophelia's internals, and takes GitHub Actions out of the path.</dd>
+          <dt>Unlocks</dt><dd>Previews (30), promotion (17), the Core lifecycle (33).</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i24">
+        <div class="item-head"><div class="num">24</div><div><h3>Backups that run, drills that prove them</h3><div class="chips"><span class="chip">Large</span><span class="chip impact-top">Impact: Transformational</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>Every app with data gets scheduled backups to its own Backblaze bucket, freshness monitoring, and a scheduled restore drill that restores into a throwaway container and verifies the data.</dd>
+          <dt>How it works</dt><dd>Postgres dumps and volume snapshots go into a restic repository (encrypted, deduplicated, with a retention policy). The drill restores the latest snapshot, starts the app in isolation, runs its verify command (row counts, file counts, a URL) and reports recovery point and recovery time. A failed drill alerts. <code>quark restore</code> for the real thing.</dd>
+          <dt>Experience</dt><dd>A weekly line in Loom: "Dragon Writer: backup 42 minutes ago, drill passed Sunday, 5,446 words in 24 chapters."</dd>
+          <dt>Why</dt><dd>Ophelia validated backup settings and never ran them. begam.in has none. Olive's work survived because the app wrote its own script.</dd>
+          <dt>Unlocks</dt><dd>Deploy from backup (12), graduate (31).</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i25">
+        <div class="item-head"><div class="num">25</div><div><h3>Health, observation and alerts, Loom first</h3><div class="chips"><span class="chip">Large</span><span class="chip impact-top">Impact: Transformational</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>Continuous checks of every app and host, with alerts that reach you the same day.</dd>
+          <dt>How it works</dt><dd>Workload health, verify URLs, certificate expiry, disk, memory and CPU, backup freshness, drill results, reboot-required and Quark version, each with hysteresis so nothing flaps. Routing to Loom push first, email as fallback, with dedupe, escalation and acknowledgment. Each machine also checks the other's public URLs from outside, through Cloudflare when proxied, so a dead host can't hide.</dd>
+          <dt>Experience</dt><dd>One notification: "dragonwriter.begam.in has returned 404 for 10 minutes." Then nothing until it changes.</dd>
+          <dt>Why</dt><dd>75 days.</dd>
+          <dt>Unlocks</dt><dd>The fleet view (32) is the same data at rest.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i26">
+        <div class="item-head"><div class="num">26</div><div><h3>Encrypted secrets store</h3><div class="chips"><span class="chip">Medium to Large</span><span class="chip impact-high">Impact: High</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>Secrets are sealed on the host, scoped per app, set from stdin, a prompt or Loom, injected at start, versioned with revisions, and never in arguments, logs or backups.</dd>
+          <dt>How it works</dt><dd>A store keyed by the host identity with a recovery key printed once, for 1Password. Values are injected into containers through tmpfs env files. Reads are audited. Rollback restores the matching secrets version.</dd>
+          <dt>Experience</dt><dd><code>quark secret set begamin B2_KEY</code> prompts, nothing echoes, the next deploy has it.</dd>
+          <dt>Why</dt><dd>Loom's bootstrap writes env files by hand today, and secrets end up inside backups.</dd>
+          <dt>Unlocks</dt><dd>Integrations (15), managed data services (27).</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i27">
+        <div class="item-head"><div class="num">27</div><div><h3>Managed data services per app</h3><div class="chips"><span class="chip">Large</span><span class="chip impact-high">Impact: High</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd><code>data.postgres: true</code> gives an app its own Postgres with a database, role and password in the secrets store, the URL injected, backups included and a major-version upgrade command. The same for Redis and an S3-compatible object store.</dd>
+          <dt>How it works</dt><dd>One container per app per service, pinned major version, resource limits, on the app's data network only. Credentials are generated and rotated by Quark. Backups (24) know how to dump and restore each.</dd>
+          <dt>Experience</dt><dd>Three lines of manifest replace a hand-run Postgres and a shared password.</dd>
+          <dt>Why</dt><dd>Dragon Writer needs Postgres 16, Ophelia v1 shared one password across apps, and Loom has object storage.</dd>
+          <dt>Unlocks</dt><dd>Launch (30) needs this to be one step.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i28">
+        <div class="item-head"><div class="num">28</div><div><h3>Per-app isolation</h3><div class="chips"><span class="chip">Large</span><span class="chip impact-high">Impact: High</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>Each app runs as if alone: its own networks, no shared credentials, non-root, read-only root filesystem and no-new-privileges by default, resource limits, and privileged workloads declared explicitly.</dd>
+          <dt>How it works</dt><dd>Edge and data networks are joined only where the manifest says. Loom's Runner is a declared privileged workload kept on its own network. <code>quark exposure</code> reports each app's privileges, ports and mounts.</dd>
+          <dt>Experience</dt><dd>A bug in a launchpad product can't reach Loom's database.</dd>
+          <dt>Why</dt><dd>Ophelia's own docs warn against running sensitive workloads beside the Runner, and never built the isolation.</dd>
+          <dt>Unlocks</dt><dd>Safe co-hosting on both machines; previews from untrusted branches.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i29">
+        <div class="item-head"><div class="num">29</div><div><h3>Git-native deploys</h3><div class="chips"><span class="chip">Medium to Large</span><span class="chip impact-high">Impact: High</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd><code>git push quark main</code> deploys. Or a GitHub webhook does. Or <code>quark deploy</code> from the Mac over one SSH session. Actions become optional.</dd>
+          <dt>How it works</dt><dd>A per-app deploy remote on the host with an app-scoped key. The receive hook builds and deploys and streams the step lines back to the terminal. Webhook mode receives pushes for a branch.</dd>
+          <dt>Experience</dt><dd>The way Heroku felt, on your own machine, with your own logs.</dd>
+          <dt>Why</dt><dd>Four repositories each carry VPS_HOST and VPS_SSH_KEY secrets and a workflow, and an Actions budget blocked a release.</dd>
+          <dt>Unlocks</dt><dd>Previews and launch (30).</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i30">
+        <div class="item-head"><div class="num">30</div><div><h3>Launchpad: <code>quark launch</code> and previews</h3><div class="chips"><span class="chip">Large</span><span class="chip impact-top">Impact: Transformational</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd><code>quark launch &lt;repo&gt;</code> takes a product from repository to live: template detection, manifest, domain, DNS, certificate, database, backups, checks, first deploy. Every pushed branch gets a preview at <code>&lt;branch&gt;.&lt;app&gt;.preview.&lt;domain&gt;</code> with its own database copy, removed on merge or inactivity.</dd>
+          <dt>How it works</dt><dd>Templates for Next.js, static, Go and Node services. Previews are ephemeral environments (17) seeded from the latest backup (24), with DNS (11) and certificates (7) handled. A size cap and an idle timeout keep them cheap.</dd>
+          <dt>Experience</dt><dd>An idea on Monday is a URL on Monday. The business machine's whole purpose in two commands.</dd>
+          <dt>Why</dt><dd>The launchpad is why the OVH box exists.</dd>
+          <dt>Unlocks</dt><dd>Traffic signals (19) and graduate (31) complete the lifecycle.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i31">
+        <div class="item-head"><div class="num">31</div><div><h3><code>quark graduate</code>: move an app to its own machine</h3><div class="chips"><span class="chip cx-massive">Massive</span><span class="chip impact-high">Impact: High</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>Move an app and its data to another machine with a rehearsal, a short write freeze, a DNS cutover and a rollback window. <code>quark move</code> does the same between your two boxes.</dd>
+          <dt>How it works</dt><dd>Provision the target (21), restore the latest backup there (12), rehearse verification, freeze writes, sync the delta, start, verify, switch DNS (11), keep the source for a window, then retire it.</dd>
+          <dt>Experience</dt><dd>A product with traction leaves the launchpad in an afternoon, and the record shows every step.</dd>
+          <dt>Why</dt><dd>Ophelia specified this as major features 1 to 4 and never built any of it.</dd>
+          <dt>Unlocks</dt><dd>The model you described: launch, prove, graduate.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i32">
+        <div class="item-head"><div class="num">32</div><div><h3>Quark and Loom: enrollment and the fleet view</h3><div class="chips"><span class="chip cx-massive">Massive</span><span class="chip impact-top">Impact: Transformational</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>Each machine enrolls with Loom and keeps an outbound, mutually authenticated link. Loom shows every machine, app, deploy, backup, drill, alert and log, and is where approvals happen.</dd>
+          <dt>How it works</dt><dd>Enrollment bound to a confirmation you see in Loom; signed, scoped commands with replay protection; an event stream with cursors; a Fleet mode in Loom built on the registry (14), the signals (19) and the receipts (3).</dd>
+          <dt>Experience</dt><dd>Open Loom, see both machines and every app, approve a production deploy from your phone.</dd>
+          <dt>Why</dt><dd>Loom is the UI. Ophelia's fleet control was turned off for new Cores, but its protocol design was sound and carries over.</dd>
+          <dt>Unlocks</dt><dd>Agent operation (34), Loom sign-in (35), the Core lifecycle in the app (33).</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i33">
+        <div class="item-head"><div class="num">33</div><div><h3>Loom Core's own lifecycle on Quark</h3><div class="chips"><span class="chip">Large</span><span class="chip impact-high">Impact: High</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>The Core, processor, Runner and data services become Quark apps. <code>loom core create</code> becomes host setup plus a deploy. Upgrade, rollback, backup and restore of the Core run through Quark, from the app, with no Actions.</dd>
+          <dt>How it works</dt><dd>One Loom manifest replaces the four Ophelia manifests and the data-authority scripts. The Runner is a declared privileged workload (28). CORE-03 and CORE-04 build on Quark's API instead of shell scripts. <code>deploy/ophelia/</code> is deleted.</dd>
+          <dt>Experience</dt><dd>"Update Core" in the app does what a release does today.</dd>
+          <dt>Why</dt><dd>12,000 lines of glue, and CORE-02 to CORE-05 finish faster on one coherent base.</dd>
+          <dt>Unlocks</dt><dd>CORE-05, your fresh start.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i34">
+        <div class="item-head"><div class="num">34</div><div><h3>Agent-safe operation</h3><div class="chips"><span class="chip">Medium</span><span class="chip impact-high">Impact: High</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>Every command has <code>--json</code> and <code>--plan</code>. A plan has a digest. Applying requires that digest and, for production, an approval recorded in Loom. API tokens are scoped read-only, per app or per host.</dd>
+          <dt>How it works</dt><dd>Plans and receipts are signed. An agent can inspect, propose and rehearse, and can apply only what a person approved.</dd>
+          <dt>Experience</dt><dd>A Loom agent says "I'd like to deploy begamin, here's the plan", you tap approve, it runs, and the receipt names both of you.</dd>
+          <dt>Why</dt><dd>Ophelia's strategy called this "delegate to agents". It's Loom's whole premise.</dd>
+          <dt>Unlocks</dt><dd>Autonomous maintenance, and previews opened by agents.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i35">
+        <div class="item-head"><div class="num">35</div><div><h3>Loom sign-in for any route</h3><div class="chips"><span class="chip">Medium</span><span class="chip impact-high">Impact: High</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd><code>auth: loom</code> on a route means only signed-in Loom identities reach it, with no per-app auth code.</dd>
+          <dt>How it works</dt><dd>Caddy forward-auth to the Core's session endpoint, allowing the owner or a named group. Works for admin pages, previews, personal tools and demos.</dd>
+          <dt>Experience</dt><dd>A weekend project gets a login by adding one line.</dd>
+          <dt>Why</dt><dd>Cloudflare Access goes away with direct TLS, and previews need protecting.</dd>
+          <dt>Unlocks</dt><dd>Personal projects on the personal box are safe by default.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i36">
+        <div class="item-head"><div class="num">36</div><div><h3>Real-host test lane</h3><div class="chips"><span class="chip">Medium</span><span class="chip impact-high">Impact: High</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd>Every release proves itself on a machine that's wiped and rebuilt: host setup, fixture apps, backup, drill, rollback, retire, self-upgrade, reboot.</dd>
+          <dt>How it works</dt><dd>A workflow rents an hourly VM (or resets the Hostinger box while it's the test bed) and runs the whole lifecycle with static, web-plus-Postgres and cron fixtures. A Docker lane in CI covers the rest.</dd>
+          <dt>Experience</dt><dd>A green check that means "this works on a real server", not "the unit tests pass".</dd>
+          <dt>Why</dt><dd>Ophelia had no Docker or VPS lane, and the watchdog bug surfaced in production.</dd>
+          <dt>Unlocks</dt><dd>Confidence to change anything.</dd>
+        </dl>
+      </article>
+
+      <article class="item" id="i37">
+        <div class="item-head"><div class="num">37</div><div><h3>Ophelia to Quark migration</h3><div class="chips"><span class="chip">Medium</span><span class="chip impact-high">Impact: High, short term</span></div></div></div>
+        <dl>
+          <dt>Summary</dt><dd><code>quark migrate</code> reads an Ophelia host, converts manifests, exports data and secret names, and produces an import plan for the new machine.</dd>
+          <dt>How it works</dt><dd>Reads both the v1 runtime and the v2 root, applies the converter (22), packages data through the backup format (24), and writes a checklist with verify steps for moving day.</dd>
+          <dt>Experience</dt><dd>Moving day is a plan you read, then run, then check.</dd>
+          <dt>Why</dt><dd>Four apps and Loom have to move once, and it should be the last time the old layout matters.</dd>
+          <dt>Unlocks</dt><dd>Decommissioning Ophelia.</dd>
+        </dl>
+      </article>
+
+    </div>
+  </section>
+
+  <section class="closing">
+    <div class="eyebrow">Where to start</div>
+    <h2>Three shortlists</h2>
+    <div class="closing-grid">
+      <div class="box lead-box">
+        <h3>Highest return</h3>
+        <ol>
+          <li><a href="#i24">Backups that run, drills that prove them</a></li>
+          <li><a href="#i25">Health and alerts, Loom first</a></li>
+          <li><a href="#i23">Deploy pipeline with real rollback</a></li>
+          <li><a href="#i21">Host setup and reconcile</a></li>
+          <li><a href="#i11">Cloudflare DNS that follows the app</a></li>
+          <li><a href="#i2">Everyday commands</a></li>
+        </ol>
+        <p class="why">Each one removes a failure you had this week or deletes thousands of lines you maintain.</p>
+      </div>
+      <div class="box">
+        <h3>Most strategic</h3>
+        <ol>
+          <li><a href="#i20">One binary, one kernel</a></li>
+          <li><a href="#i32">Quark and Loom fleet view</a></li>
+          <li><a href="#i30">Launchpad and previews</a></li>
+          <li><a href="#i34">Agent-safe operation</a></li>
+          <li><a href="#i31"><code>quark graduate</code></a></li>
+          <li><a href="#i35">Loom sign-in for any route</a></li>
+        </ol>
+        <p class="why">The kernel makes the rest cheap; the Loom items make Quark part of the product instead of a tool beside it.</p>
+      </div>
+      <div class="box">
+        <h3>Quick wins</h3>
+        <ol>
+          <li><a href="#i1"><code>quark doctor</code></a></li>
+          <li><a href="#i2">Everyday commands</a></li>
+          <li><a href="#i8">Bounded logs and limits</a></li>
+          <li><a href="#i9">Owned-only garbage collection</a></li>
+          <li><a href="#i7">Certificate readiness</a></li>
+          <li><a href="#i5">Schema and <code>quark check</code></a></li>
+          <li><a href="#i13">Bandwidth-aware drills</a></li>
+          <li><a href="#i14">App registry</a></li>
+        </ol>
+        <p class="why">Each is days of work on the kernel, and each is felt on the first day it exists.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer class="sources">
+    <div class="eyebrow">Sources</div>
+    <ul>
+      <li>The <a href="https://claude.ai/artifact/BUCyRXjPV4bqHRm2p5v6U6">Quark blueprint</a> and the September 18 server audit and Dragon Writer recovery</li>
+      <li>Ophelia's roadmap, platform strategy (phases P0 to P5), portability features 1 to 8 and <code>src/</code> on <code>next</code> (commit dc358e5)</li>
+      <li>Loom's <code>deploy/ophelia/</code>, <code>packages/core-provisioning/</code> and the core-provisioning charter (CORE-01 to CORE-06)</li>
+    </ul>
+  </footer>
+</main>

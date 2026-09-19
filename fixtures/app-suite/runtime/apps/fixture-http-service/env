@@ -1,3 +1,0 @@
-OPHELIA_APP=fixture-http-service
-API_TOKEN=fixture-token-value
-LOG_LEVEL=info

@@ -1,9 +1,0 @@
-{
-  "name": "future-service",
-  "private": true,
-  "scripts": {
-    "ophelia:health": "node scripts/ophelia-health.js",
-    "ophelia:data:verify": "node scripts/ophelia-data-verify.js",
-    "ophelia:release": "node scripts/ophelia-release.js"
-  }
-}
