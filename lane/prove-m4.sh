@@ -138,7 +138,7 @@ chapters=$(run "quark psql dragon-writer -- -tAc 'select count(*) from story_cha
 [[ "$chapters" == "36" ]] || { echo "M4 NOT proven: expected 36 chapters, got $chapters" >&2; exit 1; }
 
 echo "== a one-off command in the app's environment, with its database and secrets"
-run 'quark run dragon-writer web -- sh -c "psql \"\$DATABASE_URL\" -tAc \"select count(*) || chr(32) || chr(39)stories reachable from a one-off command as chr(39) || current_user\""' | quiet | tail -4
+run "quark run dragon-writer web -- sh -c 'psql \"\$DATABASE_URL\" -tAc \"select count(*) from stories\" | sed s/\$/\ stories\ reachable\ from\ a\ one-off\ command/'" | quiet | tail -4
 echo "-- and the app's own migration check, whose verdict is the app's (the July database was migrated with drizzle-kit push, so its journal is short):"
 run 'quark run dragon-writer web -- npm run db:migrate:check' 2>&1 | quiet | grep -E "baseline|Pending|exited" || true
 run 'quark jobs dragon-writer web --limit 2'
