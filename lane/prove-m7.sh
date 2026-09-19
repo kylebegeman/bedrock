@@ -127,6 +127,7 @@ if ! out=$(run 'quark drill notes --yes' 2>&1 | quiet); then echo "$out"; fail "
 echo "$out" | grep -E "restored|tables|verify query|object store answered|api answered|succeeded"
 echo "$out" | grep -q "object store answered" || fail "the drill didn't bring the object store back"
 echo "$out" | grep -q "api answered" || fail "the drill's api didn't reach its restored database"
+echo "$out" | grep -q "worker answered" || fail "the drill omitted the API's worker dependency"
 [[ "$(run "docker ps -a --format '{{.Names}}' | grep -c 'notes.drill' || true")" == 0 ]] || fail "the drill left containers behind"
 
 echo "== exposure names the object store"

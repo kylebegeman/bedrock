@@ -265,6 +265,7 @@ func (p pgService) start(ctx context.Context, e *docker.Engine, out io.Writer) e
 	err := e.Run(ctx, docker.Spec{
 		Name: p.Container, Image: p.Image, Env: env, Labels: p.Labels,
 		Networks: []string{p.Network}, Aliases: p.Aliases, Mounts: mounts, Restart: true,
+		Isolated: true, Capabilities: []string{"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"},
 	})
 	if err != nil {
 		return err
@@ -385,7 +386,7 @@ func (o objectsService) start(ctx context.Context, e *docker.Engine, out io.Writ
 		Name: o.Container, Image: o.Image, Cmd: []string{"server", "/data", "--console-address", ":9001"},
 		Env:    []string{ObjectsUserName + "=" + o.User, ObjectsPasswordName + "=" + o.Password},
 		Labels: o.Labels, Networks: []string{o.Network}, Aliases: o.Aliases,
-		Mounts: []string{o.Volume + ":/data"}, Restart: true,
+		Mounts: []string{o.Volume + ":/data"}, Restart: true, Isolated: true,
 	})
 	if err != nil {
 		return err
@@ -523,7 +524,7 @@ func restoreDump(ctx context.Context, e *docker.Engine, p pgService, dump string
 		return "", err
 	}
 	defer f.Close()
-	args := []string{"pg_restore", "-h", "127.0.0.1", "-U", p.User, "-d", p.Database}
+	args := []string{"pg_restore", "--single-transaction", "-h", "127.0.0.1", "-U", p.User, "-d", p.Database}
 	if !keep {
 		args = append(args, "--no-owner", "--no-privileges")
 	}

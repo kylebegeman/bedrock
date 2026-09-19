@@ -47,6 +47,12 @@ func serve() {
 			}
 			conn.Close()
 		}
+		conn, err := net.DialTimeout("tcp", "worker:8002", 3*time.Second)
+		if err != nil {
+			http.Error(w, "worker unreachable", http.StatusServiceUnavailable)
+			return
+		}
+		conn.Close()
 		fmt.Fprintln(w, "ok")
 	}
 	api := http.NewServeMux()
@@ -73,6 +79,20 @@ func serve() {
 func worker() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	listener, err := net.Listen("tcp", ":8002")
+	if err != nil {
+		panic(err)
+	}
+	defer listener.Close()
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
 	fmt.Println("worker up, revision", os.Getenv("QUARK_REVISION"))
 	<-ctx.Done()
 	fmt.Println("worker stopping")

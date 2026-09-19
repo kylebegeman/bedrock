@@ -198,6 +198,15 @@ repository, last deploy and last backup.
 
 Backups go to one bucket per app with restic, encrypted with a password
 made once per storage account. `quark backup <app>` runs one now,
+Restore the app's original secrets from the sealed machine backup before
+restoring data on a new machine. Quark refuses to generate replacement keys
+for restored data, which could make encrypted records unreadable.
+
+`quark drill <app>` uses an internal network with no outbound access, starts
+all long-running workloads before probing readiness, and never runs release
+or cron jobs. Privileged workloads cannot be safely drilled. Workloads that
+require external services may fail their drill readiness check.
+
 `quark drill <app>` restores the latest snapshot beside the app, starts the
 app on it, runs the verify query and cleans up, and `quark restore <app>`
 brings the data onto a machine that doesn't run the app yet, before

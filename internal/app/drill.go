@@ -22,7 +22,7 @@ import (
 
 // DrillKind proves a backup: it restores the latest snapshot beside the
 // app, into scratch volumes and a scratch database, starts the app's
-// serving workloads on them, checks what came back, and cleans up.
+// long-running workloads on them, checks what came back, and cleans up.
 const DrillKind = "app.drill"
 
 // Drill is the Definition for DrillKind.
@@ -66,7 +66,7 @@ func newDrillNames(stateDir string, m *manifest.Manifest) drillNames {
 		n.volumes[v] = prefix + "." + v
 	}
 	for _, w := range m.WorkloadNames() {
-		if m.Workloads[w].Serves() {
+		if m.Workloads[w].LongRunning() {
 			n.containers[w] = prefix + "." + w
 		}
 	}
@@ -131,6 +131,11 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 	}
 	if !m.HasData() {
 		return nil, fmt.Errorf("%s keeps no data; there is nothing to drill", in.App)
+	}
+	for name, workload := range m.Workloads {
+		if workload.LongRunning() && workload.Privileged {
+			return nil, fmt.Errorf("cannot safely drill privileged workload %s: it could escape the scratch network", name)
+		}
 	}
 	app := in.App
 	d := &drillState{run: &backupRun{store: dr.Store, app: app, kind: state.BackupRunDrill}, names: newDrillNames(dr.StateDir, &m)}
@@ -219,7 +224,7 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 					return d.run.fail(err)
 				}
 				defer e.Close()
-				if err := e.EnsureNetwork(ctx, d.names.network); err != nil {
+				if err := e.EnsureInternalNetwork(ctx, d.names.network); err != nil {
 					return d.abort(e, err)
 				}
 				values, err := dr.Secrets.Load(app, rev.SecretsVersion)
@@ -227,12 +232,14 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 					return d.abort(e, err)
 				}
 				// The first-run scripts make the roles the dump names.
-				svc, err := postgresService(&m, values, InitDir(dr.StateDir, app))
+				svc, err := postgresService(&m, values, filepath.Join(d.names.dir, initSnapshotDir))
 				if err != nil {
 					return d.abort(e, err)
 				}
 				if !keepsOwners(&m) {
 					svc.InitDir = ""
+				} else if !dirExists(svc.InitDir) {
+					return d.abort(e, errors.New("the snapshot holds no database init scripts"))
 				}
 				svc.Container, svc.Volume, svc.Network = d.names.postgres, d.names.postgresVolume, d.names.network
 				svc.Labels = map[string]string{docker.LabelApp: app, docker.LabelWorkload: "drill"}
@@ -281,7 +288,7 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 					return d.run.fail(err)
 				}
 				defer e.Close()
-				if err := e.EnsureNetwork(ctx, d.names.network); err != nil {
+				if err := e.EnsureInternalNetwork(ctx, d.names.network); err != nil {
 					return d.abort(e, err)
 				}
 				values, err := dr.Secrets.Load(app, rev.SecretsVersion)
@@ -308,14 +315,14 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 	}
 	if len(d.names.containers) > 0 {
 		add(kernel.Step{
-			Name: "app", Change: "start the app's serving workloads on the restored data and wait for them",
+			Name: "app", Change: "start the app's long-running workloads on the restored data and wait for them",
 			Apply: func(ctx context.Context, out io.Writer) error {
 				e, err := docker.Connect(ctx)
 				if err != nil {
 					return d.run.fail(err)
 				}
 				defer e.Close()
-				if err := e.EnsureNetwork(ctx, d.names.network); err != nil {
+				if err := e.EnsureInternalNetwork(ctx, d.names.network); err != nil {
 					return d.abort(e, err)
 				}
 				values, err := dr.Secrets.Load(app, rev.SecretsVersion)
@@ -342,11 +349,15 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 					if _, err := isolate(ctx, e, &spec, w, image); err != nil {
 						return d.abort(e, err)
 					}
-					started := time.Now()
 					if err := e.Run(ctx, spec); err != nil {
 						return d.abort(e, err)
 					}
-					if err := waitReady(ctx, e, spec.Name, w); err != nil {
+				}
+				// Dependencies must all be running before any readiness probe.
+				for _, name := range sortedKeys(d.names.containers) {
+					w := m.Workloads[name]
+					started := time.Now()
+					if err := waitReady(ctx, e, d.names.containers[name], w); err != nil {
 						return d.abort(e, fmt.Errorf("%s on the restored data: %w", name, err))
 					}
 					took := time.Since(started).Round(100 * time.Millisecond)

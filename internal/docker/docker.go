@@ -63,12 +63,28 @@ func ContainerName(app, workload, revision string) string {
 
 // EnsureNetwork creates a bridge network if it doesn't exist.
 func (e *Engine) EnsureNetwork(ctx context.Context, name string) error {
-	if _, err := e.cli.NetworkInspect(ctx, name, client.NetworkInspectOptions{}); err == nil {
+	return e.ensureNetwork(ctx, name, false)
+}
+
+// EnsureInternalNetwork isolates recovery workloads from outbound traffic.
+// Their restored queues must not send mail or mutate external services.
+func (e *Engine) EnsureInternalNetwork(ctx context.Context, name string) error {
+	return e.ensureNetwork(ctx, name, true)
+}
+
+func (e *Engine) ensureNetwork(ctx context.Context, name string, internal bool) error {
+	if n, err := e.cli.NetworkInspect(ctx, name, client.NetworkInspectOptions{}); err == nil {
+		if internal && !n.Network.Internal {
+			return fmt.Errorf("network %s must be internal for a recovery drill", name)
+		}
 		return nil
+	} else if !IsNotFound(err) {
+		return err
 	}
 	_, err := e.cli.NetworkCreate(ctx, name, client.NetworkCreateOptions{
-		Driver: "bridge",
-		Labels: map[string]string{LabelOwner: OwnerValue},
+		Driver:   "bridge",
+		Internal: internal,
+		Labels:   map[string]string{LabelOwner: OwnerValue},
 	})
 	if err != nil && !errdefs.IsConflict(err) {
 		return fmt.Errorf("create network %s: %w", name, err)

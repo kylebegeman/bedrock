@@ -3,6 +3,10 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -371,5 +375,136 @@ func TestAFailedContainerIsExplainedByItsErrorNotItsLastBrace(t *testing.T) {
 	}
 	if got := lastWords("\n\n"); got != "it wrote nothing; see quark logs" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestStartPreparationFailureRestartsThePreviousContainer(t *testing.T) {
+	for _, removalFails := range []bool{false, true} {
+		t.Run(fmt.Sprint("removalFails=", removalFails), func(t *testing.T) {
+			ctx := context.Background()
+			store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			m := &manifest.Manifest{App: "test", Workloads: map[string]manifest.Workload{
+				"a": {Kind: manifest.Worker, Image: "img", User: "0", Singleton: true},
+				"z": {Kind: manifest.Worker, Image: "img", User: "0"},
+			}}
+			old := *m
+			old.Workloads = map[string]manifest.Workload{"a": {Kind: manifest.Worker, Image: "img", User: "0"}}
+			oldJSON, _ := json.Marshal(old)
+			newJSON, _ := json.Marshal(m)
+			for _, rev := range []state.Revision{
+				{App: "test", ID: "old-rev", Status: state.RevisionActive, Manifest: oldJSON, Containers: map[string]string{"a": "old-container"}},
+				{App: "test", ID: "new-rev", Status: state.RevisionFailed, Manifest: newJSON, Images: map[string]string{"a": "img"}},
+			} {
+				if err := store.SaveRevision(ctx, rev); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var calls []string
+			running := true
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				path := strings.TrimPrefix(r.URL.Path, "/v1.44")
+				calls = append(calls, r.Method+" "+path)
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case path == "/_ping":
+					w.Header().Set("API-Version", "1.44")
+					_, _ = io.WriteString(w, "OK")
+				case path == "/containers/old-container/json":
+					_ = json.NewEncoder(w).Encode(map[string]any{"Id": "old-container", "State": map[string]any{"Running": running}})
+				case strings.HasSuffix(path, "/json"):
+					w.WriteHeader(404)
+					_, _ = io.WriteString(w, `{ "message": "not found" }`)
+				case path == "/containers/create":
+					w.WriteHeader(201)
+					_, _ = io.WriteString(w, `{"Id":"new-container"}`)
+				case r.Method == http.MethodDelete && removalFails:
+					w.WriteHeader(500)
+					_, _ = io.WriteString(w, `{"message":"fixture removal failure"}`)
+				default:
+					if path == "/containers/old-container/stop" {
+						running = false
+					}
+					if path == "/containers/old-container/start" {
+						running = true
+					}
+					w.WriteHeader(204)
+				}
+			}))
+			defer server.Close()
+			t.Setenv("DOCKER_HOST", "tcp"+strings.TrimPrefix(server.URL, "http"))
+			t.Setenv("DOCKER_API_VERSION", "1.44")
+			t.Setenv("DOCKER_TLS_VERIFY", "")
+			d := Deploy{Store: store, Secrets: newSecrets(t)}
+			plan, err := d.rollout(ctx, m, "new-rev", &buildFrom{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, step := range plan.Steps {
+				if step.Name == "start" {
+					err = step.Apply(ctx, io.Discard)
+					if err == nil || !strings.Contains(err.Error(), "no image recorded for z") {
+						t.Fatalf("wanted late preparation failure, got %v", err)
+					}
+				}
+			}
+			if !slices.Contains(calls, "POST /containers/old-container/stop") {
+				t.Fatalf("old workload was not stopped: %v", calls)
+			}
+			if restarted := slices.Contains(calls, "POST /containers/old-container/start"); restarted == removalFails || running == removalFails {
+				t.Fatalf("unsafe recovery (removalFails=%v): %v", removalFails, calls)
+			}
+		})
+	}
+}
+
+func TestRestoreRequiresOriginalKeysBeforeMakingAny(t *testing.T) {
+	m, _ := loadCore(t)
+	sec := newSecrets(t)
+	if err := requireRestoreSecrets(sec, m); err == nil || !strings.Contains(err.Error(), "original secrets") {
+		t.Fatalf("restore accepted missing keys: %v", err)
+	}
+	if _, version, _ := sec.LoadCurrent(m.App); version != 0 {
+		t.Fatal("guard generated replacement keys")
+	}
+	if err := ensureAppSecrets(sec, m, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireRestoreSecrets(sec, m); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDrillIncludesWorkersButNeverReleaseOrCronJobs(t *testing.T) {
+	m, _ := loadCore(t)
+	m.Workloads["scheduled"] = manifest.Workload{Kind: manifest.Cron}
+	names := newDrillNames(t.TempDir(), m)
+	if !slices.Equal(sortedKeys(names.containers), []string{"core-api", "product", "runner"}) {
+		t.Fatalf("drill workloads: %v", names.containers)
+	}
+}
+
+func TestResumedPullKeepsEarlierImagesAndPinnedSecrets(t *testing.T) {
+	ctx := context.Background()
+	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.SaveRevision(ctx, state.Revision{App: "test", ID: "resume", Status: state.RevisionFailed, Images: map[string]string{"built": "digest"}, SecretsVersion: 3, Source: "source-commit"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveImageReferences(ctx, store, "test", "resume", []string{"pulled"}, "image"); err != nil {
+		t.Fatal(err)
+	}
+	rev, err := store.GetRevision(ctx, "test", "resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rev.Images["built"] != "digest" || rev.Images["pulled"] != "image" || rev.SecretsVersion != 3 || rev.Source != "source-commit" {
+		t.Fatalf("lost saved progress: %+v", rev)
 	}
 }

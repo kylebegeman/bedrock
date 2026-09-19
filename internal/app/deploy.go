@@ -156,12 +156,23 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 	}
 	// abandon takes down a revision that never went live: its containers
 	// go, the singletons they replaced start again, and it stays failed.
-	abandon := func(ctx context.Context, e *docker.Engine, out io.Writer) {
+	abandon := func(_ context.Context, e *docker.Engine, out io.Writer) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		var failures []error
 		for _, c := range containers {
-			_ = e.Remove(ctx, c, 5*time.Second)
+			if err := e.Remove(ctx, c, 5*time.Second); err != nil {
+				failures = append(failures, err)
+			}
 		}
-		_ = store.SetRevisionStatus(ctx, m.App, revision, state.RevisionFailed)
-		restartSingletons(ctx, e, store, m.App, revision, out)
+		if err := store.SetRevisionStatus(ctx, m.App, revision, state.RevisionFailed); err != nil {
+			failures = append(failures, err)
+		}
+		// Never restart a singleton while its failed replacement may still run.
+		if len(failures) > 0 {
+			return errors.Join(failures...)
+		}
+		return restartStoppedWorkloads(ctx, e, store, m.App, revision, out)
 	}
 	// pin fixes the secrets a revision runs with: a deploy takes the
 	// current version, a rollback keeps the one it had.
@@ -170,7 +181,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 		if err != nil {
 			return nil, nil, 0, err
 		}
-		values, version, err := d.secretsFor(rev, from == nil)
+		values, version, err := d.secretsFor(rev, from == nil || rev.SecretsVersion > 0)
 		if err != nil {
 			return nil, nil, 0, err
 		}
@@ -318,10 +329,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 								return err
 							}
 						}
-						for _, n := range group {
-							images[n] = w.Image
-						}
-						return saveImages(ctx)
+						return saveImageReferences(ctx, store, m.App, revision, group, w.Image)
 					},
 				})
 			}
@@ -353,11 +361,16 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 	add(kernel.Step{
 		Name: "start", Change: fmt.Sprintf("start %d container(s) for revision %s", len(containers), revision),
 		Note: secretsNote(m),
-		Apply: func(ctx context.Context, out io.Writer) error {
+		Apply: func(ctx context.Context, out io.Writer) (startErr error) {
 			e, err := connect(ctx)
 			if err != nil {
 				return err
 			}
+			defer func() {
+				if startErr != nil {
+					startErr = errors.Join(startErr, abandon(ctx, e, out))
+				}
+			}()
 			rev, values, version, err := pin(ctx)
 			if err != nil {
 				return err
@@ -395,14 +408,12 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 				if w.Singleton && current != nil && current.ID != revision {
 					if old := current.Containers[name]; old != "" {
 						if err := e.Stop(ctx, old, graceOf(current, name)); err != nil {
-							abandon(ctx, e, out)
 							return err
 						}
 						fmt.Fprintf(out, "%s stopped first: %s is a singleton\n", old, name)
 					}
 				}
 				if err := e.Run(ctx, spec); err != nil {
-					abandon(ctx, e, out)
 					return err
 				}
 				fmt.Fprintf(out, "%s running as %s%s\n", spec.Name, u, isolationWord(w))
@@ -428,8 +439,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 				if err := waitReady(ctx, e, containers[name], w); err != nil {
 					showLastLines(ctx, e, containers[name], name, out)
 					// The new containers never went live; take them down.
-					abandon(ctx, e, out)
-					return fmt.Errorf("%s: %w", name, err)
+					return errors.Join(fmt.Errorf("%s: %w", name, err), abandon(ctx, e, out))
 				}
 				fmt.Fprintf(out, "%s ready\n", name)
 			}
@@ -448,8 +458,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 				}
 				for _, c := range m.Checks {
 					if err := runCheckDirect(ctx, e, m, containers, c); err != nil {
-						abandon(ctx, e, out)
-						return err
+						return errors.Join(err, abandon(ctx, e, out))
 					}
 					fmt.Fprintf(out, "%s ok\n", c.URL)
 				}
@@ -498,7 +507,9 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 			Apply: func(ctx context.Context, out io.Writer) error {
 				for _, c := range m.Checks {
 					if err := runCheck(ctx, c); err != nil {
-						revert, revertErr := revertSwitch(ctx, store, connect, m.App, revision, containers)
+						cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+						revert, revertErr := revertSwitch(cleanup, store, connect, m.App, revision, containers)
+						cancel()
 						if revertErr != nil {
 							return fmt.Errorf("%w; and putting the previous revision back failed too: %v", err, revertErr)
 						}
@@ -537,6 +548,36 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 			return pruneRecords(ctx, store, d.Secrets, m.App, d.Addresses(ctx), out)
 		},
 	})
+	// Activation and certificate failures need the same recovery as a failed
+	// public check. Use a fresh context even when the deploy was cancelled.
+	for i := range plan.Steps {
+		if plan.Steps[i].Name != "switch" && plan.Steps[i].Name != "certificates" {
+			continue
+		}
+		apply := plan.Steps[i].Apply
+		plan.Steps[i].Apply = func(ctx context.Context, out io.Writer) error {
+			if err := apply(ctx, out); err != nil {
+				cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				defer cancel()
+				current, lookupErr := store.RevisionWithStatus(cleanup, m.App, state.RevisionActive)
+				if lookupErr != nil {
+					return errors.Join(err, lookupErr)
+				}
+				if current == nil || current.ID != revision {
+					if e, connectErr := connect(cleanup); connectErr == nil {
+						return errors.Join(err, abandon(cleanup, e, out))
+					}
+					return err
+				}
+				message, recoveryErr := revertSwitch(cleanup, store, connect, m.App, revision, containers)
+				if recoveryErr != nil {
+					return fmt.Errorf("%w; recovery failed: %v", err, recoveryErr)
+				}
+				return fmt.Errorf("%w; %s", err, message)
+			}
+			return nil
+		}
+	}
 	return plan, nil
 }
 
@@ -588,33 +629,43 @@ func graceOf(rev *state.Revision, workload string) time.Duration {
 	return 10 * time.Second
 }
 
-// restartSingletons starts again the singleton containers of the active
+// restartStoppedWorkloads starts again stopped long-running containers of the active
 // revision that a deploy of another revision stopped, once that deploy
 // has taken its own containers down.
-func restartSingletons(ctx context.Context, e *docker.Engine, store *state.Store, app, except string, out io.Writer) {
+func restartStoppedWorkloads(ctx context.Context, e *docker.Engine, store *state.Store, app, except string, out io.Writer) error {
 	current, err := store.RevisionWithStatus(ctx, app, state.RevisionActive)
-	if err != nil || current == nil || current.ID == except {
-		return
+	if err != nil {
+		return err
+	}
+	if current == nil || current.ID == except {
+		return nil
 	}
 	var m manifest.Manifest
 	if err := json.Unmarshal(current.Manifest, &m); err != nil {
-		return
+		return err
 	}
+	var failures []error
 	for _, name := range m.WorkloadNames() {
-		if !m.Workloads[name].Singleton {
+		if !m.Workloads[name].LongRunning() {
 			continue
 		}
 		c := current.Containers[name]
 		info, err := e.Inspect(ctx, c)
-		if err != nil || info.Running {
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		if info.Running {
 			continue
 		}
 		if err := e.Start(ctx, c); err != nil {
+			failures = append(failures, err)
 			fmt.Fprintf(out, "starting %s again failed: %v\n", c, err)
 			continue
 		}
 		fmt.Fprintf(out, "%s started again\n", c)
 	}
+	return errors.Join(failures...)
 }
 
 func noteCommit(commit string) string {
@@ -646,15 +697,26 @@ func recordImage(ctx context.Context, store *state.Store, connect func(context.C
 	if err != nil {
 		return err
 	}
+	for _, w := range workloads {
+		images[w] = digest
+	}
+	fmt.Fprintf(out, "%s\n", digest)
+	return saveImageReferences(ctx, store, app, revision, workloads, digest)
+}
+
+// Merge into the durable record: after a daemon restart, earlier build steps
+// are skipped and their images exist only in the store.
+func saveImageReferences(ctx context.Context, store *state.Store, app, revision string, workloads []string, image string) error {
 	rev, err := store.GetRevision(ctx, app, revision)
 	if err != nil {
 		return err
 	}
-	for _, w := range workloads {
-		rev.Images[w] = digest
-		images[w] = digest
+	if rev.Images == nil {
+		rev.Images = map[string]string{}
 	}
-	fmt.Fprintf(out, "%s\n", digest)
+	for _, name := range workloads {
+		rev.Images[name] = image
+	}
 	return store.SaveRevision(ctx, *rev)
 }
 
@@ -1097,15 +1159,21 @@ func revertSwitch(ctx context.Context, store *state.Store, connect func(context.
 	if err != nil {
 		return "", err
 	}
-	if err := edge.NewAdmin().Load(ctx, cfg); err != nil {
+	e, err := connect(ctx)
+	if err != nil {
 		return "", err
 	}
-	if e, err := connect(ctx); err == nil {
-		for _, c := range containers {
-			_ = e.Remove(ctx, c, 5*time.Second)
+	for _, c := range containers {
+		if err := e.Remove(ctx, c, 5*time.Second); err != nil {
+			return "", err
 		}
-		// Only now, with the failed revision's copies gone.
-		restartSingletons(ctx, e, store, app, failed, io.Discard)
+	}
+	// Restore stopped workloads even when the edge itself is unavailable.
+	if err := restartStoppedWorkloads(ctx, e, store, app, failed, io.Discard); err != nil {
+		return "", err
+	}
+	if err := edge.NewAdmin().Load(ctx, cfg); err != nil {
+		return "", err
 	}
 	if prev == nil {
 		return "the edge routes nothing to " + app + " now", nil

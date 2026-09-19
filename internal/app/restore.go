@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kylebegeman/quark/internal/docker"
 	"github.com/kylebegeman/quark/internal/kernel"
@@ -75,6 +76,15 @@ func (r RestoreDef) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 		}
 		var parsed manifest.Manifest
 		if err := json.Unmarshal(data, &parsed); err != nil {
+			return nil, err
+		}
+		if err := parsed.Validate(); err != nil {
+			return nil, fmt.Errorf("snapshot manifest: %w", err)
+		}
+		if parsed.App != app {
+			return nil, fmt.Errorf("snapshot belongs to %s, not %s", parsed.App, app)
+		}
+		if err := requireRestoreSecrets(r.Secrets, &parsed); err != nil {
 			return nil, err
 		}
 		m = &parsed
@@ -201,15 +211,17 @@ func (r RestoreDef) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 			if err := e.EnsureNetwork(ctx, docker.AppNetwork(app)); err != nil {
 				return run.fail(err)
 			}
-			// A new machine has none of the app's secrets: the ones the
-			// manifest makes are made now, and the ones it can't make must
-			// have been set first, as they are for a deploy.
+			// Original credentials were required before touching any volumes.
+			// Only constants and derived values may be filled in here.
 			if err := ensureAppSecrets(r.Secrets, mf, out); err != nil {
 				return run.fail(err)
 			}
 			initDir, err := restoreInit(staging, r.StateDir, app)
 			if err != nil {
 				return run.fail(err)
+			}
+			if keepsOwners(mf) && initDir == "" {
+				return run.fail(errors.New("the snapshot holds no database init scripts"))
 			}
 			if err := ensurePostgres(ctx, e, r.Secrets, mf, initDir, dump, out); err != nil {
 				return run.fail(err)
@@ -303,4 +315,65 @@ func restoreInit(staging, stateDir, app string) (string, error) {
 		}
 	}
 	return dir, nil
+}
+
+// requireRestoreSecrets prevents a restore from silently replacing encryption
+// keys or credentials embedded in restored data. App snapshots deliberately
+// omit secrets; recover the sealed store from the machine backup first.
+func requireRestoreSecrets(store *secrets.Store, m *manifest.Manifest) error {
+	values, _, err := store.LoadCurrent(m.App)
+	if err != nil {
+		return err
+	}
+	required := map[string]bool{}
+	if m.Secrets != nil {
+		for name, format := range m.Secrets.Generate {
+			f, err := manifest.ParseSecretFormat(format)
+			if err != nil {
+				return err
+			}
+			if f.Kind != "value" {
+				required[name] = true
+			}
+		}
+	}
+	for _, w := range m.Workloads {
+		for _, name := range w.Secrets {
+			required[name] = true
+		}
+	}
+	if m.PostgresVersion() != "" {
+		required[postgresPasswordName] = true
+		for _, name := range m.Data.Postgres.Secrets {
+			required[name] = true
+		}
+	}
+	if m.HasObjects() {
+		required[ObjectsUserName], required[ObjectsPasswordName] = true, true
+	}
+	if m.Secrets != nil {
+		for name := range m.Secrets.Derive {
+			delete(required, name)
+		}
+		for name, format := range m.Secrets.Generate {
+			f, _ := manifest.ParseSecretFormat(format)
+			if f.Kind == "value" {
+				delete(required, name)
+			}
+		}
+	}
+	// The conventional URL can be rebuilt from the original service password.
+	if m.InjectsDatabaseURL() {
+		delete(required, DatabaseURLName)
+	}
+	var missing []string
+	for _, name := range sortedKeys(required) {
+		if values[name] == "" {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("restore %s's original secrets from the sealed machine backup before restoring data; missing: %s", m.App, strings.Join(missing, ", "))
+	}
+	return nil
 }
