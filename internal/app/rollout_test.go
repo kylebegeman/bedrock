@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kylebegeman/quark/internal/manifest"
+	"github.com/kylebegeman/quark/internal/restic"
 	"github.com/kylebegeman/quark/internal/secrets"
 	"github.com/kylebegeman/quark/internal/state"
 )
@@ -506,5 +507,23 @@ func TestResumedPullKeepsEarlierImagesAndPinnedSecrets(t *testing.T) {
 	}
 	if rev.Images["built"] != "digest" || rev.Images["pulled"] != "image" || rev.SecretsVersion != 3 || rev.Source != "source-commit" {
 		t.Fatalf("lost saved progress: %+v", rev)
+	}
+}
+
+func TestRestoreKeepsItsSnapshotIdentityAcrossReplanning(t *testing.T) {
+	staging := t.TempDir()
+	original := &restic.Snapshot{ID: "0123456789abcdef", ShortID: "01234567", Time: time.Now().UTC()}
+	if err := writeRestoreSnapshot(staging, original); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := readRestoreSnapshot(staging)
+	if err != nil || resumed.ID != original.ID || !resumed.Time.Equal(original.Time) {
+		t.Fatalf("lost pinned snapshot: %+v %v", resumed, err)
+	}
+	if err := writeRestoreSnapshot(staging, &restic.Snapshot{ID: "latest"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readRestoreSnapshot(staging); err == nil {
+		t.Fatal("accepted a moving snapshot target")
 	}
 }

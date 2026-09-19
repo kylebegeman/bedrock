@@ -131,8 +131,14 @@ func (r RestoreDef) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 			if err != nil {
 				return run.fail(err)
 			}
+			if snapshot == nil {
+				snapshot = &restic.Snapshot{ID: id, ShortID: short(id)}
+			}
+			if err := writeRestoreSnapshot(staging, snapshot); err != nil {
+				return run.fail(err)
+			}
 			when := ""
-			if snapshot != nil {
+			if !snapshot.Time.IsZero() {
 				when = " from " + snapshot.Time.Local().Format("2006-01-02 15:04")
 			}
 			fmt.Fprintf(out, "snapshot %s%s: %s\n", short(id), when, describeData(mf))
@@ -246,7 +252,49 @@ func (r RestoreDef) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 			return nil
 		},
 	})
+	// Recovery must use the same snapshot as fetch, even if a newer backup
+	// appeared while the daemon was down. Re-adopt the backup run as well.
+	for i := range plan.Steps {
+		if plan.Steps[i].Name == "fetch" {
+			continue
+		}
+		apply := plan.Steps[i].Apply
+		plan.Steps[i].Apply = func(ctx context.Context, out io.Writer) error {
+			if err := run.begin(ctx); err != nil {
+				return err
+			}
+			var err error
+			snapshot, err = readRestoreSnapshot(staging)
+			if err != nil {
+				return run.fail(err)
+			}
+			return apply(ctx, out)
+		}
+	}
 	return plan, nil
+}
+
+func writeRestoreSnapshot(staging string, snapshot *restic.Snapshot) error {
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(staging, "restore-snapshot.json"), data, 0o600)
+}
+
+func readRestoreSnapshot(staging string) (*restic.Snapshot, error) {
+	data, err := os.ReadFile(filepath.Join(staging, "restore-snapshot.json"))
+	if err != nil {
+		return nil, fmt.Errorf("restore snapshot identity is missing; fetch the snapshot again: %w", err)
+	}
+	var snapshot restic.Snapshot
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return nil, err
+	}
+	if snapshot.ID == "" || snapshot.ID == "latest" {
+		return nil, errors.New("restore needs a pinned snapshot identity")
+	}
+	return &snapshot, nil
 }
 
 // describeData says what an app keeps, for a restore's first line.
