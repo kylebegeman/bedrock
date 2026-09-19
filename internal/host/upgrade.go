@@ -128,6 +128,11 @@ func (u Upgrade) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, e
 				if identity(now) != identity(target) {
 					return fmt.Errorf("running %s (%s), not %s (%s)", now.Version, now.Commit, target.Version, target.Commit)
 				}
+				// The upgrade is over: a later crash is restarted, never
+				// rolled back.
+				if err := os.Remove(env.Path(StagedMarker)); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return err
+				}
 				fmt.Fprintf(out, "upgraded to %s (%s)\n", now.Version, now.Commit)
 				return nil
 			},
@@ -173,17 +178,24 @@ func copyFile(from, to string) error {
 	return os.Rename(tmp, to)
 }
 
-// RollbackScriptContent is what systemd runs when the daemon can't start:
-// it puts the previous binary back and starts the daemon again. It must not
-// depend on the quark binary, which is the thing that's broken.
+// RollbackScriptContent is what systemd runs when the daemon fails. It
+// puts the previous binary back only when an upgrade staged the running
+// one within the last ten minutes: a daemon that crashes long after its
+// upgrade verified is restarted, never downgraded. It must not depend on
+// the quark binary, which may be the thing that's broken.
 const RollbackScriptContent = `#!/bin/sh
-# Installed by quark. Runs when quark.service hits its start limit.
+# Installed by quark. Runs when quark.service fails.
 set -eu
-if [ -f /usr/local/lib/quark/previous ]; then
-  cp /usr/local/lib/quark/previous /usr/local/bin/quark.rollback
+lib=/usr/local/lib/quark
+if [ -f "$lib/staged" ] && [ -f "$lib/previous" ] && [ -n "$(find "$lib/staged" -mmin -10 2>/dev/null)" ]; then
+  cp "$lib/previous" /usr/local/bin/quark.rollback
   chmod 755 /usr/local/bin/quark.rollback
   mv -f /usr/local/bin/quark.rollback /usr/local/bin/quark
-  echo "quark: put the previous binary back"
+  rm -f "$lib/staged"
+  echo "quark: the upgrade didn't start; put the previous binary back"
+else
+  find "$lib" -maxdepth 1 -name 'staged*' -mmin +10 -delete 2>/dev/null || true
+  echo "quark: the daemon failed with no upgrade in flight; the binary stays and systemd restarts it"
 fi
 systemctl reset-failed quark.service
 systemctl start quark.service

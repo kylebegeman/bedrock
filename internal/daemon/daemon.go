@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kylebegeman/quark/internal/api"
@@ -115,7 +116,13 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	if cfg.SweepInterval <= 0 {
 		cfg.SweepInterval = 5 * time.Second
 	}
-	logf := func(format string, args ...any) { fmt.Fprintf(logw, format+"\n", args...) }
+	// Many loops log; one line at a time, whatever logw is.
+	var logMu sync.Mutex
+	logf := func(format string, args ...any) {
+		logMu.Lock()
+		defer logMu.Unlock()
+		fmt.Fprintf(logw, format+"\n", args...)
+	}
 	// A build whose version says "-broken" is the lane's fixture for a bad
 	// upgrade: it must fail to start so systemd rolls the binary back.
 	if strings.Contains(version.Current().Version, "-broken") {
@@ -127,6 +134,7 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 		return err
 	}
 	defer store.Close()
+	clearStaleUpgrade(logf)
 	sec := secrets.DefaultStore(cfg.StateDir)
 	engine := kernel.New(store, RegistryIn(store, sec, cfg.Socket, cfg.StateDir), cfg.Owner)
 	logf("quark daemon %s, state %s, owner %s", version.Current().Version, store.Path(), cfg.Owner)
@@ -307,4 +315,17 @@ func listenHooks() (net.Listener, error) {
 		return nil, err
 	}
 	return l, nil
+}
+
+// clearStaleUpgrade removes an upgrade marker too old to belong to an
+// upgrade in flight, so the rollback unit never acts on it; an upgrade
+// that verified removes its own. The .restarting marker is an older
+// quark's.
+func clearStaleUpgrade(logf func(string, ...any)) {
+	if info, err := os.Stat(host.StagedMarker); err == nil && time.Since(info.ModTime()) > 10*time.Minute {
+		if os.Remove(host.StagedMarker) == nil {
+			logf("cleared a stale upgrade marker from %s", info.ModTime().UTC().Format(time.RFC3339))
+		}
+	}
+	_ = os.Remove(host.StagedMarker + ".restarting")
 }

@@ -40,6 +40,7 @@ lane/prove-m2.sh              # the host: setup, a maintenance reboot, an upgrad
 lane/prove-m3.sh              # deploys: certificates, a second revision, a rollback, a failing check
 lane/prove-m4.sh <staging>    # secrets, cron, one-off commands, begamin and Dragon Writer from their archives
 lane/prove-m5.sh              # backups to per-app buckets, a drill, a restore, signals, one email per outage
+lane/prove-m6.sh [begamin]    # git push deploys begamin with its records, no app reaches another, dns point, a webhook
 ```
 
 `prove-m5.sh` needs the apps `prove-m4.sh` leaves behind. It runs two
@@ -48,3 +49,9 @@ fixtures on the box that quark doesn't manage: a mail sink (mailpit on
 email and storage integrations have something to talk to without any real
 credential leaving the machine. On the real machines the same integrations
 point at a mail provider and Backblaze B2.
+
+`prove-m6.sh` clones begamin's repository from this Mac (its argument, by
+default `~/Developer/active/begamin`) into a temporary directory and commits
+a lane manifest there; nothing is pushed anywhere but the box. It runs a
+stand-in for Cloudflare's API on the box (`lane/fixtures/fakeflare`, on
+127.0.0.1:8788), and makes a throwaway SSH key for the pushes.

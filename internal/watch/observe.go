@@ -47,8 +47,10 @@ type Prober struct {
 	// Root is the filesystem whose free space matters.
 	Root string
 
-	mu       sync.Mutex
-	restarts map[string]int
+	mu sync.Mutex
+	// restarts is written by one goroutine per app in a round.
+	restartsMu sync.Mutex
+	restarts   map[string]int
 }
 
 // NewProber returns a prober for this machine.
@@ -143,11 +145,14 @@ func (p *Prober) app(ctx context.Context, e *docker.Engine, rev state.Revision) 
 			worse(state.SeverityCritical)
 			continue
 		}
-		if last, seen := p.restarts[container]; seen && info.Restarts > last {
+		p.restartsMu.Lock()
+		last, seen := p.restarts[container]
+		p.restarts[container] = info.Restarts
+		p.restartsMu.Unlock()
+		if seen && info.Restarts > last {
 			problems = append(problems, fmt.Sprintf("%s keeps restarting (%d restarts)", name, info.Restarts))
 			worse(state.SeverityCritical)
 		}
-		p.restarts[container] = info.Restarts
 		if w.Health != nil && w.Health.Path != "" && w.Serves() {
 			if why := healthProblem(ctx, info, w); why != "" {
 				problems = append(problems, fmt.Sprintf("%s's %s %s", name, w.Health.Path, why))

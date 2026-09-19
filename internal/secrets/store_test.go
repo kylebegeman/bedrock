@@ -1,9 +1,11 @@
 package secrets
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -106,5 +108,28 @@ func TestValuesAreSealedOnDisk(t *testing.T) {
 	}
 	if _, err := other.Load("hello", 1); err == nil {
 		t.Fatal("a different key must not decrypt the store")
+	}
+}
+
+func TestConcurrentChangesLoseNothing(t *testing.T) {
+	dir := t.TempDir()
+	s := &Store{Dir: filepath.Join(dir, "secrets"), KeyPath: filepath.Join(dir, "key")}
+	if _, _, _, err := s.EnsureKey(); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if _, err := s.Set("app", fmt.Sprintf("NAME_%d", i), "v"); err != nil {
+				t.Error(err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	values, version, err := s.LoadCurrent("app")
+	if err != nil || len(values) != 20 || version != 20 {
+		t.Fatalf("%d names in version %d (%v): every change must build on the one before", len(values), version, err)
 	}
 }

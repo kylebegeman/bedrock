@@ -174,6 +174,20 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 			return nil
 		},
 	})
+	// Names first: a record that points at another machine stops the
+	// deploy before it costs a build.
+	if len(hosts) > 0 {
+		change := "confirm " + strings.Join(hosts, ", ") + " point at this machine"
+		if managed := m.ManagedHosts(); len(managed) > 0 {
+			change = "keep the DNS records for " + strings.Join(sortedKeys(managed), ", ") + " and confirm every host points here"
+		}
+		add(kernel.Step{
+			Name: "dns", Change: change,
+			Apply: func(ctx context.Context, out io.Writer) error {
+				return keepRecords(ctx, d.Secrets, m, d.Addresses(ctx), out)
+			},
+		})
+	}
 	if m.Data != nil {
 		var restore Restore
 		if from != nil {
@@ -348,18 +362,6 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 					fmt.Fprintf(out, "%s ok\n", c.URL)
 				}
 				return nil
-			},
-		})
-	}
-	if len(hosts) > 0 {
-		change := "confirm " + strings.Join(hosts, ", ") + " point at this machine"
-		if managed := m.ManagedHosts(); len(managed) > 0 {
-			change = "keep the DNS records for " + strings.Join(sortedKeys(managed), ", ") + " and confirm every host points here"
-		}
-		add(kernel.Step{
-			Name: "dns", Change: change,
-			Apply: func(ctx context.Context, out io.Writer) error {
-				return keepRecords(ctx, d.Secrets, m, d.Addresses(ctx), out)
 			},
 		})
 	}

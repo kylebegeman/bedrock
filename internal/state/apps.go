@@ -209,6 +209,24 @@ func (s *Store) Apps(ctx context.Context) ([]App, error) {
 	return out, rows.Err()
 }
 
+// AppNames lists every app with a revision, deployed or not.
+func (s *Store) AppNames(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT app FROM revisions ORDER BY app`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out = append(out, name)
+	}
+	return out, rows.Err()
+}
+
 // ActiveRevisions returns every app's active revision.
 func (s *Store) ActiveRevisions(ctx context.Context) ([]Revision, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT app, id, status, manifest, images, containers, source, secrets_version, created_at FROM revisions WHERE status = ? ORDER BY app`, string(RevisionActive))

@@ -116,8 +116,12 @@ func (j *Jobs) execute(ctx context.Context, e *docker.Engine, spec docker.Spec, 
 	if err := e.Run(ctx, spec); err != nil {
 		return -1, err
 	}
+	// The log copy may outlive the wait by a moment; once the job is done
+	// it writes nowhere, so the step's output is never written after it ends.
+	guarded := &closingWriter{w: out}
+	defer guarded.close()
 	logs := make(chan error, 1)
-	go func() { logs <- e.Logs(ctx, spec.Name, true, "all", out) }()
+	go func() { logs <- e.Logs(ctx, spec.Name, true, "all", guarded) }()
 	code, err := e.WaitExit(ctx, spec.Name)
 	if errors.Is(err, context.DeadlineExceeded) {
 		_ = e.Remove(context.Background(), spec.Name, time.Second)
@@ -253,4 +257,26 @@ func (r RunDefinition) Plan(ctx context.Context, raw json.RawMessage) (*kernel.P
 			return err
 		},
 	}}}, nil
+}
+
+// closingWriter forwards writes until it is closed, then drops them.
+type closingWriter struct {
+	mu     sync.Mutex
+	w      io.Writer
+	closed bool
+}
+
+func (c *closingWriter) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return len(p), nil
+	}
+	return c.w.Write(p)
+}
+
+func (c *closingWriter) close() {
+	c.mu.Lock()
+	c.closed = true
+	c.mu.Unlock()
 }

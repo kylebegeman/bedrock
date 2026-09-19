@@ -162,6 +162,19 @@ func TestUpgradeResumedOnTheNewBuildSucceeds(t *testing.T) {
 	if m.ranCommand("systemctl restart") {
 		t.Fatal("no restart when the new build is already running")
 	}
+	// Verified: the marker goes, so a crash later is restarted by systemd
+	// and never rolled back to the previous build.
+	if m.read(StagedMarker) != "" {
+		t.Fatalf("the staged marker outlived a verified upgrade: %q", m.read(StagedMarker))
+	}
+}
+
+func TestTheRollbackScriptOnlyActsOnAFreshUpgrade(t *testing.T) {
+	for _, want := range []string{`-f "$lib/staged"`, `-mmin -10`, `rm -f "$lib/staged"`, "the binary stays and systemd restarts it"} {
+		if !strings.Contains(RollbackScriptContent, want) {
+			t.Errorf("the rollback script lacks %q", want)
+		}
+	}
 }
 
 func TestUpgradeRefusesWrongBinaries(t *testing.T) {

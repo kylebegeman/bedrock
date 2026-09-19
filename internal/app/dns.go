@@ -173,28 +173,15 @@ func (p Point) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, err
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return nil, fmt.Errorf("point input: %w", err)
 	}
-	active, err := p.Store.ActiveRevisions(ctx)
+	// The app that routes the host: an active one, or else the newest
+	// revision that asked for it, such as a first deploy that stopped
+	// because the name still pointed at the old machine.
+	app, mode, err := routedBy(ctx, p.Store, in.Host)
 	if err != nil {
 		return nil, err
 	}
-	app := ""
-	mode := manifest.DNSDirect
-	for _, rev := range active {
-		var m manifest.Manifest
-		if err := json.Unmarshal(rev.Manifest, &m); err != nil {
-			continue
-		}
-		for _, h := range m.Hosts() {
-			if h == in.Host {
-				app = rev.App
-				if managed, ok := m.ManagedHosts()[h]; ok {
-					mode = managed
-				}
-			}
-		}
-	}
 	if app == "" {
-		return nil, fmt.Errorf("no app on this machine routes %s; deploy the app first, then point its name here", in.Host)
+		return nil, fmt.Errorf("no app on this machine routes %s; deploy the app with it first, then point its name here", in.Host)
 	}
 	if in.Proxied {
 		mode = manifest.DNSProxied
@@ -246,4 +233,49 @@ func Routes(ctx context.Context, store *state.Store) ([]dns.Route, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Host < out[j].Host })
 	return out, nil
+}
+
+// routedBy finds the app whose revisions route a host, preferring an
+// active revision, and the record mode it asks for.
+func routedBy(ctx context.Context, store *state.Store, host string) (string, manifest.DNSMode, error) {
+	apps, err := store.AppNames(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	type found struct {
+		app    string
+		mode   manifest.DNSMode
+		active bool
+		at     time.Time
+	}
+	var best *found
+	for _, name := range apps {
+		revs, err := store.Revisions(ctx, name)
+		if err != nil {
+			return "", "", err
+		}
+		for _, rev := range revs {
+			var m manifest.Manifest
+			if err := json.Unmarshal(rev.Manifest, &m); err != nil {
+				continue
+			}
+			for _, h := range m.Hosts() {
+				if h != host {
+					continue
+				}
+				mode := m.ManagedHosts()[h]
+				if mode == manifest.DNSManual {
+					mode = manifest.DNSDirect
+				}
+				f := found{rev.App, mode, rev.Status == state.RevisionActive, rev.CreatedAt}
+				if best == nil || (f.active && !best.active) || (f.active == best.active && f.at.After(best.at)) {
+					best = &f
+				}
+			}
+		}
+	}
+	if best == nil {
+		return "", "", nil
+	}
+	return best.app, best.mode, nil
 }

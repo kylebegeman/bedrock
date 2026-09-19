@@ -35,12 +35,18 @@ workloads:
     port: 8000
     routes:
       - host: hello.example.com
+        dns: direct        # quark keeps the Cloudflare record (or proxied)
       - host: example.com
         path: /hello       # a prefix; longest wins on a host
     env: {GREETING: hello}
     secrets: [API_KEY]     # names only; values live in quark's store
     health: {path: /healthz}
-    resources: {memory: 256m, cpus: 0.5}
+    resources: {memory: 256m, cpus: 0.5}   # memory defaults to 2g
+    tmpfs: [/app/.cache]   # writable in memory; the root filesystem is read-only
+    # user: "1000:1000"    # default: the image's user, or nobody for a root image
+    # capabilities: [NET_BIND_SERVICE]     # default: none at all
+    # writable_root: true  # the explicit way out of a read-only root
+    # privileged: true     # for the rare workload that runs containers
   site:
     kind: static
     dir: public            # served by a file server
@@ -71,6 +77,43 @@ switches the edge, waits for certificates, checks again through the edge
 and retires the replaced revision, which `quark rollback` can bring back.
 Every container is told its `QUARK_APP`, `QUARK_WORKLOAD` and
 `QUARK_REVISION`.
+
+## How apps are kept apart
+
+Each app runs as if it were alone on the machine. Its workloads share a
+network with each other and its database; the ones that serve traffic also
+share a network with the edge, and with nothing else. No app can reach
+another app's containers or database, or the edge's admin API, which is a
+socket only the machine reaches. By default a workload has no Linux
+capabilities, can't gain privileges, runs as its image's user (or nobody,
+when the image would run as root), has a read-only root filesystem with
+/tmp in memory, and is bounded to 2 GiB and 4096 processes. The manifest
+fields above are the explicit ways out, and `quark exposure` shows each
+container as Docker runs it: its user, privileges, root filesystem,
+networks, published ports and mounts, and anything that shares a network
+it shouldn't.
+
+## Deploying without a pipeline
+
+A route with `dns: direct` or `dns: proxied` gets its Cloudflare record from
+the deploy, which refuses a record that points at another machine; `quark
+dns point <host>` moves one on purpose. Retiring a route, or the app,
+removes its record. `quark dns` explains every host; `quark dns audit`
+finds records that point here with nothing routed.
+
+`quark git allow <app> <public key>` lets a key push that app and nothing
+else. Then, from the app's checkout:
+
+```sh
+git remote add quark quark@<machine>:<app>.git
+git push quark main        # deploys, and streams every step back
+```
+
+A push whose deploy fails is refused, so the branch on the machine is what
+runs. `quark deploy . --to quark@<machine>` sends a working tree the same
+way, commit or not. `quark git webhook <app> --repo git@github.com:you/app.git`
+deploys when GitHub says the branch moved, with a deploy key and secret
+quark makes and shows once.
 
 ## What quark keeps an eye on
 

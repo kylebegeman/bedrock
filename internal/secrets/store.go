@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"filippo.io/age"
@@ -155,6 +156,11 @@ func (s *Store) LoadCurrent(app string) (map[string]string, int, error) {
 
 // Set records a value and returns the new version.
 func (s *Store) Set(app, name, value string) (int, error) {
+	unlock, err := s.lock(app)
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
 	if !ValidName(name) {
 		return 0, fmt.Errorf("%q must be an UPPER_CASE name", name)
 	}
@@ -169,6 +175,11 @@ func (s *Store) Set(app, name, value string) (int, error) {
 // SetAll records several values in one new version. A nil value in the
 // map removes the name. Names outside the map are kept.
 func (s *Store) SetAll(app string, changes map[string]*string) (int, error) {
+	unlock, err := s.lock(app)
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
 	values, _, err := s.LoadCurrent(app)
 	if err != nil {
 		return 0, err
@@ -188,6 +199,11 @@ func (s *Store) SetAll(app string, changes map[string]*string) (int, error) {
 
 // Remove drops a name and returns the new version.
 func (s *Store) Remove(app, name string) (int, error) {
+	unlock, err := s.lock(app)
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
 	values, _, err := s.LoadCurrent(app)
 	if err != nil {
 		return 0, err
@@ -250,6 +266,28 @@ func (s *Store) write(app string, values map[string]string) (int, error) {
 		return 0, err
 	}
 	return next, nil
+}
+
+// lock holds an app's secrets for one change, across processes: the CLI
+// and the daemon can both set secrets, and each change reads the current
+// version before writing the next.
+func (s *Store) lock(app string) (func(), error) {
+	dir := s.appDir(app)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		f.Close()
+	}, nil
 }
 
 // Versions lists an app's versions, newest first, without values.
