@@ -527,3 +527,50 @@ func TestRestoreKeepsItsSnapshotIdentityAcrossReplanning(t *testing.T) {
 		t.Fatal("accepted a moving snapshot target")
 	}
 }
+
+func TestRestoreResumeAdoptsItsRunAndUsesTheFetchedSnapshot(t *testing.T) {
+	ctx := context.Background()
+	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	stateDir := t.TempDir()
+	staging := filepath.Join(stateDir, "restore", "test")
+	if err := os.MkdirAll(staging, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mf, _ := json.Marshal(manifest.Manifest{App: "test", Workloads: map[string]manifest.Workload{"worker": {Kind: manifest.Worker, Image: "fixture"}}})
+	if err := os.WriteFile(filepath.Join(staging, "manifest.json"), mf, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := &restic.Snapshot{ID: "0123456789abcdef", ShortID: "01234567", Time: time.Now().UTC()}
+	if err := writeRestoreSnapshot(staging, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	id, err := store.StartBackupRun(ctx, "test", state.BackupRunRestore, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := RestoreDef{Store: store, Secrets: newSecrets(t), StateDir: stateDir}
+	plan, err := r.Plan(ctx, json.RawMessage(`{"app":"test","snapshot":"latest"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The kernel skips the completed fetch when it replans after a crash.
+	for _, step := range plan.Steps {
+		if step.Name == "fetch" {
+			continue
+		}
+		if err := step.Apply(ctx, io.Discard); err != nil {
+			t.Fatalf("%s: %v", step.Name, err)
+		}
+	}
+	run, err := store.LastBackupRun(ctx, "test", state.BackupRunRestore)
+	if err != nil || run == nil {
+		t.Fatalf("missing recovery record: %v", err)
+	}
+	if run.ID != id || !run.OK || run.Snapshot != snapshot.ShortID || !run.Finished() {
+		t.Fatalf("incorrect recovery receipt: %+v", run)
+	}
+}
