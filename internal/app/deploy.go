@@ -58,6 +58,8 @@ type DeployInput struct {
 	// Commit is the source's commit when the caller knows it, as a push
 	// does; otherwise it is read from the source when it is a checkout.
 	Commit string `json:"commit,omitempty"`
+	// Manifest names the manifest at the source's root; empty is quark.yaml.
+	Manifest string `json:"manifest,omitempty"`
 }
 
 var revisionPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{3,40}$`)
@@ -77,12 +79,13 @@ func (d Deploy) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 	if !revisionPattern.MatchString(in.Revision) {
 		return nil, fmt.Errorf("revision %q must be lowercase letters, digits and hyphens", in.Revision)
 	}
-	// The manifest is read as root: it must be a file of the source's own,
-	// never a link out of it.
-	if info, err := os.Lstat(filepath.Join(in.Source, manifest.FileName)); err == nil && !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s must be a plain file, not a link", manifest.FileName)
+	// The manifest is read as root: LoadFile takes only a plain file of
+	// the source's own, never a link out of it.
+	name := in.Manifest
+	if name == "" {
+		name = manifest.FileName
 	}
-	m, err := manifest.Load(in.Source)
+	m, err := manifest.LoadFile(in.Source, name)
 	if err != nil {
 		return nil, err
 	}

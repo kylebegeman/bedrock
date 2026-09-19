@@ -26,6 +26,7 @@ func newDeploy(a *app) *cobra.Command {
 		restorePostgres string
 		restoreVolumes  []string
 		to              string
+		manifestName    string
 	)
 	cmd := &cobra.Command{
 		Use:   "deploy <source-dir>",
@@ -36,7 +37,7 @@ func newDeploy(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			m, err := manifest.Load(source)
+			m, err := manifest.LoadFile(source, manifestName)
 			if err != nil {
 				return err
 			}
@@ -44,9 +45,15 @@ func newDeploy(a *app) *cobra.Command {
 				if restorePostgres != "" || len(restoreVolumes) > 0 {
 					return fmt.Errorf("restores read files on the machine; run them there")
 				}
+				if manifestName != manifest.FileName {
+					return fmt.Errorf("--to sends the source with its quark.yaml; deploy another manifest on the machine")
+				}
 				return deployTo(cmd.Context(), a, source, m.App, to)
 			}
 			in := apps.DeployInput{Source: source, Revision: time.Now().UTC().Format("20060102-150405")}
+			if manifestName != manifest.FileName {
+				in.Manifest = manifestName
+			}
 			if restorePostgres != "" {
 				if in.Restore.Postgres, err = filepath.Abs(restorePostgres); err != nil {
 					return err
@@ -70,6 +77,7 @@ func newDeploy(a *app) *cobra.Command {
 	cmd.Flags().StringVar(&restorePostgres, "restore-postgres", "", "a pg_dump file to load into the app's empty database first")
 	cmd.Flags().StringArrayVar(&restoreVolumes, "restore-volume", nil, "name=file.tar.gz to unpack into an empty volume first")
 	cmd.Flags().StringVar(&to, "to", "", "send the source to a machine over SSH, such as quark@203.0.113.7, and deploy it there ($QUARK_SSH replaces ssh)")
+	cmd.Flags().StringVar(&manifestName, "manifest", manifest.FileName, "the manifest at the source's root, for a source that holds several apps")
 	a.mutatingFlags(cmd, &planOnly)
 	return cmd
 }

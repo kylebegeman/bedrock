@@ -347,11 +347,40 @@ func Parse(data []byte) (*Manifest, error) {
 
 // Load reads dir/quark.yaml.
 func Load(dir string) (*Manifest, error) {
-	data, err := os.ReadFile(filepath.Join(dir, FileName))
+	return LoadFile(dir, FileName)
+}
+
+// LoadFile reads a manifest by name from a source directory, for a source
+// that holds several apps, such as a product and the worker it runs apart.
+// The name is a plain YAML file at the source's root; it is read as root, so
+// it must be the source's own file, never a link out of it.
+func LoadFile(dir, name string) (*Manifest, error) {
+	if err := CheckFileName(name); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(dir, name)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s must be a plain file, not a link", name)
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 	return Parse(data)
+}
+
+// CheckFileName refuses a manifest name that isn't a plain .yaml or .yml
+// file at a source's root.
+func CheckFileName(name string) error {
+	if name == "" || name != filepath.Base(name) || strings.HasPrefix(name, ".") ||
+		!(strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml")) {
+		return fmt.Errorf("%q must name a .yaml file at the source's root, such as quark.worker.yaml", name)
+	}
+	return nil
 }
 
 // Validate checks a manifest. The errors name the field in the person's

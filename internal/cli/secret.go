@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/kylebegeman/quark/internal/manifest"
 	"github.com/kylebegeman/quark/internal/secrets"
 )
 
@@ -112,7 +113,48 @@ func newSecret(a *app) *cobra.Command {
 			return w.Flush()
 		},
 	}
-	cmd.AddCommand(set, list, remove, versions)
+	copySecret := &cobra.Command{
+		Use:   "copy <from-app> <NAME> <to-app>",
+		Short: "Give another app the same value of a secret, without showing it.",
+		Long: `Give another app the same value of a secret, without showing it: for
+two apps that must share a credential, such as a worker that pairs with
+the product that made its token. The value never leaves the machine's
+store. Copying the same value again changes nothing.`,
+		Args: cobra.ExactArgs(3),
+		RunE: func(_ *cobra.Command, args []string) error {
+			from, name, to := args[0], args[1], args[2]
+			if from == manifest.ReservedApp || to == manifest.ReservedApp {
+				return fmt.Errorf("the integrations' credentials stay quark's own")
+			}
+			if from == to {
+				return fmt.Errorf("%s would copy onto itself", name)
+			}
+			store := a.secretsStore()
+			values, _, err := store.LoadCurrent(from)
+			if err != nil {
+				return err
+			}
+			value, ok := values[name]
+			if !ok {
+				return fmt.Errorf("%s has no secret named %s", from, name)
+			}
+			current, _, err := store.LoadCurrent(to)
+			if err != nil {
+				return err
+			}
+			if existing, ok := current[name]; ok && existing == value {
+				fmt.Fprintf(a.stdout, "%s: %s already matches %s's\n", to, name, from)
+				return nil
+			}
+			version, err := store.Set(to, name, value)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(a.stdout, "%s: %s copied from %s; secrets version %d. The next deploy uses it.\n", to, name, from, version)
+			return nil
+		},
+	}
+	cmd.AddCommand(set, list, remove, versions, copySecret)
 	return cmd
 }
 

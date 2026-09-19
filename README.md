@@ -141,6 +141,11 @@ before it loads the dump. `quark run --secret NAME` gives a one-off command
 one more secret, and `quark run --stdin` hands it this terminal's input
 without recording it anywhere.
 
+One source can hold several apps, such as a product and a worker that runs
+other people's code apart from its data: `quark deploy <dir> --manifest
+quark.worker.yaml` deploys the other one, and `quark secret copy <app> NAME
+<other-app>` gives it a secret the first made, without showing it.
+
 ## How apps are kept apart
 
 Each app runs as if it were alone on the machine. Its workloads share a

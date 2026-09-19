@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/kylebegeman/quark/internal/kernel"
+	"github.com/kylebegeman/quark/internal/secrets"
 	"github.com/kylebegeman/quark/internal/version"
 )
 
@@ -111,5 +112,39 @@ func TestAFailedOperationFailsTheCommand(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "step-1")); err == nil {
 		t.Fatal("step-1 should have been undone")
+	}
+}
+
+func TestSecretCopyGivesAnotherAppTheSameValueUnseen(t *testing.T) {
+	stateDir := t.TempDir()
+	store := secrets.DefaultStore(stateDir)
+	if _, _, _, err := store.EnsureKey(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Set("loom", "RUNNER_TOKEN", "s3cret-value"); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, code := run(t, stateDir, "secret", "copy", "loom", "RUNNER_TOKEN", "loom-runner")
+	if code != 0 || !strings.Contains(out, "copied from loom") || strings.Contains(out+errOut, "s3cret-value") {
+		t.Fatalf("code %d, out %q, stderr %q", code, out, errOut)
+	}
+	values, version, err := store.LoadCurrent("loom-runner")
+	if err != nil || values["RUNNER_TOKEN"] != "s3cret-value" {
+		t.Fatalf("copied value: %v", err)
+	}
+	// The same value again makes no new version.
+	out, _, code = run(t, stateDir, "secret", "copy", "loom", "RUNNER_TOKEN", "loom-runner")
+	if _, again, _ := store.LoadCurrent("loom-runner"); code != 0 || again != version || !strings.Contains(out, "already matches") {
+		t.Fatalf("second copy: code %d, version %d then %d, out %q", code, version, again, out)
+	}
+	for _, args := range [][]string{
+		{"quark", "EMAIL_PASSWORD", "loom"},
+		{"loom", "RUNNER_TOKEN", "quark"},
+		{"loom", "MISSING", "loom-runner"},
+		{"loom", "RUNNER_TOKEN", "loom"},
+	} {
+		if _, errOut, code := run(t, stateDir, append([]string{"secret", "copy"}, args...)...); code == 0 {
+			t.Fatalf("secret copy %v must be refused: %q", args, errOut)
+		}
 	}
 }
