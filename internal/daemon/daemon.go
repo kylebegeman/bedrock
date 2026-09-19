@@ -79,13 +79,13 @@ func registry(store *state.Store, sec *secrets.Store, socket, stateDir string) k
 	}})
 	reg.Add(host.Maintain{Env: env, Socket: socket})
 	reg.Add(host.Upgrade{Env: env})
-	deploy := app.Deploy{Store: store, Secrets: sec, Addresses: func(ctx context.Context) []string { return host.Addresses(ctx, env) }}
+	deploy := app.Deploy{Store: store, Secrets: sec, StateDir: stateDir, Addresses: func(ctx context.Context) []string { return host.Addresses(ctx, env) }}
 	reg.Add(deploy)
 	reg.Add(app.Rollback{Deploy: deploy})
 	reg.Add(app.GC{Store: store})
 	reg.Add(app.RunDefinition{Jobs: app.NewJobs(store, sec)})
 	addresses := func(ctx context.Context) []string { return host.Addresses(ctx, env) }
-	reg.Add(app.Remove{Store: store, Secrets: sec, Addresses: addresses})
+	reg.Add(app.Remove{Store: store, Secrets: sec, Addresses: addresses, StateDir: stateDir})
 	reg.Add(app.Point{Store: store, Secrets: sec, Addresses: addresses})
 	reg.Add(app.Backup{Store: store, Secrets: sec, StateDir: stateDir, Hostname: hostname})
 	reg.Add(app.Drill{Store: store, Secrets: sec, StateDir: stateDir})

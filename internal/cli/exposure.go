@@ -44,6 +44,10 @@ func roleOf(x docker.Exposure) (role, workload string) {
 		return "the image registry", ""
 	case x.Labels[docker.LabelWorkload] == "postgres":
 		return "database", "postgres"
+	case x.Labels[docker.LabelWorkload] == "objects":
+		return "object store", "objects"
+	case x.Labels[docker.LabelWorkload] == "drill":
+		return "restore drill", "drill"
 	case x.Labels[docker.LabelWorkload] != "":
 		return "workload", x.Labels[docker.LabelWorkload]
 	}
@@ -71,7 +75,7 @@ func buildExposure(xs []docker.Exposure) exposureReport {
 		row := exposureRow{Exposure: x, Role: role, Workload: workload}
 		for _, n := range x.Networks {
 			row.Nets = append(row.Nets, networkRole(x.App, n))
-			if role == "workload" || role == "database" {
+			if role == "workload" || role == "database" || role == "object store" || role == "restore drill" {
 				if members[n] == nil {
 					members[n] = map[string]bool{}
 				}
@@ -208,8 +212,8 @@ func roleWord(row exposureRow) string {
 	if row.Role == "workload" {
 		return row.App + " " + row.Workload
 	}
-	if row.Role == "database" {
-		return row.App + " database"
+	if row.Role == "database" || row.Role == "object store" || row.Role == "restore drill" {
+		return row.App + " " + row.Role
 	}
 	return row.Role
 }

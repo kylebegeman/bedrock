@@ -114,7 +114,7 @@ func (r RestoreDef) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 			if snapshot != nil {
 				id = snapshot.ID
 			}
-			if _, err := rs.Restore(ctx, id, app, []string{restic.DirMount(staging, false)}, restic.DataRoot+"/manifest.json", restic.DataRoot+"/postgres.dump"); err != nil {
+			if _, err := rs.Restore(ctx, id, app, []string{restic.DirMount(staging, false)}, restic.DataRoot+"/manifest.json", restic.DataRoot+"/postgres.dump", restic.DataRoot+"/"+initSnapshotDir); err != nil {
 				return run.fail(err)
 			}
 			mf, err := loadStaged()
@@ -136,7 +136,7 @@ func (r RestoreDef) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 			if err != nil {
 				return run.fail(err)
 			}
-			if mf.Data == nil || len(mf.Data.Volumes) == 0 {
+			if len(mf.DataVolumes()) == 0 {
 				fmt.Fprintln(out, "no volumes")
 				return nil
 			}
@@ -146,7 +146,7 @@ func (r RestoreDef) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 			}
 			defer e.Close()
 			var mounts, includes []string
-			for _, v := range sortedKeys(mf.Data.Volumes) {
+			for _, v := range mf.DataVolumes() {
 				vol := docker.VolumeName(app, v)
 				if err := e.EnsureVolume(ctx, vol); err != nil {
 					return run.fail(err)
@@ -201,7 +201,17 @@ func (r RestoreDef) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 			if err := e.EnsureNetwork(ctx, docker.AppNetwork(app)); err != nil {
 				return run.fail(err)
 			}
-			if err := ensurePostgres(ctx, e, r.Secrets, mf, version, dump, out); err != nil {
+			// A new machine has none of the app's secrets: the ones the
+			// manifest makes are made now, and the ones it can't make must
+			// have been set first, as they are for a deploy.
+			if err := ensureAppSecrets(r.Secrets, mf, out); err != nil {
+				return run.fail(err)
+			}
+			initDir, err := restoreInit(staging, r.StateDir, app)
+			if err != nil {
+				return run.fail(err)
+			}
+			if err := ensurePostgres(ctx, e, r.Secrets, mf, initDir, dump, out); err != nil {
 				return run.fail(err)
 			}
 			return nil
@@ -236,7 +246,7 @@ func describeData(m *manifest.Manifest) string {
 	if v := m.PostgresVersion(); v != "" {
 		parts = append(parts, "postgres "+v)
 	}
-	if n := len(m.Data.Volumes); n == 1 {
+	if n := len(m.DataVolumes()); n == 1 {
 		parts = append(parts, "1 volume")
 	} else if n > 1 {
 		parts = append(parts, fmt.Sprintf("%d volumes", n))
@@ -256,4 +266,41 @@ func joinWords(parts []string) string {
 	default:
 		return parts[0] + " and " + parts[1]
 	}
+}
+
+// initSnapshotDir is where a snapshot keeps the database's first-run
+// scripts, which a restore on a new machine runs again before the dump.
+const initSnapshotDir = "postgres-init"
+
+// restoreInit puts the first-run scripts a snapshot holds where the
+// database mounts them, and returns that directory, or "" without any.
+func restoreInit(staging, stateDir, app string) (string, error) {
+	from := filepath.Join(staging, initSnapshotDir)
+	if !dirExists(from) {
+		return "", nil
+	}
+	entries, err := os.ReadDir(from)
+	if err != nil {
+		return "", err
+	}
+	dir := InitDir(stateDir, app)
+	if err := resetDir(dir); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		return "", err
+	}
+	for _, entry := range entries {
+		if !entry.Type().IsRegular() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(from, entry.Name()))
+		if err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(filepath.Join(dir, entry.Name()), data, 0o644); err != nil {
+			return "", err
+		}
+	}
+	return dir, nil
 }

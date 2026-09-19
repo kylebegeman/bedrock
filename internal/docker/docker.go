@@ -143,6 +143,11 @@ type Spec struct {
 	Tmpfs    []string
 	// PidsLimit bounds the processes in the container; 0 means the default.
 	PidsLimit int64
+	// Aliases are more names the container answers to on its first network.
+	Aliases []string
+	// Stdin, when set, is copied to the container's standard input, which
+	// is closed at its end.
+	Stdin io.Reader
 }
 
 // DefaultPidsLimit bounds every isolated container's processes.
@@ -179,6 +184,10 @@ func (e *Engine) Run(ctx context.Context, spec Spec) error {
 			pids = DefaultPidsLimit
 		}
 		hostConfig.Resources.PidsLimit = &pids
+	} else if spec.PidsLimit > 0 {
+		// A privileged container keeps a bound it asked for.
+		pids := spec.PidsLimit
+		hostConfig.Resources.PidsLimit = &pids
 	}
 	if spec.ReadOnly || len(spec.Tmpfs) > 0 {
 		hostConfig.Tmpfs = map[string]string{}
@@ -209,11 +218,15 @@ func (e *Engine) Run(ctx context.Context, spec Spec) error {
 	}
 	endpoints := map[string]*network.EndpointSettings{}
 	if len(spec.Networks) > 0 {
-		endpoints[spec.Networks[0]] = &network.EndpointSettings{}
+		endpoints[spec.Networks[0]] = &network.EndpointSettings{Aliases: spec.Aliases}
+	}
+	config := &container.Config{Image: spec.Image, Cmd: spec.Cmd, Env: spec.Env, Labels: labels, ExposedPorts: exposed, User: spec.User}
+	if spec.Stdin != nil {
+		config.OpenStdin, config.StdinOnce, config.AttachStdin = true, true, true
 	}
 	created, err := e.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Name:             spec.Name,
-		Config:           &container.Config{Image: spec.Image, Cmd: spec.Cmd, Env: spec.Env, Labels: labels, ExposedPorts: exposed, User: spec.User},
+		Config:           config,
 		HostConfig:       hostConfig,
 		NetworkingConfig: &network.NetworkingConfig{EndpointsConfig: endpoints},
 	})
@@ -224,6 +237,26 @@ func (e *Engine) Run(ctx context.Context, spec Spec) error {
 		if _, err := e.cli.NetworkConnect(ctx, extra, client.NetworkConnectOptions{Container: created.ID, EndpointConfig: &network.EndpointSettings{}}); err != nil {
 			return fmt.Errorf("connect %s to %s: %w", spec.Name, extra, err)
 		}
+	}
+	if spec.Stdin != nil {
+		// Attached before the start, so no input is lost.
+		attached, err := e.cli.ContainerAttach(ctx, created.ID, client.ContainerAttachOptions{Stream: true, Stdin: true})
+		if err != nil {
+			return fmt.Errorf("attach %s: %w", spec.Name, err)
+		}
+		if _, err := e.cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
+			attached.Close()
+			return fmt.Errorf("start %s: %w", spec.Name, err)
+		}
+		go func() {
+			defer attached.Close()
+			_, _ = io.Copy(attached.Conn, spec.Stdin)
+			_ = attached.CloseWrite()
+			// Hold the connection until the container has read what it
+			// wants; its end closes the stream.
+			_, _ = io.Copy(io.Discard, attached.Reader)
+		}()
+		return nil
 	}
 	if _, err := e.cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
 		return fmt.Errorf("start %s: %w", spec.Name, err)
@@ -323,6 +356,24 @@ func (e *Engine) Remove(ctx context.Context, name string, timeout time.Duration)
 	// named volumes never do.
 	if _, err := e.cli.ContainerRemove(ctx, name, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true}); err != nil && !IsNotFound(err) {
 		return fmt.Errorf("remove %s: %w", name, err)
+	}
+	return nil
+}
+
+// Stop stops a container within timeout and keeps it, to start again.
+// A missing container is fine.
+func (e *Engine) Stop(ctx context.Context, name string, timeout time.Duration) error {
+	secs := int(timeout.Seconds())
+	if _, err := e.cli.ContainerStop(ctx, name, client.ContainerStopOptions{Timeout: &secs}); err != nil && !IsNotFound(err) {
+		return fmt.Errorf("stop %s: %w", name, err)
+	}
+	return nil
+}
+
+// Start starts a stopped container.
+func (e *Engine) Start(ctx context.Context, name string) error {
+	if _, err := e.cli.ContainerStart(ctx, name, client.ContainerStartOptions{}); err != nil {
+		return fmt.Errorf("start %s: %w", name, err)
 	}
 	return nil
 }

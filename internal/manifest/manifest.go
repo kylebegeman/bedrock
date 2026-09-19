@@ -39,6 +39,22 @@ type Manifest struct {
 	// Backup says when the data is backed up and drilled. An app with data
 	// is backed up nightly and drilled weekly unless this says otherwise.
 	Backup *Backup `yaml:"backup,omitempty" json:"backup,omitempty"`
+	// Secrets are the ones quark makes for the app, so nobody has to type
+	// them in: generated once and kept, or derived from others at every
+	// deploy.
+	Secrets *Secrets `yaml:"secrets,omitempty" json:"secrets,omitempty"`
+}
+
+// Secrets quark makes for an app.
+type Secrets struct {
+	// Generate makes each named secret once, when it doesn't exist yet,
+	// in a format: hex:N or base64:N or base64url:N for N random bytes,
+	// or value:TEXT for a fixed value such as a user name.
+	Generate map[string]string `yaml:"generate,omitempty" json:"generate,omitempty"`
+	// Derive computes each named secret from a template at every deploy:
+	// {NAME} is another secret, {sha256:NAME} its SHA-256 in hex, and
+	// {postgres} and {objects} the hosts of the app's data services.
+	Derive map[string]string `yaml:"derive,omitempty" json:"derive,omitempty"`
 }
 
 // Backup is an app's backup policy.
@@ -89,9 +105,12 @@ const ReservedApp = "quark"
 // collide with quark's own: quark-edge, quark-registry, quark-restic-cache.
 var reservedApps = map[string]bool{ReservedApp: true, "edge": true, "registry": true, "restic": true}
 
-// DatabaseVolume is the name of the volume that holds an app's database;
-// no declared volume may take it.
-const DatabaseVolume = "postgres"
+// DatabaseVolume and ObjectsVolume are the volumes that hold an app's
+// database and object store; no declared volume may take their names.
+const (
+	DatabaseVolume = "postgres"
+	ObjectsVolume  = "objects"
+)
 
 // Data is an app's state, kept across revisions.
 type Data struct {
@@ -100,12 +119,39 @@ type Data struct {
 	Postgres *Postgres `yaml:"postgres,omitempty" json:"postgres,omitempty"`
 	// Volumes are named directories workloads mount.
 	Volumes map[string]Volume `yaml:"volumes,omitempty" json:"volumes,omitempty"`
+	// Objects gives the app its own S3-compatible object store (MinIO),
+	// reachable at {objects}:9000 with the MINIO_ROOT_USER and
+	// MINIO_ROOT_PASSWORD secrets quark makes.
+	Objects *Objects `yaml:"objects,omitempty" json:"objects,omitempty"`
+}
+
+// Objects configures the app's object store.
+type Objects struct {
+	// Image replaces quark's pinned MinIO image.
+	Image string `yaml:"image,omitempty" json:"image,omitempty"`
 }
 
 // Postgres configures the app's database.
 type Postgres struct {
 	// Version is the major version. Default 16.
 	Version string `yaml:"version,omitempty" json:"version,omitempty"`
+	// Image replaces postgres:<version>-alpine, for an image with
+	// extensions such as pgvector. Pin it by digest.
+	Image string `yaml:"image,omitempty" json:"image,omitempty"`
+	// User is the first superuser; Database the database made with it.
+	// Both default to the app's name with underscores.
+	User     string `yaml:"user,omitempty" json:"user,omitempty"`
+	Database string `yaml:"database,omitempty" json:"database,omitempty"`
+	// Init is a file or directory in the source whose .sql and .sh files
+	// run once, when the database is first made.
+	Init string `yaml:"init,omitempty" json:"init,omitempty"`
+	// Env and Secrets reach the database container, for init scripts.
+	Env     map[string]string `yaml:"env,omitempty" json:"env,omitempty"`
+	Secrets []string          `yaml:"secrets,omitempty" json:"secrets,omitempty"`
+	// DatabaseURL false keeps quark from giving every workload
+	// DATABASE_URL, the superuser's address: for an app whose workloads
+	// each get a role of their own through derived secrets.
+	DatabaseURL *bool `yaml:"database_url,omitempty" json:"database_url,omitempty"`
 }
 
 // Volume is a named directory an app keeps.
@@ -131,6 +177,10 @@ const (
 	Worker Kind = "worker"
 	// Cron runs its command on a schedule and exits.
 	Cron Kind = "cron"
+	// Release runs its command once at every deploy, after the data is
+	// up and before the new revision starts, such as a migration. A
+	// failure stops the deploy.
+	Release Kind = "release"
 )
 
 // Workload is one container the app runs.
@@ -180,6 +230,19 @@ type Workload struct {
 	// Tmpfs are more paths the workload may write to, kept in memory, such
 	// as a framework's cache directory.
 	Tmpfs []string `yaml:"tmpfs,omitempty" json:"tmpfs,omitempty"`
+	// Aliases are more names the workload answers to on the app's own
+	// network; its workload name always is one.
+	Aliases []string `yaml:"aliases,omitempty" json:"aliases,omitempty"`
+	// Order sorts release workloads; lower runs first, then by name.
+	Order int `yaml:"order,omitempty" json:"order,omitempty"`
+	// Grace is how long the workload gets to stop before it is killed.
+	// Default 10s.
+	Grace string `yaml:"grace,omitempty" json:"grace,omitempty"`
+	// Singleton workloads never run twice at once: a deploy stops the old
+	// container before it starts the new one, and starts the old one
+	// again if the deploy fails. For a workload that owns state no second
+	// copy may share, such as a lock-holding worker or a SQLite file.
+	Singleton bool `yaml:"singleton,omitempty" json:"singleton,omitempty"`
 }
 
 // Build says how to build a workload's image.
@@ -200,6 +263,9 @@ type Route struct {
 	// Path is a prefix; "/" (the default) takes everything not claimed by
 	// a longer prefix on the same host.
 	Path string `yaml:"path,omitempty" json:"path,omitempty"`
+	// Port sends the route to another port of the workload than its own,
+	// for a workload that listens on two.
+	Port int `yaml:"port,omitempty" json:"port,omitempty"`
 	// DNS says whether quark keeps the host's record in Cloudflare:
 	// "direct" makes a record that names this machine, "proxied" one
 	// behind Cloudflare's proxy. Empty leaves the record alone and only
@@ -229,6 +295,9 @@ type Health struct {
 	Path string `yaml:"path,omitempty" json:"path,omitempty"`
 	// Timeout is how long to wait for readiness, as a Go duration. Default 60s.
 	Timeout string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	// Command is run inside the container instead; exit 0 means ready.
+	// It is how a worker, which has no port, says it is ready.
+	Command []string `yaml:"command,omitempty" json:"command,omitempty"`
 }
 
 // Resources bound a workload.
@@ -237,6 +306,8 @@ type Resources struct {
 	Memory string `yaml:"memory,omitempty" json:"memory,omitempty"`
 	// CPUs is a limit such as 1 or 0.5.
 	CPUs float64 `yaml:"cpus,omitempty" json:"cpus,omitempty"`
+	// Pids bounds the processes. Default 4096.
+	Pids int64 `yaml:"pids,omitempty" json:"pids,omitempty"`
 }
 
 // Check is a URL that must answer a certain way after a deploy.
@@ -251,12 +322,13 @@ type Check struct {
 }
 
 var (
-	namePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
-	hostPattern = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$`)
-	envPattern  = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
-	sizePattern = regexp.MustCompile(`^[0-9]+[kmg]$`)
-	capPattern  = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
-	userPattern = regexp.MustCompile(`^[a-z0-9_][a-z0-9_-]*(:[a-z0-9_][a-z0-9_-]*)?$`)
+	namePattern    = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
+	hostPattern    = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$`)
+	envPattern     = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+	sizePattern    = regexp.MustCompile(`^[0-9]+[kmg]$`)
+	capPattern     = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+	pgIdentPattern = regexp.MustCompile(`^[a-z_][a-z0-9_]{0,62}$`)
+	userPattern    = regexp.MustCompile(`^[a-z0-9_][a-z0-9_-]*(:[a-z0-9_][a-z0-9_-]*)?$`)
 )
 
 // Parse reads a manifest from YAML and validates it.
@@ -296,6 +368,10 @@ func (m *Manifest) Validate() error {
 		fail("workloads: an app needs at least one")
 	}
 	claimed := map[string]string{} // host+path -> workload
+	names := map[string]string{}   // workload names and aliases -> workload
+	for name := range m.Workloads {
+		names[name] = name
+	}
 	for _, name := range m.WorkloadNames() {
 		w := m.Workloads[name]
 		at := "workloads." + name
@@ -303,7 +379,7 @@ func (m *Manifest) Validate() error {
 			fail("%s: the name must be lowercase letters, digits and hyphens", at)
 		}
 		switch w.Kind {
-		case Web, Worker, Cron:
+		case Web, Worker, Cron, Release:
 			if (w.Image == "") == (w.Build == nil) {
 				fail("%s: give either image or build", at)
 			}
@@ -318,9 +394,16 @@ func (m *Manifest) Validate() error {
 				fail("%s: a static workload has dir only, no image, build or port", at)
 			}
 		case "":
-			fail("%s: kind is required: web, static, worker or cron", at)
+			fail("%s: kind is required: web, static, worker, cron or release", at)
 		default:
-			fail("%s: kind %q isn't one of web, static, worker, cron", at, w.Kind)
+			fail("%s: kind %q isn't one of web, static, worker, cron, release", at, w.Kind)
+		}
+		if w.Kind == Release {
+			if len(w.Routes) > 0 || w.Port != 0 || w.Schedule != "" {
+				fail("%s: a release workload runs once per deploy; it has no routes, port or schedule", at)
+			}
+		} else if w.Order != 0 {
+			fail("%s: order is for release workloads", at)
 		}
 		if w.Kind == Cron {
 			if w.Schedule == "" {
@@ -336,8 +419,44 @@ func (m *Manifest) Validate() error {
 					fail("%s.timeout: %q isn't a duration such as 30m", at, w.Timeout)
 				}
 			}
-		} else if w.Schedule != "" || w.Timeout != "" {
-			fail("%s: schedule and timeout are for cron workloads", at)
+		} else if w.Schedule != "" {
+			fail("%s: schedule is for cron workloads", at)
+		} else if w.Timeout != "" && w.Kind != Release {
+			fail("%s: timeout is for cron and release workloads", at)
+		} else if w.Timeout != "" {
+			if _, err := time.ParseDuration(w.Timeout); err != nil {
+				fail("%s.timeout: %q isn't a duration such as 10m", at, w.Timeout)
+			}
+		}
+		if w.Singleton && w.Kind != Web && w.Kind != Worker {
+			fail("%s: singleton is for web and worker workloads", at)
+		}
+		if w.Grace != "" {
+			if d, err := time.ParseDuration(w.Grace); err != nil || d < time.Second || d > 10*time.Minute {
+				fail("%s.grace: %q must be a duration from 1s to 10m", at, w.Grace)
+			}
+		}
+		if w.Resources.Pids != 0 && (w.Resources.Pids < 16 || w.Resources.Pids > 1<<20) {
+			fail("%s.resources.pids: must be 16 or more", at)
+		}
+		for _, a := range w.Aliases {
+			if !namePattern.MatchString(a) {
+				fail("%s.aliases: %q must be lowercase letters, digits and hyphens", at, a)
+			}
+			if other, taken := names[a]; taken && other != name {
+				fail("%s.aliases: %q is already %s's name", at, a, other)
+			}
+			names[a] = name
+		}
+		if h := w.Health; h != nil && len(h.Command) > 0 {
+			if h.Path != "" {
+				fail("%s.health: give a path or a command, not both", at)
+			}
+			for _, c := range h.Command {
+				if c == "" {
+					fail("%s.health.command: an argument is empty", at)
+				}
+			}
 		}
 		for i, mt := range w.Mounts {
 			ma := fmt.Sprintf("%s.mounts[%d]", at, i)
@@ -385,6 +504,12 @@ func (m *Manifest) Validate() error {
 			case DNSManual, DNSDirect, DNSProxied:
 			default:
 				fail("%s.dns: %q isn't direct or proxied", ra, r.DNS)
+			}
+			if r.Port != 0 && (r.Port < 1 || r.Port > 65535) {
+				fail("%s.port: must be a port number", ra)
+			}
+			if r.Port != 0 && w.Kind == Static {
+				fail("%s.port: a static workload serves on its own port only", ra)
 			}
 		}
 		if w.User != "" && !userPattern.MatchString(w.User) {
@@ -446,15 +571,54 @@ func (m *Manifest) Validate() error {
 			if !namePattern.MatchString(name) {
 				fail("data.volumes: %q must be lowercase letters, digits and hyphens", name)
 			}
-			if name == DatabaseVolume {
-				fail("data.volumes: %q is the database's own volume; pick another name", name)
+			if name == DatabaseVolume || name == ObjectsVolume {
+				fail("data.volumes: %q is quark's own volume for the %s; pick another name", name, map[string]string{DatabaseVolume: "database", ObjectsVolume: "object store"}[name])
 			}
 		}
-		if m.Data.Postgres != nil {
-			switch m.Data.Postgres.Version {
+		if pg := m.Data.Postgres; pg != nil {
+			switch pg.Version {
 			case "", "15", "16", "17", "18":
 			default:
-				fail("data.postgres.version: %q isn't a supported major version (15 to 18)", m.Data.Postgres.Version)
+				fail("data.postgres.version: %q isn't a supported major version (15 to 18)", pg.Version)
+			}
+			for field, v := range map[string]string{"user": pg.User, "database": pg.Database} {
+				if v != "" && !pgIdentPattern.MatchString(v) {
+					fail("data.postgres.%s: %q must be lowercase letters, digits and underscores", field, v)
+				}
+			}
+			if pg.Init != "" && (strings.HasPrefix(pg.Init, "/") || strings.Contains(pg.Init, "..")) {
+				fail("data.postgres.init: must be inside the source")
+			}
+			for k := range pg.Env {
+				if !envPattern.MatchString(k) {
+					fail("data.postgres.env: %q must be an UPPER_CASE name", k)
+				}
+			}
+			for _, n := range pg.Secrets {
+				if !envPattern.MatchString(n) {
+					fail("data.postgres.secrets: %q must be an UPPER_CASE name", n)
+				}
+			}
+		}
+	}
+	if sec := m.Secrets; sec != nil {
+		for name, format := range sec.Generate {
+			if !envPattern.MatchString(name) {
+				fail("secrets.generate: %q must be an UPPER_CASE name", name)
+			}
+			if _, err := ParseSecretFormat(format); err != nil {
+				fail("secrets.generate.%s: %v", name, err)
+			}
+			if _, both := sec.Derive[name]; both {
+				fail("secrets: %s is both generated and derived", name)
+			}
+		}
+		for name, tmpl := range sec.Derive {
+			if !envPattern.MatchString(name) {
+				fail("secrets.derive: %q must be an UPPER_CASE name", name)
+			}
+			if err := checkTemplate(tmpl); err != nil {
+				fail("secrets.derive.%s: %v", name, err)
 			}
 		}
 	}
@@ -543,26 +707,34 @@ func (r Route) NormalizedPath() string {
 // WorkloadFor finds the workload that serves a host and path: the route
 // with the longest matching prefix wins, as it does at the edge.
 func (m *Manifest) WorkloadFor(host, path string) (string, Workload, bool) {
+	name, w, _, ok := m.RouteFor(host, path)
+	return name, w, ok
+}
+
+// RouteFor is WorkloadFor with the route that matched, whose port the
+// request reaches.
+func (m *Manifest) RouteFor(host, path string) (string, Workload, Route, bool) {
 	if path == "" {
 		path = "/"
 	}
 	probe := strings.TrimSuffix(path, "/") + "/"
 	var (
-		bestName string
-		bestLen  = -1
+		bestName  string
+		bestRoute Route
+		bestLen   = -1
 	)
 	for _, name := range m.WorkloadNames() {
 		for _, r := range m.Workloads[name].Routes {
 			prefix := r.NormalizedPath()
 			if r.Host == host && strings.HasPrefix(probe, prefix) && len(prefix) > bestLen {
-				bestName, bestLen = name, len(prefix)
+				bestName, bestRoute, bestLen = name, r, len(prefix)
 			}
 		}
 	}
 	if bestLen < 0 {
-		return "", Workload{}, false
+		return "", Workload{}, Route{}, false
 	}
-	return bestName, m.Workloads[bestName], true
+	return bestName, m.Workloads[bestName], bestRoute, true
 }
 
 // ParseSchedule parses a five-field cron schedule.
@@ -586,11 +758,86 @@ func (m *Manifest) PostgresVersion() string {
 func (w Workload) Serves() bool { return w.Kind == Web || w.Kind == Static }
 
 // LongRunning reports whether a workload stays up between deploys.
-func (w Workload) LongRunning() bool { return w.Kind != Cron }
+func (w Workload) LongRunning() bool { return w.Kind != Cron && w.Kind != Release }
 
-// HasData reports whether the app keeps a database or volumes.
+// RoutePort is the container port a route reaches.
+func (w Workload) RoutePort(r Route) int {
+	if r.Port != 0 {
+		return r.Port
+	}
+	return w.Port
+}
+
+// GraceOr returns how long the workload gets to stop.
+func (w Workload) GraceOr(fallback time.Duration) time.Duration {
+	if d, err := time.ParseDuration(w.Grace); err == nil && d > 0 {
+		return d
+	}
+	return fallback
+}
+
+// ReleaseWorkloads returns the release workloads in the order they run.
+func (m *Manifest) ReleaseWorkloads() []string {
+	var names []string
+	for _, n := range m.WorkloadNames() {
+		if m.Workloads[n].Kind == Release {
+			names = append(names, n)
+		}
+	}
+	sort.SliceStable(names, func(i, j int) bool {
+		return m.Workloads[names[i]].Order < m.Workloads[names[j]].Order
+	})
+	return names
+}
+
+// PostgresIdentity returns the database's first superuser and database.
+func (m *Manifest) PostgresIdentity() (user, database string) {
+	base := strings.ReplaceAll(m.App, "-", "_")
+	user, database = base, base
+	if m.Data != nil && m.Data.Postgres != nil {
+		if m.Data.Postgres.User != "" {
+			user = m.Data.Postgres.User
+		}
+		if m.Data.Postgres.Database != "" {
+			database = m.Data.Postgres.Database
+		}
+	}
+	return user, database
+}
+
+// InjectsDatabaseURL reports whether workloads get DATABASE_URL.
+func (m *Manifest) InjectsDatabaseURL() bool {
+	if m.PostgresVersion() == "" {
+		return false
+	}
+	pg := m.Data.Postgres
+	return pg.DatabaseURL == nil || *pg.DatabaseURL
+}
+
+// HasObjects reports whether the app has an object store.
+func (m *Manifest) HasObjects() bool { return m.Data != nil && m.Data.Objects != nil }
+
+// HasData reports whether the app keeps a database, an object store or
+// volumes.
 func (m *Manifest) HasData() bool {
-	return m.Data != nil && (m.Data.Postgres != nil || len(m.Data.Volumes) > 0)
+	return m.Data != nil && (m.Data.Postgres != nil || m.Data.Objects != nil || len(m.Data.Volumes) > 0)
+}
+
+// DataVolumes names every volume that holds the app's files, sorted: the
+// declared ones, and the object store's.
+func (m *Manifest) DataVolumes() []string {
+	if m.Data == nil {
+		return nil
+	}
+	var names []string
+	for name := range m.Data.Volumes {
+		names = append(names, name)
+	}
+	if m.Data.Objects != nil {
+		names = append(names, ObjectsVolume)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // BackedUp reports whether the app's data gets backed up.

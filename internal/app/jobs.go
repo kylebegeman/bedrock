@@ -22,8 +22,9 @@ const RunKind = "app.run"
 
 // Job kinds as job_runs records them.
 const (
-	JobCron = "cron"
-	JobRun  = "run"
+	JobCron    = "cron"
+	JobRun     = "run"
+	JobRelease = "release"
 )
 
 // Jobs runs cron workloads and one-off commands.
@@ -39,10 +40,25 @@ func NewJobs(store *state.Store, sec *secrets.Store) *Jobs {
 	return &Jobs{Store: store, Secrets: sec, running: map[string]bool{}}
 }
 
+// JobOptions are what a one-off command adds to its workload's setup.
+type JobOptions struct {
+	// Secrets are more of the app's secrets for the command, beyond the
+	// workload's own.
+	Secrets []string
+	// Stdin is copied to the command's standard input, and never
+	// recorded anywhere.
+	Stdin io.Reader
+}
+
 // Run executes one job: a container from the workload's image with the
 // revision's environment, secrets and mounts, waited for and removed.
 // Output streams to out; the last lines and the exit code are recorded.
 func (j *Jobs) Run(ctx context.Context, rev *state.Revision, workload string, command []string, kind string, out io.Writer) (int, error) {
+	return j.RunWith(ctx, rev, workload, command, kind, JobOptions{}, out)
+}
+
+// RunWith is Run with more secrets or a standard input.
+func (j *Jobs) RunWith(ctx context.Context, rev *state.Revision, workload string, command []string, kind string, opts JobOptions, out io.Writer) (int, error) {
 	var m manifest.Manifest
 	if err := json.Unmarshal(rev.Manifest, &m); err != nil {
 		return -1, err
@@ -68,15 +84,33 @@ func (j *Jobs) Run(ctx context.Context, rev *state.Revision, workload string, co
 	if err != nil {
 		return -1, err
 	}
+	for _, name := range opts.Secrets {
+		v, ok := values[name]
+		if !ok {
+			return -1, fmt.Errorf("%s has no secret named %s", rev.App, name)
+		}
+		spec.Env = append(spec.Env, name+"="+v)
+	}
 	spec.Name = fmt.Sprintf("quark-%s-%s-job-%d", rev.App, workload, time.Now().UnixMilli())
 	spec.Restart = false
-	// A job never takes traffic: it stays on the app's own network.
+	// A job never takes traffic: it stays on the app's own network, and
+	// answers to none of the workload's names, which belong to the
+	// workload's running containers.
 	spec.Networks = []string{docker.AppNetwork(rev.App)}
+	spec.Aliases = nil
+	spec.Stdin = opts.Stdin
 	if len(command) > 0 {
 		spec.Cmd = command
 	}
-	if _, err := isolate(ctx, e, &spec, w, image); err != nil {
+	u, err := isolate(ctx, e, &spec, w, image)
+	if err != nil {
 		return -1, err
+	}
+	if kind == JobRelease {
+		// A release runs before the start step readies the volumes.
+		if err := ownVolumes(ctx, e, &m, w, u, out); err != nil {
+			return -1, err
+		}
 	}
 	if kind == JobRun {
 		// A one-off command is the operator's: it may write where it
@@ -213,6 +247,8 @@ type RunInput struct {
 	App      string   `json:"app"`
 	Workload string   `json:"workload,omitempty"`
 	Command  []string `json:"command"`
+	// Secrets are more of the app's secrets the command gets, by name.
+	Secrets []string `json:"secrets,omitempty"`
 }
 
 // Kind implements kernel.Definition.
@@ -234,29 +270,42 @@ func (r RunDefinition) Plan(ctx context.Context, raw json.RawMessage) (*kernel.P
 	if rev == nil {
 		return nil, fmt.Errorf("%s isn't deployed", in.App)
 	}
-	var m manifest.Manifest
-	if err := json.Unmarshal(rev.Manifest, &m); err != nil {
+	workload, err := RunWorkload(rev, in.Workload)
+	if err != nil {
 		return nil, err
 	}
-	workload := in.Workload
+	note := "revision " + rev.ID
+	if len(in.Secrets) > 0 {
+		note += ", with " + strings.Join(in.Secrets, ", ")
+	}
+	return &kernel.Plan{Target: in.App + " " + workload, Recovery: kernel.Resume, Steps: []kernel.Step{{
+		Name: "run", Change: fmt.Sprintf("run %s in %s's environment", strings.Join(in.Command, " "), workload),
+		Note: note,
+		Apply: func(ctx context.Context, out io.Writer) error {
+			_, err := r.Jobs.RunWith(ctx, rev, workload, in.Command, JobRun, JobOptions{Secrets: in.Secrets}, out)
+			return err
+		},
+	}}}, nil
+}
+
+// RunWorkload picks the workload a one-off command runs as: the one
+// named, or the app's only one.
+func RunWorkload(rev *state.Revision, workload string) (string, error) {
+	var m manifest.Manifest
+	if err := json.Unmarshal(rev.Manifest, &m); err != nil {
+		return "", err
+	}
 	if workload == "" {
 		names := m.WorkloadNames()
 		if len(names) != 1 {
-			return nil, fmt.Errorf("%s has several workloads; name one of %s", in.App, strings.Join(names, ", "))
+			return "", fmt.Errorf("%s has several workloads; name one of %s", rev.App, strings.Join(names, ", "))
 		}
 		workload = names[0]
 	}
 	if _, ok := m.Workloads[workload]; !ok {
-		return nil, fmt.Errorf("%s has no workload named %s", in.App, workload)
+		return "", fmt.Errorf("%s has no workload named %s", rev.App, workload)
 	}
-	return &kernel.Plan{Target: in.App + " " + workload, Recovery: kernel.Resume, Steps: []kernel.Step{{
-		Name: "run", Change: fmt.Sprintf("run %s in %s's environment", strings.Join(in.Command, " "), workload),
-		Note: "revision " + rev.ID,
-		Apply: func(ctx context.Context, out io.Writer) error {
-			_, err := r.Jobs.Run(ctx, rev, workload, in.Command, JobRun, out)
-			return err
-		},
-	}}}, nil
+	return workload, nil
 }
 
 // closingWriter forwards writes until it is closed, then drops them.

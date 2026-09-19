@@ -184,7 +184,7 @@ func (s *Sampler) Sample(ctx context.Context) error {
 			}
 		}
 		if m.Data != nil {
-			for v := range m.Data.Volumes {
+			for _, v := range m.DataVolumes() {
 				volumes[rev.App] = append(volumes[rev.App], docker.VolumeName(rev.App, v))
 			}
 			if m.PostgresVersion() != "" {

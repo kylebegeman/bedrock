@@ -75,20 +75,65 @@ func newDeploy(a *app) *cobra.Command {
 }
 
 func newRun(a *app) *cobra.Command {
-	return &cobra.Command{
+	var (
+		secretNames []string
+		stdin       bool
+	)
+	cmd := &cobra.Command{
 		Use:   "run <app> [workload] -- <command...>",
 		Short: "Run a one-off command with a workload's image, environment, secrets and volumes.",
-		Args:  cobra.MinimumNArgs(2),
+		Long: `Run a one-off command with a workload's image, environment, secrets and volumes.
+
+--secret gives the command more of the app's secrets by name; their values
+never leave the machine. --stdin hands this command's standard input to
+the command, for a value that must appear in no argument, log or record:
+the command then runs here, not in the daemon, and exits with the
+command's own exit code.`,
+		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dash := cmd.ArgsLenAtDash()
 			if dash < 1 || dash >= len(args) {
 				return fmt.Errorf("give the app, optionally the workload, then -- and the command")
 			}
-			in := apps.RunInput{App: args[0], Workload: optional(args[:dash], 1), Command: args[dash:]}
+			in := apps.RunInput{App: args[0], Workload: optional(args[:dash], 1), Command: args[dash:], Secrets: secretNames}
+			if stdin {
+				return a.runHere(cmd.Context(), in)
+			}
 			a.yes = true
 			return a.operate(cmd.Context(), apps.RunKind, in, false)
 		},
 	}
+	cmd.Flags().StringArrayVar(&secretNames, "secret", nil, "give the command this secret of the app too (repeatable)")
+	cmd.Flags().BoolVar(&stdin, "stdin", false, "pass standard input to the command; it runs in this process")
+	return cmd
+}
+
+// runHere runs a one-off command in this process with its standard input
+// attached, and exits with the command's code.
+func (a *app) runHere(ctx context.Context, in apps.RunInput) error {
+	store, err := a.openState()
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	rev, err := store.RevisionWithStatus(ctx, in.App, state.RevisionActive)
+	if err != nil {
+		return err
+	}
+	if rev == nil {
+		return fmt.Errorf("%s isn't deployed", in.App)
+	}
+	workload, err := apps.RunWorkload(rev, in.Workload)
+	if err != nil {
+		return err
+	}
+	jobs := apps.NewJobs(store, a.secretsStore())
+	code, err := jobs.RunWith(ctx, rev, workload, in.Command, apps.JobRun, apps.JobOptions{Secrets: in.Secrets, Stdin: os.Stdin}, a.stdout)
+	if err != nil && code > 0 {
+		// The command said why on its own output; its code is the answer.
+		return quietError{code: code}
+	}
+	return err
 }
 
 func newJobs(a *app) *cobra.Command {
@@ -146,14 +191,40 @@ func newPsql(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			db := strings.ReplaceAll(appName, "-", "_")
-			argv := []string{"docker", "exec", "-i"}
+			store, err := a.openState()
+			if err != nil {
+				return err
+			}
+			rev, err := store.RevisionWithStatus(cmd.Context(), appName, state.RevisionActive)
+			store.Close()
+			if err != nil {
+				return err
+			}
+			if rev == nil {
+				return fmt.Errorf("%s isn't deployed", appName)
+			}
+			var m manifest.Manifest
+			if err := json.Unmarshal(rev.Manifest, &m); err != nil {
+				return err
+			}
+			if m.PostgresVersion() == "" {
+				return fmt.Errorf("%s has no database", appName)
+			}
+			values, _, err := a.secretsStore().LoadCurrent(appName)
+			if err != nil {
+				return err
+			}
+			password := values[apps.PostgresPasswordName]
+			user, database := m.PostgresIdentity()
+			// The password reaches psql through docker's environment,
+			// never an argument anyone on the machine could read.
+			argv := []string{"docker", "exec", "-i", "-e", "PGPASSWORD"}
 			if a.tty {
 				argv = append(argv, "-t")
 			}
-			argv = append(argv, apps.PostgresContainer(appName), "psql", "-U", db, "-d", db)
+			argv = append(argv, apps.PostgresContainer(appName), "psql", "-h", "127.0.0.1", "-U", user, "-d", database)
 			argv = append(argv, args[1:]...)
-			return syscall.Exec(dockerBin, argv, os.Environ())
+			return syscall.Exec(dockerBin, argv, append(os.Environ(), "PGPASSWORD="+password))
 		},
 	}
 }

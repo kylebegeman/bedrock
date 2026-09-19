@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,6 +43,8 @@ type Deploy struct {
 	Secrets *secrets.Store
 	// Addresses are this machine's public addresses, for the DNS check.
 	Addresses func(ctx context.Context) []string
+	// StateDir is quark's state directory; empty means /var/lib/quark.
+	StateDir string
 }
 
 // DeployInput says what to deploy.
@@ -110,6 +113,10 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 		return nil, err
 	}
 	store := d.Store
+	stateDir := d.StateDir
+	if stateDir == "" {
+		stateDir = defaultStateDir
+	}
 	images := map[string]string{}
 	if from == nil {
 		rev, err := store.GetRevision(ctx, m.App, revision)
@@ -141,13 +148,47 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 		engine = e
 		return e, nil
 	}
+	saveImages := func(ctx context.Context) error {
+		return store.SaveRevision(ctx, state.Revision{App: m.App, ID: revision, Status: state.RevisionFailed, Manifest: manifestJSON, Images: images, Containers: containers, Source: from.commit, CreatedAt: time.Now().UTC()})
+	}
+	// abandon takes down a revision that never went live: its containers
+	// go, the singletons they replaced start again, and it stays failed.
+	abandon := func(ctx context.Context, e *docker.Engine, out io.Writer) {
+		for _, c := range containers {
+			_ = e.Remove(ctx, c, 5*time.Second)
+		}
+		_ = store.SetRevisionStatus(ctx, m.App, revision, state.RevisionFailed)
+		restartSingletons(ctx, e, store, m.App, revision, out)
+	}
+	// pin fixes the secrets a revision runs with: a deploy takes the
+	// current version, a rollback keeps the one it had.
+	pin := func(ctx context.Context) (*state.Revision, map[string]string, int, error) {
+		rev, err := store.GetRevision(ctx, m.App, revision)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		values, version, err := d.secretsFor(rev, from == nil)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		if err := checkSecrets(m, values); err != nil {
+			return nil, nil, 0, err
+		}
+		if rev.SecretsVersion != version {
+			rev.SecretsVersion = version
+			if err := store.SaveRevision(ctx, *rev); err != nil {
+				return nil, nil, 0, err
+			}
+		}
+		return rev, values, version, nil
+	}
 
 	if from != nil {
 		add(kernel.Step{
 			Name: "record", Change: fmt.Sprintf("record revision %s of %s", revision, m.App),
 			Note: noteCommit(from.commit),
 			Apply: func(ctx context.Context, out io.Writer) error {
-				return store.SaveRevision(ctx, state.Revision{App: m.App, ID: revision, Status: state.RevisionFailed, Manifest: manifestJSON, Images: images, Containers: containers, Source: from.commit, CreatedAt: time.Now().UTC()})
+				return saveImages(ctx)
 			},
 		})
 	}
@@ -188,26 +229,44 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 			},
 		})
 	}
+	// Secrets the manifest asks quark to make come before the data: the
+	// database starts with its password, and derived values name it.
+	if from != nil && (m.PostgresVersion() != "" || m.HasObjects() || m.Secrets != nil) {
+		add(kernel.Step{
+			Name: "secrets", Change: "make the secrets the manifest asks for" + secretsSummary(m),
+			Apply: func(ctx context.Context, out io.Writer) error {
+				return ensureAppSecrets(d.Secrets, m, out)
+			},
+		})
+	}
 	if m.Data != nil {
 		var restore Restore
 		if from != nil {
 			restore = from.restore
 		}
 		add(kernel.Step{
-			Name: "data", Change: "keep the app's database and volumes" + dataSummary(m),
+			Name: "data", Change: "keep the app's data" + dataSummary(m),
 			Note: restoreNote(restore),
 			Apply: func(ctx context.Context, out io.Writer) error {
 				e, err := connect(ctx)
 				if err != nil {
 					return err
 				}
-				return ensureData(ctx, e, d.Secrets, m, restore, out)
+				source := ""
+				if from != nil {
+					source = from.source
+				}
+				initDir, err := prepareInit(m, source, stateDir)
+				if err != nil {
+					return err
+				}
+				return ensureData(ctx, e, d.Secrets, m, initDir, restore, out)
 			},
 		})
 	}
 	if from != nil {
-		for _, name := range m.WorkloadNames() {
-			w := m.Workloads[name]
+		for _, group := range buildGroups(m) {
+			name, w := group[0], m.Workloads[group[0]]
 			ref := docker.ImageRef(m.App, name, revision)
 			switch {
 			case w.Kind == manifest.Static:
@@ -222,23 +281,30 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 						if err := docker.Build(ctx, docker.BuildSpec{Ref: ref, Context: context, Labels: imageLabels(m.App, name, revision)}, filtered(out)); err != nil {
 							return err
 						}
-						return recordImage(ctx, store, connect, m.App, revision, name, ref, images, out)
+						return recordImage(ctx, store, connect, m.App, revision, group, ref, images, out)
 					},
 				})
 			case w.Build != nil:
+				change := fmt.Sprintf("build %s from %s", name, orDot(w.Build.Context))
+				if len(group) > 1 {
+					change = fmt.Sprintf("build %s's image from %s, for %s", name, orDot(w.Build.Context), strings.Join(group, ", "))
+				}
+				if w.Build.Target != "" {
+					change += " (target " + w.Build.Target + ")"
+				}
 				add(kernel.Step{
-					Name: "build-" + name, Change: fmt.Sprintf("build %s from %s", name, orDot(w.Build.Context)),
+					Name: "build-" + name, Change: change,
 					Apply: func(ctx context.Context, out io.Writer) error {
 						spec := docker.BuildSpec{Ref: ref, Context: filepath.Join(from.source, orDot(w.Build.Context)), Dockerfile: w.Build.Dockerfile, Target: w.Build.Target, Args: w.Build.Args, Labels: imageLabels(m.App, name, revision)}
 						if err := docker.Build(ctx, spec, filtered(out)); err != nil {
 							return err
 						}
-						return recordImage(ctx, store, connect, m.App, revision, name, ref, images, out)
+						return recordImage(ctx, store, connect, m.App, revision, group, ref, images, out)
 					},
 				})
 			default:
 				add(kernel.Step{
-					Name: "pull-" + name, Change: fmt.Sprintf("use image %s for %s", w.Image, name),
+					Name: "pull-" + name, Change: fmt.Sprintf("use image %s for %s", w.Image, strings.Join(group, ", ")),
 					Apply: func(ctx context.Context, out io.Writer) error {
 						e, err := connect(ctx)
 						if err != nil {
@@ -249,12 +315,37 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 								return err
 							}
 						}
-						images[name] = w.Image
-						return store.SaveRevision(ctx, state.Revision{App: m.App, ID: revision, Status: state.RevisionFailed, Manifest: manifestJSON, Images: images, Containers: containers, Source: from.commit, CreatedAt: time.Now().UTC()})
+						for _, n := range group {
+							images[n] = w.Image
+						}
+						return saveImages(ctx)
 					},
 				})
 			}
 		}
+	}
+	// Release workloads run once, in order, against the data the new
+	// revision will use, while the old one still serves. A rollback never
+	// runs them: an older release step against newer data is the wrong
+	// way round.
+	if releases := m.ReleaseWorkloads(); from != nil && len(releases) > 0 {
+		add(kernel.Step{
+			Name: "release", Change: "run " + strings.Join(releases, ", ") + ", once each, before anything new starts",
+			Apply: func(ctx context.Context, out io.Writer) error {
+				rev, _, _, err := pin(ctx)
+				if err != nil {
+					return err
+				}
+				jobs := NewJobs(store, d.Secrets)
+				for _, name := range releases {
+					fmt.Fprintf(out, "%s:\n", name)
+					if _, err := jobs.Run(ctx, rev, name, nil, JobRelease, out); err != nil {
+						return fmt.Errorf("release workload %s: %w; nothing new started, the running revision is untouched", name, err)
+					}
+				}
+				return nil
+			},
+		})
 	}
 	add(kernel.Step{
 		Name: "start", Change: fmt.Sprintf("start %d container(s) for revision %s", len(containers), revision),
@@ -264,27 +355,20 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 			if err != nil {
 				return err
 			}
-			rev, err := store.GetRevision(ctx, m.App, revision)
+			rev, values, version, err := pin(ctx)
 			if err != nil {
 				return err
 			}
-			// A deploy runs with the current secrets and pins that version;
-			// a rollback runs with the version the revision had.
-			values, version, err := d.secretsFor(rev, from == nil)
+			// The revision this one replaces, whose singletons stop first.
+			current, err := store.RevisionWithStatus(ctx, m.App, state.RevisionActive)
 			if err != nil {
 				return err
-			}
-			if err := checkSecrets(m, values); err != nil {
-				return err
-			}
-			if rev.SecretsVersion != version {
-				rev.SecretsVersion = version
-				if err := store.SaveRevision(ctx, *rev); err != nil {
-					return err
-				}
 			}
 			for _, name := range m.WorkloadNames() {
 				w := m.Workloads[name]
+				if w.Kind == manifest.Release {
+					continue
+				}
 				image := rev.Images[name]
 				if image == "" {
 					return fmt.Errorf("no image recorded for %s", name)
@@ -305,7 +389,17 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 				if !w.LongRunning() {
 					continue
 				}
+				if w.Singleton && current != nil && current.ID != revision {
+					if old := current.Containers[name]; old != "" {
+						if err := e.Stop(ctx, old, graceOf(current, name)); err != nil {
+							abandon(ctx, e, out)
+							return err
+						}
+						fmt.Fprintf(out, "%s stopped first: %s is a singleton\n", old, name)
+					}
+				}
 				if err := e.Run(ctx, spec); err != nil {
+					abandon(ctx, e, out)
 					return err
 				}
 				fmt.Fprintf(out, "%s running as %s%s\n", spec.Name, u, isolationWord(w))
@@ -325,15 +419,12 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 			}
 			for _, name := range m.WorkloadNames() {
 				w := m.Workloads[name]
-				if !w.Serves() {
+				if !w.LongRunning() {
 					continue
 				}
 				if err := waitReady(ctx, e, containers[name], w); err != nil {
 					// The new containers never went live; take them down.
-					for _, c := range containers {
-						_ = e.Remove(ctx, c, 5*time.Second)
-					}
-					_ = store.SetRevisionStatus(ctx, m.App, revision, state.RevisionFailed)
+					abandon(ctx, e, out)
 					return fmt.Errorf("%s: %w", name, err)
 				}
 				fmt.Fprintf(out, "%s ready\n", name)
@@ -353,10 +444,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 				}
 				for _, c := range m.Checks {
 					if err := runCheckDirect(ctx, e, m, containers, c); err != nil {
-						for _, name := range containers {
-							_ = e.Remove(ctx, name, 5*time.Second)
-						}
-						_ = store.SetRevisionStatus(ctx, m.App, revision, state.RevisionFailed)
+						abandon(ctx, e, out)
 						return err
 					}
 					fmt.Fprintf(out, "%s ok\n", c.URL)
@@ -433,8 +521,8 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 				if r.ID == revision || r.Status == state.RevisionActive {
 					continue
 				}
-				for _, c := range r.Containers {
-					if err := e.Remove(ctx, c, 10*time.Second); err != nil {
+				for _, name := range sortedKeys(r.Containers) {
+					if err := e.Remove(ctx, r.Containers[name], graceOf(&r, name)); err != nil {
 						return err
 					}
 				}
@@ -446,6 +534,83 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 		},
 	})
 	return plan, nil
+}
+
+// defaultStateDir is quark's state on a machine, where a Deploy that
+// doesn't say otherwise keeps what it copies.
+const defaultStateDir = "/var/lib/quark"
+
+// buildGroups lists the images a deploy makes, each with the workloads
+// that share it: workloads built from the same context, Dockerfile,
+// target and arguments, or pulled from the same reference, share one.
+// Groups keep manifest order, by their first workload.
+func buildGroups(m *manifest.Manifest) [][]string {
+	var groups [][]string
+	index := map[string]int{}
+	for _, name := range m.WorkloadNames() {
+		w := m.Workloads[name]
+		key := ""
+		switch {
+		case w.Kind == manifest.Static:
+			key = "static\x00" + name
+		case w.Build != nil:
+			var args []string
+			for _, k := range sortedKeys(w.Build.Args) {
+				args = append(args, k+"="+w.Build.Args[k])
+			}
+			key = strings.Join([]string{"build", orDot(w.Build.Context), w.Build.Dockerfile, w.Build.Target, strings.Join(args, "\x01")}, "\x00")
+		default:
+			key = "image\x00" + w.Image
+		}
+		if i, ok := index[key]; ok {
+			groups[i] = append(groups[i], name)
+			continue
+		}
+		index[key] = len(groups)
+		groups = append(groups, []string{name})
+	}
+	return groups
+}
+
+// graceOf is how long a revision's workload gets to stop, as its own
+// manifest says.
+func graceOf(rev *state.Revision, workload string) time.Duration {
+	var m manifest.Manifest
+	if err := json.Unmarshal(rev.Manifest, &m); err == nil {
+		if w, ok := m.Workloads[workload]; ok {
+			return w.GraceOr(10 * time.Second)
+		}
+	}
+	return 10 * time.Second
+}
+
+// restartSingletons starts again the singleton containers of the active
+// revision that a deploy of another revision stopped, once that deploy
+// has taken its own containers down.
+func restartSingletons(ctx context.Context, e *docker.Engine, store *state.Store, app, except string, out io.Writer) {
+	current, err := store.RevisionWithStatus(ctx, app, state.RevisionActive)
+	if err != nil || current == nil || current.ID == except {
+		return
+	}
+	var m manifest.Manifest
+	if err := json.Unmarshal(current.Manifest, &m); err != nil {
+		return
+	}
+	for _, name := range m.WorkloadNames() {
+		if !m.Workloads[name].Singleton {
+			continue
+		}
+		c := current.Containers[name]
+		info, err := e.Inspect(ctx, c)
+		if err != nil || info.Running {
+			continue
+		}
+		if err := e.Start(ctx, c); err != nil {
+			fmt.Fprintf(out, "starting %s again failed: %v\n", c, err)
+			continue
+		}
+		fmt.Fprintf(out, "%s started again\n", c)
+	}
 }
 
 func noteCommit(commit string) string {
@@ -466,8 +631,9 @@ func imageLabels(app, workload, revision string) map[string]string {
 	return map[string]string{docker.LabelOwner: docker.OwnerValue, docker.LabelApp: app, docker.LabelWorkload: workload, docker.LabelRevision: revision}
 }
 
-// recordImage stores the digest reference of a built image on the revision.
-func recordImage(ctx context.Context, store *state.Store, connect func(context.Context) (*docker.Engine, error), app, revision, workload, ref string, images map[string]string, out io.Writer) error {
+// recordImage stores the digest reference of a built image on the
+// revision, for every workload that shares it.
+func recordImage(ctx context.Context, store *state.Store, connect func(context.Context) (*docker.Engine, error), app, revision string, workloads []string, ref string, images map[string]string, out io.Writer) error {
 	e, err := connect(ctx)
 	if err != nil {
 		return err
@@ -480,8 +646,10 @@ func recordImage(ctx context.Context, store *state.Store, connect func(context.C
 	if err != nil {
 		return err
 	}
-	rev.Images[workload] = digest
-	images[workload] = digest
+	for _, w := range workloads {
+		rev.Images[w] = digest
+		images[w] = digest
+	}
 	fmt.Fprintf(out, "%s\n", digest)
 	return store.SaveRevision(ctx, *rev)
 }
@@ -515,7 +683,10 @@ func containerSpec(m *manifest.Manifest, name string, w manifest.Workload, revis
 		Cmd:      w.Command,
 		Labels:   imageLabels(m.App, name, revision),
 		Networks: []string{docker.AppNetwork(m.App)},
-		Restart:  true,
+		// The app's other workloads reach it by its name and its aliases.
+		Aliases:   append([]string{name}, w.Aliases...),
+		Restart:   true,
+		PidsLimit: w.Resources.Pids,
 	}
 	if w.Serves() {
 		// The one network it shares with the edge, and with no other app.
@@ -528,7 +699,7 @@ func containerSpec(m *manifest.Manifest, name string, w manifest.Workload, revis
 	for _, k := range w.Secrets {
 		spec.Env = append(spec.Env, k+"="+values[k])
 	}
-	if m.PostgresVersion() != "" {
+	if m.InjectsDatabaseURL() && !slices.Contains(w.Secrets, DatabaseURLName) {
 		spec.Env = append(spec.Env, DatabaseURLName+"="+values[DatabaseURLName])
 	}
 	for _, mt := range w.Mounts {
@@ -563,18 +734,15 @@ func parseSize(s string) (int64, error) {
 	return 0, fmt.Errorf("size %q", s)
 }
 
-// waitReady waits for a workload's container to accept connections, and
-// for its health path to answer when it has one.
+// waitReady waits until a workload's container is ready: its health
+// command succeeds or its health path answers, or else its port accepts
+// connections. A worker with neither only has to stay up.
 func waitReady(ctx context.Context, e *docker.Engine, container string, w manifest.Workload) error {
 	timeout := 60 * time.Second
 	if w.Health != nil && w.Health.Timeout != "" {
 		if d, err := time.ParseDuration(w.Health.Timeout); err == nil {
 			timeout = d
 		}
-	}
-	port := w.Port
-	if w.Kind == manifest.Static {
-		port, _ = strconv.Atoi(docker.StaticPort)
 	}
 	deadline := time.Now().Add(timeout)
 	var last string
@@ -589,35 +757,11 @@ func waitReady(ctx context.Context, e *docker.Engine, container string, w manife
 			words := lastWords(e.LogTail(ctx, container, 5))
 			return fmt.Errorf("the container exited (exit code %d, restarted %d times): %s", info.ExitCode, info.Restarts, words)
 		default:
-			ip := info.IPs[docker.EdgeNetwork]
-			if ip == "" {
-				for _, v := range info.IPs {
-					ip = v
-				}
+			ok, why := probeReady(ctx, e, container, info, w)
+			if ok {
+				return nil
 			}
-			if ip != "" {
-				if w.Health != nil && w.Health.Path != "" {
-					resp, err := (&http.Client{Timeout: 5 * time.Second}).Get(fmt.Sprintf("http://%s:%d%s", ip, port, w.Health.Path))
-					if err == nil {
-						resp.Body.Close()
-						if resp.StatusCode < 400 {
-							return nil
-						}
-						last = fmt.Sprintf("%s answered %s", w.Health.Path, resp.Status)
-					} else {
-						last = err.Error()
-					}
-				} else {
-					conn, err := (&net_Dialer{}).dial(ctx, fmt.Sprintf("%s:%d", ip, port))
-					if err == nil {
-						conn.Close()
-						return nil
-					}
-					last = err.Error()
-				}
-			} else {
-				last = "no network address yet"
-			}
+			last = why
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("not ready after %s: %s", timeout, last)
@@ -628,6 +772,73 @@ func waitReady(ctx context.Context, e *docker.Engine, container string, w manife
 		case <-time.After(2 * time.Second):
 		}
 	}
+}
+
+// probeReady asks a running container once whether it is ready.
+func probeReady(ctx context.Context, e *docker.Engine, container string, info *docker.Info, w manifest.Workload) (bool, string) {
+	if w.Health != nil && len(w.Health.Command) > 0 {
+		if err := HealthCommand(ctx, e, container, w.Health.Command); err != nil {
+			return false, err.Error()
+		}
+		return true, ""
+	}
+	port := servePort(w, nil)
+	if port == 0 {
+		// A worker that says nothing about its health: running is ready.
+		return true, ""
+	}
+	ip := containerIP(info)
+	if ip == "" {
+		return false, "no network address yet"
+	}
+	if w.Health != nil && w.Health.Path != "" {
+		resp, err := (&http.Client{Timeout: 5 * time.Second}).Get(fmt.Sprintf("http://%s:%d%s", ip, port, w.Health.Path))
+		if err != nil {
+			return false, err.Error()
+		}
+		resp.Body.Close()
+		if resp.StatusCode < 400 {
+			return true, ""
+		}
+		return false, fmt.Sprintf("%s answered %s", w.Health.Path, resp.Status)
+	}
+	conn, err := (&net_Dialer{}).dial(ctx, fmt.Sprintf("%s:%d", ip, port))
+	if err != nil {
+		return false, err.Error()
+	}
+	conn.Close()
+	return true, ""
+}
+
+// HealthCommand runs a workload's health command inside its container;
+// it is healthy when the command exits 0 within 30 seconds.
+func HealthCommand(ctx context.Context, e *docker.Engine, container string, command []string) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	out, err := e.Exec(ctx, container, nil, command...)
+	if err != nil {
+		if ctx.Err() != nil {
+			return errors.New("the health command took longer than 30s")
+		}
+		if words := lastWords(out); words != "it wrote nothing; see quark logs" {
+			return fmt.Errorf("the health command failed: %s", words)
+		}
+		return errors.New("the health command failed")
+	}
+	return nil
+}
+
+// servePort is the port a route reaches, or with no route the port the
+// workload listens on: static workloads serve on quark's own.
+func servePort(w manifest.Workload, r *manifest.Route) int {
+	if w.Kind == manifest.Static {
+		port, _ := strconv.Atoi(docker.StaticPort)
+		return port
+	}
+	if r != nil {
+		return w.RoutePort(*r)
+	}
+	return w.Port
 }
 
 // ReloadEdge gives the edge the configuration the active revisions call
@@ -739,12 +950,8 @@ func edgeConfig(ctx context.Context, store *state.Store) ([]byte, error) {
 		}
 		for _, name := range m.WorkloadNames() {
 			w := m.Workloads[name]
-			port := w.Port
-			if w.Kind == manifest.Static {
-				port, _ = strconv.Atoi(docker.StaticPort)
-			}
 			for _, r := range w.Routes {
-				routes = append(routes, edge.Route{Host: r.Host, Path: r.NormalizedPath(), Dial: fmt.Sprintf("%s:%d", rev.Containers[name], port)})
+				routes = append(routes, edge.Route{Host: r.Host, Path: r.NormalizedPath(), Dial: fmt.Sprintf("%s:%d", rev.Containers[name], servePort(w, &r))})
 			}
 		}
 	}
@@ -782,7 +989,7 @@ func runCheckDirect(ctx context.Context, e *docker.Engine, m *manifest.Manifest,
 	if err != nil {
 		return fmt.Errorf("check %s: %w", c.URL, err)
 	}
-	name, w, ok := m.WorkloadFor(u.Hostname(), u.Path)
+	name, w, route, ok := m.RouteFor(u.Hostname(), u.Path)
 	if !ok {
 		return fmt.Errorf("check %s: no workload routes %s%s", c.URL, u.Hostname(), u.Path)
 	}
@@ -794,12 +1001,8 @@ func runCheckDirect(ctx context.Context, e *docker.Engine, m *manifest.Manifest,
 	if ip == "" {
 		return fmt.Errorf("check %s: %s has no address", c.URL, containers[name])
 	}
-	port := w.Port
-	if w.Kind == manifest.Static {
-		port, _ = strconv.Atoi(docker.StaticPort)
-	}
 	within := checkTimeout(c)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://%s:%d%s", ip, port, u.RequestURI()), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://%s:%d%s", ip, servePort(w, &route), u.RequestURI()), nil)
 	if err != nil {
 		return err
 	}
@@ -869,6 +1072,8 @@ func revertSwitch(ctx context.Context, store *state.Store, connect func(context.
 		for _, c := range containers {
 			_ = e.Remove(ctx, c, 5*time.Second)
 		}
+		// Only now, with the failed revision's copies gone.
+		restartSingletons(ctx, e, store, app, failed, io.Discard)
 	}
 	if prev == nil {
 		return "the edge routes nothing to " + app + " now", nil
@@ -970,19 +1175,42 @@ func secretsNote(m *manifest.Manifest) string {
 	for _, name := range m.WorkloadNames() {
 		names = append(names, m.Workloads[name].Secrets...)
 	}
-	if m.PostgresVersion() != "" {
+	if m.InjectsDatabaseURL() {
 		names = append(names, DatabaseURLName)
 	}
 	if len(names) == 0 {
 		return ""
 	}
-	return "secrets: " + strings.Join(names, ", ")
+	slices.Sort(names)
+	return "secrets: " + strings.Join(slices.Compact(names), ", ")
+}
+
+func secretsSummary(m *manifest.Manifest) string {
+	var parts []string
+	if m.PostgresVersion() != "" {
+		parts = append(parts, "the database's password")
+	}
+	if m.HasObjects() {
+		parts = append(parts, "the object store's root user")
+	}
+	if m.Secrets != nil {
+		if n := len(m.Secrets.Generate); n > 0 {
+			parts = append(parts, fmt.Sprintf("%d generated", n))
+		}
+		if n := len(m.Secrets.Derive); n > 0 {
+			parts = append(parts, fmt.Sprintf("%d derived", n))
+		}
+	}
+	return ": " + strings.Join(parts, ", ")
 }
 
 func dataSummary(m *manifest.Manifest) string {
 	var parts []string
 	if v := m.PostgresVersion(); v != "" {
 		parts = append(parts, "postgres "+v)
+	}
+	if m.HasObjects() {
+		parts = append(parts, "object store")
 	}
 	for _, v := range sortedKeys(m.Data.Volumes) {
 		parts = append(parts, "volume "+v)

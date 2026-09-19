@@ -30,7 +30,7 @@ description: What this is for
 owner: personal
 workloads:
   web:
-    kind: web              # web, static or worker
+    kind: web              # web, static, worker, cron or release
     build: {context: .}    # or image: ghcr.io/you/hello:1.2
     port: 8000
     routes:
@@ -71,12 +71,75 @@ checks:
     contains: hello
 ```
 
-`quark deploy <dir>` builds the images on the machine, starts the new
-revision beside the old one, runs the checks against it, confirms DNS,
-switches the edge, waits for certificates, checks again through the edge
-and retires the replaced revision, which `quark rollback` can bring back.
-Every container is told its `QUARK_APP`, `QUARK_WORKLOAD` and
+`quark deploy <dir>` confirms DNS, makes the secrets the manifest asks for,
+readies the data, builds the images on the machine, runs the release
+workloads, starts the new revision beside the old one, runs the checks
+against it, switches the edge, waits for certificates, checks again through
+the edge and retires the replaced revision, which `quark rollback` can bring
+back. Every container is told its `QUARK_APP`, `QUARK_WORKLOAD` and
 `QUARK_REVISION`.
+
+An app with several parts, such as Loom's Core, uses a few more fields:
+
+```yaml
+app: core
+workloads:
+  api:
+    kind: web
+    build: {target: server}      # workloads built alike share one image
+    port: 4773
+    routes:
+      - host: core.example.com
+        path: /api
+      - host: runners.example.com
+        port: 4774               # a route may reach another port
+    aliases: [control]           # more names on the app's network; "api" is one
+    singleton: true              # never two at once: the old one stops first
+    grace: 60s                   # time to stop before it is killed (10s)
+    secrets: [API_DATABASE_URL]
+  worker:
+    kind: worker
+    build: {target: server}
+    health:
+      command: [node, bin/ready.js]   # run inside; exit 0 means ready
+      timeout: 5m
+    resources: {pids: 2048}
+  migrate:
+    kind: release                # runs once per deploy, before anything starts
+    order: 1                     # lower first, then by name
+    build: {target: server}
+    command: [node, bin/migrate.js]
+    secrets: [MIGRATION_DATABASE_URL]
+    timeout: 10m
+data:
+  postgres:
+    version: "17"
+    image: pgvector/pgvector:0.8.0-pg17   # default postgres:<version>-alpine
+    user: core_admin             # the superuser; default the app's name
+    database: core
+    init: deploy/postgres        # first-run scripts, from the source
+    secrets: [API_PASSWORD]      # given to the first-run scripts
+    database_url: false          # no automatic DATABASE_URL
+  objects: {}                    # a MinIO of the app's own at {objects}:9000
+secrets:
+  generate:                      # made once, when missing
+    API_PASSWORD: hex:32         # hex, base64 or base64url of N bytes; value:TEXT
+  derive:                        # made again whenever a source changes
+    API_DATABASE_URL: "postgres://core_api:{API_PASSWORD}@{postgres}:5432/core"
+    MIGRATION_DATABASE_URL: "postgres://core_admin:{QUARK_POSTGRES_PASSWORD}@{postgres}:5432/core"
+```
+
+Generated and derived values stay on the machine; only their names appear
+anywhere. `{postgres}` and `{objects}` are the data services' names on the
+app's network, the object store's root user is `MINIO_ROOT_USER` and
+`MINIO_ROOT_PASSWORD`, and `{sha256:NAME}` is the hex SHA-256 of a secret.
+A release that fails stops the deploy before anything new starts. A
+singleton that fails to come up is replaced by its predecessor again. A
+backup holds the database, every volume, the object store's files and the
+first-run scripts, so a restore on a new machine rebuilds the same roles
+before it loads the dump. `quark run --secret NAME` gives a one-off command
+one more secret, and `quark run --stdin` hands it this terminal's input
+without recording it anywhere.
 
 ## How apps are kept apart
 

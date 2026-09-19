@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -26,6 +28,8 @@ type Remove struct {
 	Store     *state.Store
 	Secrets   *secrets.Store
 	Addresses func(ctx context.Context) []string
+	// StateDir is quark's state directory; empty means /var/lib/quark.
+	StateDir string
 }
 
 // RemoveInput says which app, and whether its data goes too.
@@ -134,14 +138,24 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 					if c.Labels[docker.LabelApp] != in.App {
 						continue
 					}
-					if c.Labels[docker.LabelWorkload] == postgresWorkload && !in.Data {
-						if err := e.Remove(ctx, c.Name, 30*time.Second); err != nil {
+					workload := c.Labels[docker.LabelWorkload]
+					if workload == postgresWorkload || workload == objectsWorkload {
+						// The data services get time to write everything out.
+						if err := e.Remove(ctx, c.Name, 60*time.Second); err != nil {
 							return err
 						}
-						fmt.Fprintf(out, "%s stopped; its volume stays\n", c.Name)
+						if !in.Data {
+							fmt.Fprintf(out, "%s stopped; its volume stays\n", c.Name)
+						} else {
+							fmt.Fprintf(out, "%s stopped\n", c.Name)
+						}
 						continue
 					}
-					if err := e.Remove(ctx, c.Name, 10*time.Second); err != nil {
+					grace := 10 * time.Second
+					if w, ok := m.Workloads[workload]; ok {
+						grace = w.GraceOr(grace)
+					}
+					if err := e.Remove(ctx, c.Name, grace); err != nil {
 						return err
 					}
 					fmt.Fprintf(out, "%s removed\n", c.Name)
@@ -161,7 +175,7 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 	)
 	if in.Data {
 		plan.Steps = append(plan.Steps, kernel.Step{
-			Name: "data", Change: "remove the app's volumes and database (no way back except a backup)",
+			Name: "data", Change: "remove the app's volumes, database and object store (no way back except a backup)",
 			Apply: func(ctx context.Context, out io.Writer) error {
 				e, err := docker.Connect(ctx)
 				if err != nil {
@@ -169,10 +183,8 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 				}
 				defer e.Close()
 				names := []string{docker.VolumeName(in.App, postgresWorkload)}
-				if m.Data != nil {
-					for v := range m.Data.Volumes {
-						names = append(names, docker.VolumeName(in.App, v))
-					}
+				for _, v := range m.DataVolumes() {
+					names = append(names, docker.VolumeName(in.App, v))
 				}
 				for _, v := range names {
 					removed, err := e.RemoveVolume(ctx, v)
@@ -180,8 +192,16 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 						return err
 					}
 					if removed {
-						fmt.Fprintf(out, "%s removed\n", v)
+						fmt.Fprintf(out, "volume %s removed\n", v)
 					}
+				}
+				// The copy of the database's first-run scripts goes too.
+				stateDir := r.StateDir
+				if stateDir == "" {
+					stateDir = defaultStateDir
+				}
+				if err := os.RemoveAll(filepath.Dir(InitDir(stateDir, in.App))); err != nil {
+					return err
 				}
 				return nil
 			},

@@ -59,7 +59,7 @@ func TestIsolationAndDNSAreValidated(t *testing.T) {
 		{strings.Replace(isolated, "tmpfs: [/app/.cache]", "tmpfs: [app/.cache]", 1), "absolute path"},
 		{strings.Replace(isolated, "app: loom", "app: edge", 1), "a name quark uses for itself"},
 		{strings.Replace(isolated, "app: loom", "app: registry", 1), "a name quark uses for itself"},
-		{isolated + "data:\n  volumes:\n    postgres: {}\n", "the database's own volume"},
+		{isolated + "data:\n  volumes:\n    postgres: {}\n", "quark's own volume for the database"},
 	}
 	for _, c := range cases {
 		_, err := Parse([]byte(c.yaml))

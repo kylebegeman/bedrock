@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -103,8 +104,15 @@ func (e *Engine) ImageUser(ctx context.Context, ref string) (string, error) {
 // ExecTo runs a command in a running container, streaming its stdout to
 // w. Its stderr comes back as text, for errors.
 func (e *Engine) ExecTo(ctx context.Context, container string, w io.Writer, cmd ...string) (string, error) {
-	args := append([]string{"exec", container}, cmd...)
-	c := exec.CommandContext(ctx, "docker", args...)
+	return e.ExecToEnv(ctx, container, nil, w, cmd...)
+}
+
+// ExecToEnv is ExecTo with environment variables for the command. Their
+// values reach docker through its environment, never its arguments,
+// which any user of the machine can read.
+func (e *Engine) ExecToEnv(ctx context.Context, container string, env map[string]string, w io.Writer, cmd ...string) (string, error) {
+	c := exec.CommandContext(ctx, "docker", execArgs(container, env, false, cmd)...)
+	c.Env = execEnv(env)
 	var stderr bytes.Buffer
 	c.Stdout, c.Stderr = w, &stderr
 	err := c.Run()
@@ -114,6 +122,36 @@ func (e *Engine) ExecTo(ctx context.Context, container string, w io.Writer, cmd 
 		return text, fmt.Errorf("%s: %s", err, lines[len(lines)-1])
 	}
 	return text, nil
+}
+
+// execArgs builds a docker exec command line that names env's variables
+// without their values.
+func execArgs(container string, env map[string]string, stdin bool, cmd []string) []string {
+	args := []string{"exec"}
+	if stdin {
+		args = append(args, "-i")
+	}
+	names := make([]string, 0, len(env))
+	for k := range env {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		args = append(args, "-e", k)
+	}
+	return append(append(args, container), cmd...)
+}
+
+// execEnv is docker's own environment plus env; nil keeps the default.
+func execEnv(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	out := os.Environ()
+	for k, v := range env {
+		out = append(out, k+"="+v)
+	}
+	return out
 }
 
 // VolumeExists reports whether a volume is there.
@@ -133,12 +171,22 @@ func (e *Engine) VolumeMountpoint(ctx context.Context, name string) (string, err
 
 // Exec runs a command in a running container and returns its output.
 func (e *Engine) Exec(ctx context.Context, container string, stdin io.Reader, cmd ...string) (string, error) {
-	args := []string{"exec"}
-	if stdin != nil {
-		args = append(args, "-i")
+	return e.ExecEnv(ctx, container, nil, stdin, cmd...)
+}
+
+// ExecEnv is Exec with environment variables for the command, kept out
+// of every process's arguments as ExecToEnv keeps them.
+func (e *Engine) ExecEnv(ctx context.Context, container string, env map[string]string, stdin io.Reader, cmd ...string) (string, error) {
+	c := exec.CommandContext(ctx, "docker", execArgs(container, env, stdin != nil, cmd)...)
+	c.Env = execEnv(env)
+	c.Stdin = stdin
+	out, err := c.CombinedOutput()
+	text := strings.TrimSpace(string(out))
+	if err != nil {
+		lines := strings.Split(text, "\n")
+		return text, fmt.Errorf("%s: %s", err, lines[len(lines)-1])
 	}
-	args = append(append(args, container), cmd...)
-	return cliOutput(ctx, stdin, "docker", args...)
+	return text, nil
 }
 
 // ExitCode returns a stopped container's exit code, or -1 while it runs.

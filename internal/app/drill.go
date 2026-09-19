@@ -2,8 +2,6 @@ package app
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,9 +43,9 @@ func (Drill) Kind() string { return DrillKind }
 
 // drillNames are the scratch things a drill makes.
 type drillNames struct {
-	dir, network, postgres, postgresVolume string
-	volumes                                map[string]string // app volume name -> drill volume
-	containers                             map[string]string // workload -> drill container
+	dir, network, postgres, postgresVolume, objects string
+	volumes                                         map[string]string // app volume name -> drill volume
+	containers                                      map[string]string // workload -> drill container
 }
 
 func newDrillNames(stateDir string, m *manifest.Manifest) drillNames {
@@ -60,13 +58,12 @@ func newDrillNames(stateDir string, m *manifest.Manifest) drillNames {
 		network:        prefix,
 		postgres:       prefix + ".postgres",
 		postgresVolume: prefix + ".postgres",
+		objects:        prefix + ".objects",
 		volumes:        map[string]string{},
 		containers:     map[string]string{},
 	}
-	if m.Data != nil {
-		for v := range m.Data.Volumes {
-			n.volumes[v] = prefix + "." + v
-		}
+	for _, v := range m.DataVolumes() {
+		n.volumes[v] = prefix + "." + v
 	}
 	for _, w := range m.WorkloadNames() {
 		if m.Workloads[w].Serves() {
@@ -85,6 +82,7 @@ func (n drillNames) cleanup(e *docker.Engine) {
 		_ = e.Remove(ctx, c, 5*time.Second)
 	}
 	_ = e.Remove(ctx, n.postgres, 10*time.Second)
+	_ = e.Remove(ctx, n.objects, 10*time.Second)
 	_ = e.RemoveNetwork(ctx, n.network)
 	_, _ = e.RemoveVolume(ctx, n.postgresVolume)
 	for _, v := range n.volumes {
@@ -99,7 +97,6 @@ type drillState struct {
 	names    drillNames
 	snapshot *restic.Snapshot
 	restored *restic.RestoreSummary
-	dbURL    string
 	details  []string
 	started  time.Time
 }
@@ -205,6 +202,10 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 			return nil
 		},
 	})
+	// The scratch services answer, on the drill's own network, to the
+	// names the app's services have on the app's: the app's secrets,
+	// DATABASE_URL and every derived URL included, work unchanged against
+	// the restored copies, and can't reach the real ones.
 	if m.PostgresVersion() != "" {
 		change := "start a scratch database and load the dump"
 		if verifySQL != "" {
@@ -221,18 +222,29 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 				if err := e.EnsureNetwork(ctx, d.names.network); err != nil {
 					return d.abort(e, err)
 				}
-				var b [16]byte
-				_, _ = rand.Read(b[:])
-				password := hex.EncodeToString(b[:])
-				dbName := postgresName(app)
-				if err := startPostgres(ctx, e, d.names.postgres, "postgres:"+m.PostgresVersion()+"-alpine", dbName, password, d.names.postgresVolume, d.names.network, out); err != nil {
+				values, err := dr.Secrets.Load(app, rev.SecretsVersion)
+				if err != nil {
+					return d.abort(e, err)
+				}
+				// The first-run scripts make the roles the dump names.
+				svc, err := postgresService(&m, values, InitDir(dr.StateDir, app))
+				if err != nil {
+					return d.abort(e, err)
+				}
+				if !keepsOwners(&m) {
+					svc.InitDir = ""
+				}
+				svc.Container, svc.Volume, svc.Network = d.names.postgres, d.names.postgresVolume, d.names.network
+				svc.Labels = map[string]string{docker.LabelApp: app, docker.LabelWorkload: "drill"}
+				svc.Aliases = []string{PostgresContainer(app)}
+				if err := svc.start(ctx, e, out); err != nil {
 					return d.abort(e, err)
 				}
 				dump := filepath.Join(d.names.dir, "postgres.dump")
 				if _, err := os.Stat(dump); err != nil {
 					return d.abort(e, errors.New("the snapshot holds no postgres.dump"))
 				}
-				tables, err := restoreDump(ctx, e, d.names.postgres, dbName, dump)
+				tables, err := restoreDump(ctx, e, svc, dump, keepsOwners(&m))
 				if err != nil {
 					return d.abort(e, err)
 				}
@@ -241,9 +253,8 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 				}
 				d.details = append(d.details, tables+" tables")
 				fmt.Fprintf(out, "database restored: %s tables\n", tables)
-				d.dbURL = fmt.Sprintf("postgres://%s:%s@%s:5432/%s?sslmode=disable", dbName, password, d.names.postgres, dbName)
 				if verifySQL != "" {
-					got, err := scalar(ctx, e, d.names.postgres, dbName, verifySQL)
+					got, err := scalar(ctx, e, svc, verifySQL)
 					if err != nil {
 						return d.abort(e, fmt.Errorf("verify query: %w", err))
 					}
@@ -257,6 +268,40 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 					d.details = append(d.details, fmt.Sprintf("verify query %d (at least %d)", n, atLeast))
 					fmt.Fprintf(out, "verify query: %d\n", n)
 				}
+				return nil
+			},
+		})
+	}
+	if m.HasObjects() {
+		add(kernel.Step{
+			Name: "objects", Change: "start a scratch object store on the restored files",
+			Apply: func(ctx context.Context, out io.Writer) error {
+				e, err := docker.Connect(ctx)
+				if err != nil {
+					return d.run.fail(err)
+				}
+				defer e.Close()
+				if err := e.EnsureNetwork(ctx, d.names.network); err != nil {
+					return d.abort(e, err)
+				}
+				values, err := dr.Secrets.Load(app, rev.SecretsVersion)
+				if err != nil {
+					return d.abort(e, err)
+				}
+				o := objectsServiceFor(&m, values)
+				o.Container, o.Volume, o.Network = d.names.objects, d.names.volumes[manifest.ObjectsVolume], d.names.network
+				if empty, err := e.VolumeEmpty(ctx, o.Volume); err != nil {
+					return d.abort(e, err)
+				} else if empty {
+					return d.abort(e, errors.New("the snapshot holds no object store files"))
+				}
+				o.Labels = map[string]string{docker.LabelApp: app, docker.LabelWorkload: "drill"}
+				o.Aliases = []string{ObjectsContainer(app)}
+				if err := o.start(ctx, e, out); err != nil {
+					return d.abort(e, err)
+				}
+				d.details = append(d.details, "object store answered")
+				fmt.Fprintln(out, "object store answered on the restored files")
 				return nil
 			},
 		})
@@ -276,9 +321,6 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 				values, err := dr.Secrets.Load(app, rev.SecretsVersion)
 				if err != nil {
 					return d.abort(e, err)
-				}
-				if d.dbURL != "" {
-					values[DatabaseURLName] = d.dbURL
 				}
 				for _, name := range sortedKeys(d.names.containers) {
 					w := m.Workloads[name]

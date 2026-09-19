@@ -159,7 +159,7 @@ func (b Backup) appPlan(st *integration.Storage, rev *state.Revision, m *manifes
 			}
 			// The volumes mount over these inside the read-only tree, so
 			// the mountpoints have to be there already.
-			for v := range m.Data.Volumes {
+			for _, v := range m.DataVolumes() {
 				if err := os.MkdirAll(filepath.Join(staging, "volumes", v), 0o700); err != nil {
 					return run.fail(err)
 				}
@@ -167,12 +167,27 @@ func (b Backup) appPlan(st *integration.Storage, rev *state.Revision, m *manifes
 			if m.PostgresVersion() == "" {
 				return nil
 			}
+			// The database's first-run scripts go with it: a restore on a
+			// new machine runs them again before it loads the dump.
+			if init := InitDir(b.StateDir, app); keepsOwners(m) && dirExists(init) {
+				if out, err := exec.CommandContext(ctx, "cp", "-a", init, filepath.Join(staging, initSnapshotDir)).CombinedOutput(); err != nil {
+					return run.fail(fmt.Errorf("copy the database's first-run scripts: %s", strings.TrimSpace(string(out))))
+				}
+			}
 			e, err := docker.Connect(ctx)
 			if err != nil {
 				return run.fail(err)
 			}
 			defer e.Close()
-			size, err := dumpDatabase(ctx, e, app, filepath.Join(staging, "postgres.dump"))
+			values, _, err := b.Secrets.LoadCurrent(app)
+			if err != nil {
+				return run.fail(err)
+			}
+			svc, err := postgresService(m, values, "")
+			if err != nil {
+				return run.fail(err)
+			}
+			size, err := dumpDatabase(ctx, e, svc, filepath.Join(staging, "postgres.dump"))
 			if err != nil {
 				return run.fail(err)
 			}
@@ -203,7 +218,7 @@ func (b Backup) appPlan(st *integration.Storage, rev *state.Revision, m *manifes
 				fmt.Fprintf(out, "made bucket %s and its repository\n", bucket)
 			}
 			mounts := []string{restic.DirMount(staging, true)}
-			for _, v := range sortedKeys(m.Data.Volumes) {
+			for _, v := range m.DataVolumes() {
 				mounts = append(mounts, restic.VolumeMount(docker.VolumeName(app, v), v, true))
 			}
 			summary, err = r.Backup(ctx, app, mounts, restic.DataRoot)
@@ -374,13 +389,12 @@ func (b Backup) machinePlan(st *integration.Storage) (*kernel.Plan, error) {
 }
 
 // dumpDatabase writes an app's database as a pg_dump custom-format file.
-func dumpDatabase(ctx context.Context, e *docker.Engine, app, path string) (int64, error) {
-	db := postgresName(app)
+func dumpDatabase(ctx context.Context, e *docker.Engine, p pgService, path string) (int64, error) {
 	f, err := os.OpenFile(path+".tmp", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return 0, err
 	}
-	stderr, err := e.ExecTo(ctx, PostgresContainer(app), f, "pg_dump", "-Fc", "-U", db, db)
+	stderr, err := e.ExecToEnv(ctx, p.Container, map[string]string{"PGPASSWORD": p.Password}, f, "pg_dump", "-Fc", "-h", "127.0.0.1", "-U", p.User, "-d", p.Database)
 	f.Close()
 	if err != nil {
 		_ = os.Remove(path + ".tmp")

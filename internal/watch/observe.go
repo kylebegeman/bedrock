@@ -136,6 +136,9 @@ func (p *Prober) app(ctx context.Context, e *docker.Engine, rev state.Revision) 
 			problems = append(problems, fmt.Sprintf("%s has no container", name))
 			worse(state.SeverityCritical)
 			continue
+		case !info.Running && w.Singleton && p.deploying(ctx, rev.App):
+			// A deploy stopped it to start its successor.
+			continue
 		case !info.Running:
 			since := ""
 			if !info.FinishedAt.IsZero() {
@@ -153,7 +156,12 @@ func (p *Prober) app(ctx context.Context, e *docker.Engine, rev state.Revision) 
 			problems = append(problems, fmt.Sprintf("%s keeps restarting (%d restarts)", name, info.Restarts))
 			worse(state.SeverityCritical)
 		}
-		if w.Health != nil && w.Health.Path != "" && w.Serves() {
+		if w.Health != nil && len(w.Health.Command) > 0 {
+			if err := app.HealthCommand(ctx, e, container, w.Health.Command); err != nil {
+				problems = append(problems, fmt.Sprintf("%s: %v", name, err))
+				worse(state.SeverityCritical)
+			}
+		} else if w.Health != nil && w.Health.Path != "" && w.Serves() {
 			if why := healthProblem(ctx, info, w); why != "" {
 				problems = append(problems, fmt.Sprintf("%s's %s %s", name, w.Health.Path, why))
 				worse(state.SeverityCritical)
@@ -192,6 +200,20 @@ func (p *Prober) app(ctx context.Context, e *docker.Engine, rev state.Revision) 
 		}
 	}
 	return severity, problems
+}
+
+// deploying reports whether a deploy or rollback of the app is under way.
+func (p *Prober) deploying(ctx context.Context, appName string) bool {
+	ops, err := p.Store.List(ctx, 20)
+	if err != nil {
+		return false
+	}
+	for _, op := range ops {
+		if (op.Kind == app.DeployKind || op.Kind == app.RollbackKind) && !op.Status.Final() && strings.HasPrefix(op.Target, appName+" ") {
+			return true
+		}
+	}
+	return false
 }
 
 // backupProblem says when an app's last good backup is too old, giving a
