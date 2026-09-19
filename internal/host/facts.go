@@ -55,6 +55,8 @@ type Facts struct {
 	} `json:"registry"`
 	EdgeRunning   bool `json:"edge_running"`
 	DaemonAnswers bool `json:"daemon_answers"`
+	// PushUser is whether the quark user, which receives pushes, exists.
+	PushUser bool `json:"push_user"`
 }
 
 // RegistryContainer is the local image registry every build lands in.
@@ -158,6 +160,9 @@ func Gather(ctx context.Context, env Env, socket string) Facts {
 	}
 	if conf, err := env.ReadFile("/etc/systemd/journald.conf.d/quark.conf"); err == nil {
 		f.JournalMaxUse = parseKeyValues(conf)["SystemMaxUse"]
+	}
+	if _, err := env.Run(ctx, "id", "-u", "quark"); err == nil {
+		f.PushUser = true
 	}
 	if out, err := env.Run(ctx, "systemctl", "is-active", "fail2ban"); err == nil {
 		f.Fail2ban = strings.TrimSpace(out) == "active"

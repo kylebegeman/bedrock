@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"github.com/kylebegeman/quark/internal/app"
 	"github.com/kylebegeman/quark/internal/docker"
 	"github.com/kylebegeman/quark/internal/edge"
+	"github.com/kylebegeman/quark/internal/gitdeploy"
 	"github.com/kylebegeman/quark/internal/host"
 	"github.com/kylebegeman/quark/internal/kernel"
 	"github.com/kylebegeman/quark/internal/secrets"
@@ -207,6 +209,26 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	scheduler := &Scheduler{Store: store, Secrets: sec, Server: apiServer, Log: logf, Started: time.Now().UTC()}
 	go every(ctx, 30*time.Second, false, func(now time.Time) { scheduler.Tick(ctx, now) })
 
+	// GitHub's webhooks reach the daemon through the edge, on a socket in
+	// the directory the two share.
+	receiver := &gitdeploy.Receiver{
+		Store: store, Secrets: sec,
+		Deploy: gitdeploy.InProcess(apiServer.RunLocked),
+		Notify: func(ctx context.Context, subject, body string) {
+			_ = watch.EmailNotifier{Secrets: sec, Store: store}.Notify(ctx, watch.Notice{Subject: machine + ": " + subject, Body: body})
+		},
+		Log:        logf,
+		SourcesDir: filepath.Join(cfg.StateDir, "sources"),
+		BuildsDir:  filepath.Join(cfg.StateDir, "builds"),
+	}
+	if hooks, err := listenHooks(); err != nil {
+		logf("webhooks: %v", err)
+	} else {
+		hookServer := &http.Server{Handler: receiver, ReadHeaderTimeout: 10 * time.Second}
+		go func() { _ = hookServer.Serve(hooks) }()
+		defer hookServer.Close()
+	}
+
 	listener, err := api.Listen(cfg.Socket)
 	if err != nil {
 		return err
@@ -268,4 +290,21 @@ func (w logWriter) Write(p []byte) (int, error) {
 		}
 	}
 	return len(p), nil
+}
+
+// listenHooks opens the webhooks socket the edge proxies to.
+func listenHooks() (net.Listener, error) {
+	if err := os.MkdirAll(edge.RunDir, 0o755); err != nil {
+		return nil, err
+	}
+	_ = os.Remove(edge.HooksSocket)
+	l, err := net.Listen("unix", edge.HooksSocket)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(edge.HooksSocket, 0o660); err != nil {
+		l.Close()
+		return nil, err
+	}
+	return l, nil
 }

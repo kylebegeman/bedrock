@@ -25,6 +25,7 @@ func newDeploy(a *app) *cobra.Command {
 		planOnly        bool
 		restorePostgres string
 		restoreVolumes  []string
+		to              string
 	)
 	cmd := &cobra.Command{
 		Use:   "deploy <source-dir>",
@@ -35,8 +36,15 @@ func newDeploy(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if _, err := manifest.Load(source); err != nil {
+			m, err := manifest.Load(source)
+			if err != nil {
 				return err
+			}
+			if to != "" {
+				if restorePostgres != "" || len(restoreVolumes) > 0 {
+					return fmt.Errorf("restores read files on the machine; run them there")
+				}
+				return deployTo(cmd.Context(), a, source, m.App, to)
 			}
 			in := apps.DeployInput{Source: source, Revision: time.Now().UTC().Format("20060102-150405")}
 			if restorePostgres != "" {
@@ -61,6 +69,7 @@ func newDeploy(a *app) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&restorePostgres, "restore-postgres", "", "a pg_dump file to load into the app's empty database first")
 	cmd.Flags().StringArrayVar(&restoreVolumes, "restore-volume", nil, "name=file.tar.gz to unpack into an empty volume first")
+	cmd.Flags().StringVar(&to, "to", "", "send the source to a machine over SSH, such as quark@203.0.113.7, and deploy it there ($QUARK_SSH replaces ssh)")
 	a.mutatingFlags(cmd, &planOnly)
 	return cmd
 }

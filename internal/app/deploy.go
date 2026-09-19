@@ -74,6 +74,11 @@ func (d Deploy) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 	if !revisionPattern.MatchString(in.Revision) {
 		return nil, fmt.Errorf("revision %q must be lowercase letters, digits and hyphens", in.Revision)
 	}
+	// The manifest is read as root: it must be a file of the source's own,
+	// never a link out of it.
+	if info, err := os.Lstat(filepath.Join(in.Source, manifest.FileName)); err == nil && !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s must be a plain file, not a link", manifest.FileName)
+	}
 	m, err := manifest.Load(in.Source)
 	if err != nil {
 		return nil, err
@@ -691,6 +696,9 @@ func EdgeConfig(ctx context.Context, store *state.Store) ([]byte, error) {
 	return edgeConfig(ctx, store)
 }
 
+// HookRoute is the path webhooks arrive on, as the edge routes it.
+const HookRoute = "/_quark/hook/"
+
 // lastWords picks the last line a container wrote, for an error message.
 func lastWords(logs string) string {
 	lines := strings.Split(strings.TrimSpace(logs), "\n")
@@ -708,11 +716,24 @@ func edgeConfig(ctx context.Context, store *state.Store) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	hooks, err := store.GitHooks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	hooked := map[string]bool{}
+	for _, h := range hooks {
+		hooked[h.App] = true
+	}
 	var routes []edge.Route
 	for _, rev := range active {
 		var m manifest.Manifest
 		if err := json.Unmarshal(rev.Manifest, &m); err != nil {
 			return nil, fmt.Errorf("revision %s/%s manifest: %w", rev.App, rev.ID, err)
+		}
+		if hosts := m.Hosts(); hooked[rev.App] && len(hosts) > 0 {
+			// Webhooks for the app arrive on its first host and go to
+			// quark, not to the app.
+			routes = append(routes, edge.Route{Host: hosts[0], Path: HookRoute, Dial: edge.HooksDial})
 		}
 		for _, name := range m.WorkloadNames() {
 			w := m.Workloads[name]

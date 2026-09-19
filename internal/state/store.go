@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS steps (
 	if err != nil {
 		return fmt.Errorf("migrate state: %w", err)
 	}
-	for _, step := range []func(context.Context) error{s.migrateApps, s.migrateBackups, s.migrateIncidents, s.migrateSignals} {
+	for _, step := range []func(context.Context) error{s.migrateApps, s.migrateBackups, s.migrateIncidents, s.migrateSignals, s.migrateGitHooks} {
 		if err := step(ctx); err != nil {
 			return fmt.Errorf("migrate state: %w", err)
 		}

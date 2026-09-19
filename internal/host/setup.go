@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/kylebegeman/quark/internal/gitdeploy"
 	"github.com/kylebegeman/quark/internal/kernel"
 )
 
@@ -28,7 +30,7 @@ type Setup struct {
 func (Setup) Kind() string { return SetupKind }
 
 // Packages quark installs on every machine.
-var basePackages = []string{"ca-certificates", "curl", "gnupg", "ufw", "fail2ban", "unattended-upgrades", "jq"}
+var basePackages = []string{"ca-certificates", "curl", "gnupg", "ufw", "fail2ban", "unattended-upgrades", "jq", "git"}
 
 // Packages Docker's repository provides.
 var dockerPackages = []string{"docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin", "docker-compose-plugin"}
@@ -210,6 +212,13 @@ func (s Setup) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, err
 			}
 			_, err = env.Run(ctx, "systemctl", "restart", "fail2ban")
 			return err
+		},
+	})
+	add(kernel.Step{
+		Name: "pushes", Change: "keep the quark user, which receives git pushes; each of its keys deploys only the apps it names",
+		Note: doneIf(f.PushUser, "already there", "no quark user yet"),
+		Apply: func(ctx context.Context, out io.Writer) error {
+			return ensurePushUser(ctx, env, s.Socket, out)
 		},
 	})
 	add(kernel.Step{
@@ -424,5 +433,37 @@ func ensureFirewall(ctx context.Context, env Env, out io.Writer) error {
 		}
 	}
 	fmt.Fprintln(out, "firewall active: ssh, 80, 443")
+	return nil
+}
+
+// ensurePushUser keeps the system user pushes arrive as: no password, a
+// home that only it and root read, and a key file quark writes.
+func ensurePushUser(ctx context.Context, env Env, socket string, out io.Writer) error {
+	if _, err := env.Run(ctx, "id", "-u", gitdeploy.User); err != nil {
+		if _, err := env.Run(ctx, "useradd", "--system", "--user-group", "--create-home", "--home-dir", gitdeploy.Home, "--shell", "/bin/sh", "--comment", "quark receives git pushes", gitdeploy.User); err != nil {
+			return err
+		}
+		fmt.Fprintln(out, "quark user made")
+	}
+	for dir, mode := range map[string]string{gitdeploy.Home: "0750", gitdeploy.Home + "/.ssh": "0700", gitdeploy.BuildsDir: "0750"} {
+		if _, err := env.Run(ctx, "install", "-d", "-o", gitdeploy.User, "-g", gitdeploy.User, "-m", mode, dir); err != nil {
+			return err
+		}
+	}
+	if !env.Exists(gitdeploy.AuthorizedKeys) {
+		if _, err := env.Run(ctx, "install", "-o", gitdeploy.User, "-g", gitdeploy.User, "-m", "0600", "/dev/null", gitdeploy.AuthorizedKeys); err != nil {
+			return err
+		}
+	}
+	// A push asks the daemon to deploy through its socket, which the
+	// daemon shares with the quark group when it starts; one already
+	// running is given to the group here.
+	if socket != "" && env.Exists(socket) {
+		for _, args := range [][]string{{"chgrp", gitdeploy.User, filepath.Dir(socket)}, {"chmod", "0750", filepath.Dir(socket)}, {"chgrp", gitdeploy.User, socket}} {
+			if _, err := env.Run(ctx, args[0], args[1:]...); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }

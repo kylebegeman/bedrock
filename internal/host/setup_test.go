@@ -22,7 +22,7 @@ func profileJSON(t *testing.T, p Profile) json.RawMessage {
 
 // allowEverything makes every mutating command succeed on the fake machine.
 func allowEverything(m *fakeMachine) {
-	for _, prefix := range []string{"apt-get", "hostnamectl", "timedatectl set-timezone", "fallocate", "chmod", "mkswap", "swapon /swapfile", "install", "curl", "systemctl", "docker run", "docker start", "sshd -t", "ufw", "dpkg --print-architecture"} {
+	for _, prefix := range []string{"apt-get", "hostnamectl", "timedatectl set-timezone", "fallocate", "chmod", "mkswap", "swapon /swapfile", "install", "curl", "systemctl", "docker run", "docker start", "sshd -t", "ufw", "dpkg --print-architecture", "useradd", "chgrp"} {
 		m.answers[prefix+" *"] = ""
 	}
 	m.answers["dpkg --print-architecture"] = "amd64"
@@ -62,7 +62,7 @@ func TestSetupPlansEveryStepAndSaysWhatEachWillChange(t *testing.T) {
 	m := freshUbuntu(t)
 	allowEverything(m)
 	view, notes := planSteps(t, m, Profile{Hostname: "personal-vps", SwapGiB: 4})
-	want := []string{"packages", "hostname", "swap", "docker", "registry", "edge", "security-updates", "journal", "ssh", "firewall", "fail2ban", "time", "profile"}
+	want := []string{"packages", "hostname", "swap", "docker", "registry", "edge", "security-updates", "journal", "ssh", "firewall", "fail2ban", "pushes", "time", "profile"}
 	var got []string
 	for _, st := range view.Steps {
 		got = append(got, st.Name)
@@ -70,7 +70,7 @@ func TestSetupPlansEveryStepAndSaysWhatEachWillChange(t *testing.T) {
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("steps %v, want %v", got, want)
 	}
-	for name, note := range map[string]string{"hostname": "currently srv1614602", "swap": "none yet", "docker": "not installed", "registry": "not running", "ssh": "password logins on", "firewall": "inactive"} {
+	for name, note := range map[string]string{"hostname": "currently srv1614602", "swap": "none yet", "docker": "not installed", "registry": "not running", "ssh": "password logins on", "firewall": "inactive", "pushes": "no quark user yet"} {
 		if notes[name] != note {
 			t.Errorf("%s note %q, want %q", name, notes[name], note)
 		}
@@ -141,6 +141,8 @@ func TestSetupAppliesInASafeOrderOnAFreshBox(t *testing.T) {
 	index("timedatectl set-timezone America/New_York")
 	index("fallocate -l 4G /swapfile")
 	index("sshd -t")
+	index("useradd --system --user-group --create-home --home-dir /var/lib/quark-git --shell /bin/sh")
+	index("install -o quark -g quark -m 0600 /dev/null /var/lib/quark-git/.ssh/authorized_keys")
 	p, err := LoadProfile(m.env())
 	if err != nil || p.Hostname != "personal-vps" || p.SwapGiB != 4 {
 		t.Fatalf("profile: %v %+v", err, p)
@@ -150,7 +152,7 @@ func TestSetupAppliesInASafeOrderOnAFreshBox(t *testing.T) {
 func TestSetupOnASetUpBoxChangesNothingHeavy(t *testing.T) {
 	m := setUpBox(t)
 	allowEverything(m)
-	m.answers["dpkg-query *"] = "ca-certificates install ok installed\ncurl install ok installed\ngnupg install ok installed\nufw install ok installed\nfail2ban install ok installed\nunattended-upgrades install ok installed\njq install ok installed\ndocker-ce install ok installed\ndocker-ce-cli install ok installed\ncontainerd.io install ok installed\ndocker-buildx-plugin install ok installed\ndocker-compose-plugin install ok installed\n"
+	m.answers["dpkg-query *"] = "ca-certificates install ok installed\ncurl install ok installed\ngnupg install ok installed\nufw install ok installed\nfail2ban install ok installed\nunattended-upgrades install ok installed\njq install ok installed\ngit install ok installed\ndocker-ce install ok installed\ndocker-ce-cli install ok installed\ncontainerd.io install ok installed\ndocker-buildx-plugin install ok installed\ndocker-compose-plugin install ok installed\n"
 	m.write("/etc/docker/daemon.json", dockerDaemonJSON)
 	m.write(SSHDropIn, sshdQuark)
 	m.write("/etc/hosts", "127.0.0.1 localhost\n127.0.1.1 personal-vps\n")
