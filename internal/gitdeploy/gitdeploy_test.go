@@ -74,7 +74,7 @@ func TestOnlyTheAllowedCommandsRun(t *testing.T) {
 		"git-receive-pack '/begamin.git'":     {Receive, "begamin"},
 		"git receive-pack 'begamin'":          {Receive, "begamin"},
 		"git-upload-pack 'dragon-writer.git'": {Upload, "dragon-writer"},
-		"bedrock receive begamin":               {Tarball, "begamin"},
+		"bedrock receive begamin":             {Tarball, "begamin"},
 	}
 	for cmd, want := range cases {
 		got, err := ParseCommand(cmd)

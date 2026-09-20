@@ -123,15 +123,15 @@ func TestSetupAppliesInASafeOrderOnAFreshBox(t *testing.T) {
 	}
 	// Files bedrock owns exist with the expected content.
 	for path, want := range map[string]string{
-		"/etc/docker/daemon.json":                 `"live-restore": true`,
+		"/etc/docker/daemon.json":                   `"live-restore": true`,
 		"/etc/ssh/sshd_config.d/00-bedrock.conf":    "PasswordAuthentication no",
 		"/etc/systemd/journald.conf.d/bedrock.conf": "SystemMaxUse=500M",
-		"/etc/apt/apt.conf.d/20auto-upgrades":     `Unattended-Upgrade "1"`,
+		"/etc/apt/apt.conf.d/20auto-upgrades":       `Unattended-Upgrade "1"`,
 		"/etc/apt/apt.conf.d/52bedrock-unattended":  `Automatic-Reboot "false"`,
 		"/etc/fail2ban/jail.d/bedrock.conf":         "[sshd]",
-		"/etc/hosts":                              "127.0.1.1 personal-vps",
-		"/etc/fstab":                              "/swapfile none swap sw 0 0",
-		ProfilePath:                               `"hostname": "personal-vps"`,
+		"/etc/hosts":                                "127.0.1.1 personal-vps",
+		"/etc/fstab":                                "/swapfile none swap sw 0 0",
+		ProfilePath:                                 `"hostname": "personal-vps"`,
 	} {
 		if !strings.Contains(m.read(path), want) {
 			t.Errorf("%s: want %q in %q", path, want, m.read(path))
