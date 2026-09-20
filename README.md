@@ -1,24 +1,66 @@
+<div align="center">
+
+<img src="./assets/bedrock.svg" alt="" width="88" height="88">
+
 # Bedrock
 
-One small program that runs your machines. Bedrock installs and operates
-everything a server needs for the apps it hosts: builds, certificates,
-secrets, backups, health checks and alerts. Loom is where you see and approve
-it all.
+**One small program that runs your machines.**
 
-Bedrock is the Go rewrite of Ophelia. The Python 0.6 line is archived on the
-`ophelia-0.6` branch and the `ophelia-0.6-final` tag, and stays there.
+Builds, certificates, secrets, backups, health checks and alerts.<br>
+Everything a server needs for the apps it hosts, from a single static binary.
 
-## Status
+<a href="https://github.com/kylebegeman/bedrock/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/kylebegeman/bedrock?style=for-the-badge&color=9a3412&label=release"></a>
+<a href="https://github.com/kylebegeman/bedrock/actions/workflows/ci.yml?query=branch%3Anext"><img alt="CI status" src="https://img.shields.io/github/actions/workflow/status/kylebegeman/bedrock/ci.yml?branch=next&style=for-the-badge&label=CI"></a>
+<img alt="Go 1.26 or newer" src="https://img.shields.io/badge/go-1.26-00ADD8?style=for-the-badge&logo=go&logoColor=white">
+<a href="./LICENSE"><img alt="Apache 2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-555555?style=for-the-badge"></a>
 
-0.7 is the first Go release. The plan, the ideas it was chosen from, and the blueprint
-behind it live in [docs/](docs/):
+[Quick start](#quick-start) · [Manifest](#an-apps-manifest) · [Isolation](#how-apps-are-kept-apart) · [Deploys](#deploying-without-a-pipeline) · [Backups](#backups-that-restore) · [Commands](#commands) · [Docs](#status-and-docs)
 
-- [docs/plan.html](docs/plan.html): the 0.7 plan, milestone by milestone.
-- [docs/ideas.html](docs/ideas.html): the 37 ideas, with the 34 that were chosen.
-- [docs/blueprint.html](docs/blueprint.html): why the rewrite, and what 0.7 to 1.0 are.
+</div>
 
-Every milestone is proven on a real machine that is wiped and rebuilt for the
-purpose. See [lane/README.md](lane/README.md).
+<br>
+
+## Why Bedrock
+
+- **One binary, nothing to install underneath.** A static Go binary installs and operates the whole machine. There is no agent to babysit, no runtime to keep current, and no control plane to pay for.
+- **The manifest is the entire interface.** An app describes itself in `bedrock.yaml`. Everything else follows from that file: DNS records, certificates, secrets, data services, health, backups and alerts.
+- **Isolation you get by default, not by remembering.** Read-only root, no Linux capabilities, no privilege escalation, a non-root user, and a private network per app. The manifest holds the explicit ways out, and `bedrock exposure` shows what each container really got.
+- **Backups that are proven rather than hoped for.** Every backup is quiesced and consistent, and `bedrock drill` restores it beside the app, starts the app on it and verifies it on a schedule.
+- **No pipeline required.** `git push bedrock main` deploys and streams every step back. A push whose deploy fails is refused, so the branch on the machine is always what runs.
+
+## How a deploy works
+
+```mermaid
+flowchart LR
+  M["bedrock.yaml"] --> DNS["confirm<br/>DNS"]
+  DNS --> SEC["make<br/>secrets"]
+  SEC --> DATA["ready<br/>data"]
+  DATA --> BUILD["build<br/>images"]
+  BUILD --> REL["run release<br/>workloads"]
+  REL --> START["start beside<br/>the old"]
+  START --> CHK["run<br/>checks"]
+  CHK --> SW["switch<br/>the edge"]
+  SW --> CERT["wait for<br/>certificates"]
+  CERT --> CHK2["check through<br/>the edge"]
+  CHK2 --> RET["retire the<br/>old revision"]
+  RET -.->|"bedrock rollback"| START
+```
+
+The old revision is kept, not deleted, so `bedrock rollback` brings it back. Every container is told its `BEDROCK_APP`, `BEDROCK_WORKLOAD` and `BEDROCK_REVISION`.
+
+## Quick start
+
+```sh
+bedrock host setup                 # prepare a fresh Ubuntu or Debian machine
+bedrock integration set cloudflare # DNS records for your hosts
+bedrock integration set storage    # Backblaze B2 or any S3 store, for backups
+bedrock integration set email      # SMTP, for alerts
+
+bedrock deploy ./my-app            # build, check, switch the edge
+bedrock status                     # health, traffic, errors, backups
+```
+
+Bedrock needs Ubuntu 22.04 or 24.04, or Debian 12 or 13, on x86_64 or aarch64.
 
 ## An app's manifest
 
@@ -71,13 +113,10 @@ checks:
     contains: hello
 ```
 
-`bedrock deploy <dir>` confirms DNS, makes the secrets the manifest asks for,
-readies the data, builds the images on the machine, runs the release
-workloads, starts the new revision beside the old one, runs the checks
-against it, switches the edge, waits for certificates, checks again through
-the edge and retires the replaced revision, which `bedrock rollback` can bring
-back. Every container is told its `BEDROCK_APP`, `BEDROCK_WORKLOAD` and
-`BEDROCK_REVISION`.
+<details>
+<summary><b>A larger app, with releases, singletons and derived secrets</b></summary>
+
+<br>
 
 An app with several parts, such as Loom's Core, uses a few more fields:
 
@@ -146,28 +185,52 @@ other people's code apart from its data: `bedrock deploy <dir> --manifest
 bedrock.worker.yaml` deploys the other one, and `bedrock secret copy <app> NAME
 <other-app>` gives it a secret the first made, without showing it.
 
+</details>
+
 ## How apps are kept apart
 
-Each app runs as if it were alone on the machine. Its workloads share a
-network with each other and its database; the ones that serve traffic also
-share a network with the edge, and with nothing else. No app can reach
-another app's containers or database, or the edge's admin API, which is a
-socket only the machine reaches. By default a workload has no Linux
-capabilities, can't gain privileges, runs as its image's user (or nobody,
-when the image would run as root), has a read-only root filesystem with
-/tmp in memory, and is bounded to 2 GiB and 4096 processes. The manifest
-fields above are the explicit ways out, and `bedrock exposure` shows each
-container as Docker runs it: its user, privileges, root filesystem,
-networks, published ports and mounts, and anything that shares a network
-it shouldn't.
+Each app runs as if it were alone on the machine.
+
+```mermaid
+flowchart TB
+  NET(["the internet"]) --> EDGE["Caddy edge<br/>certificates and routing"]
+  EDGE --> A1["web"]
+  EDGE --> B1["web"]
+  subgraph APPA ["app: hello"]
+    A1 --- A2[("postgres")]
+    A1 --- A3["worker"]
+  end
+  subgraph APPB ["app: notes"]
+    B1 --- B2[("postgres")]
+  end
+```
+
+Its workloads share a network with each other and its database; the ones that
+serve traffic also share a network with the edge, and with nothing else. No app
+can reach another app's containers or database, or the edge's admin API, which
+is a socket only the machine reaches.
+
+| Default | What a workload gets |
+|---|---|
+| **User** | the image's user, or `nobody` when the image would run as root |
+| **Capabilities** | none at all |
+| **Privilege escalation** | refused |
+| **Root filesystem** | read-only, with `/tmp` in memory |
+| **Memory** | 2 GiB |
+| **Processes** | 4096 |
+
+The manifest fields above are the explicit ways out, and `bedrock exposure`
+shows each container as Docker runs it: its user, privileges, root filesystem,
+networks, published ports and mounts, and anything that shares a network it
+shouldn't.
 
 ## Deploying without a pipeline
 
 A route with `dns: direct` or `dns: proxied` gets its Cloudflare record from
 the deploy, which refuses a record that points at another machine; `bedrock
-dns point <host>` moves one on purpose. Retiring a route, or the app,
-removes its record. `bedrock dns` explains every host; `bedrock dns audit`
-finds records that point here with nothing routed.
+dns point <host>` moves one on purpose. Retiring a route, or the app, removes
+its record. `bedrock dns` explains every host; `bedrock dns audit` finds
+records that point here with nothing routed.
 
 `bedrock git allow <app> <public key>` lets a key push that app and nothing
 else. Then, from the app's checkout:
@@ -183,7 +246,7 @@ way, commit or not. `bedrock git webhook <app> --repo git@github.com:you/app.git
 deploys when GitHub says the branch moved, with a deploy key and secret
 bedrock makes and shows once.
 
-## What bedrock keeps an eye on
+## What Bedrock keeps an eye on
 
 The daemon watches every app and the machine once a minute: containers
 running, health paths and checks answering through the edge, certificates
@@ -191,33 +254,92 @@ valid and renewing, disk and memory, backups fresh and drills passing, and
 any URL added with `bedrock watch add` (the other machine's sites, say). A
 problem has to hold for three rounds before it becomes an alert, one alert
 per app, and you hear once when it starts and once when it recovers.
-`bedrock alerts` shows what is wrong now and what was; `bedrock status` shows
-health beside each app's requests, errors, p95 latency, CPU, memory and
-disk from the last day; `bedrock ls` is the registry: owner, hosts,
-repository, last deploy and last backup.
 
-Backups go to one bucket per app with restic, encrypted with a password
-made once per storage account. `bedrock backup <app>` runs one now,
+| Command | Shows |
+|---|---|
+| `bedrock alerts` | what is wrong now, and what was |
+| `bedrock status` | health beside each app's requests, errors, p95, CPU, memory and disk |
+| `bedrock ls` | the registry: owner, hosts, repository, last deploy, last backup |
+| `bedrock exposure` | what each container may do and what reaches it |
+| `bedrock doctor` | what to fix on this machine; changes nothing |
+
+## Backups that restore
+
+Backups go to one bucket per app with restic, encrypted with a password made
+once per storage account.
+
+App backups drain Bedrock-managed jobs, stop running workloads gracefully,
+stop the object store, dump PostgreSQL, and snapshot the unchanged volume
+files. **This is a maintenance window**: the app is unavailable for the capture
+and upload, bounded to 30 minutes. Backups then restart exactly the containers
+that were running, with the object store first. Retention runs after service is
+restored. A forced shutdown aborts the capture instead of certifying an
+inconsistent snapshot.
+
+| Command | What it does |
+|---|---|
+| `bedrock backup <app>` | run one now |
+| `bedrock backup bedrock` | snapshot the machine's own state and sealed secrets |
+| `bedrock drill <app>` | restore the latest snapshot beside the app, start it, verify, clean up |
+| `bedrock restore <app>` | bring data onto a machine that doesn't run the app yet |
+| `bedrock backups` | list what happened |
+
+`bedrock drill` uses an internal network with no outbound access, starts all
+long-running workloads before probing readiness, and never runs release or cron
+jobs. Privileged workloads cannot be safely drilled, and workloads that require
+external services may fail their drill readiness check.
+
 Restore the app's original secrets from the sealed machine backup before
 restoring data on a new machine. Bedrock refuses to generate replacement keys
 for restored data, which could make encrypted records unreadable.
 
-`bedrock drill <app>` uses an internal network with no outbound access, starts
-all long-running workloads before probing readiness, and never runs release
-or cron jobs. Privileged workloads cannot be safely drilled. Workloads that
-require external services may fail their drill readiness check.
+> [!IMPORTANT]
+> The pause journal survives daemon restarts: the daemon restores paused
+> containers before accepting work, and a failed restart retains the journal and
+> reports the error. Cron, `bedrock run --stdin`, `bedrock exec` and
+> `bedrock psql` share the backup lock. Direct Docker or SQL writes and external
+> database writers are outside this contract: do not run them during a backup.
+> All app writers must be Bedrock-managed. Pick `backup.schedule` for an
+> acceptable maintenance window, and note that an app must not use its own
+> paused object store as its backup destination. Offsite storage remains the
+> recovery target.
 
-`bedrock drill <app>` restores the latest snapshot beside the app, starts the
-app on it, runs the verify query and cleans up, and `bedrock restore <app>`
-brings the data onto a machine that doesn't run the app yet, before
-`bedrock deploy`. `bedrock backup bedrock` snapshots the machine's own state and
-sealed secrets. `bedrock backups` lists what happened.
+## Secrets
 
-The credentials bedrock itself uses are integrations, kept sealed like any
+The credentials Bedrock itself uses are integrations, kept sealed like any
 secret: `bedrock integration set storage` (Backblaze B2 or any S3 store),
 `bedrock integration set email` (SMTP, for alerts) and
-`bedrock integration set cloudflare`. `bedrock integration list` shows which
-are set and when each was last used, never the values.
+`bedrock integration set cloudflare`. `bedrock integration list` shows which are
+set and when each was last used, never the values.
+
+<details>
+<summary><b>Moving a secret between machines</b></summary>
+
+<br>
+
+`bedrock secret recipient` initializes the machine identity if needed and prints
+only its public age recipient. Keep `/etc/bedrock/secrets.key` in your recovery
+process; automation never prints its private recovery key.
+
+`bedrock secret export core TOKEN runner --recipient age1...` emits only
+ciphertext. Pipe that to `bedrock secret import runner TOKEN` on the receiving
+machine through pinned SSH connections. Transfers expire after ten minutes, are
+bound to the receiving app and name, and are idempotent. Integration credentials
+cannot be exported.
+
+</details>
+
+## Commands
+
+| | |
+|---|---|
+| **Machine** | `host` · `daemon` · `doctor` · `upgrade` · `status` · `alerts` · `watch` |
+| **Apps** | `deploy` · `rollback` · `remove` · `ls` · `ps` · `logs` · `history` · `gc` |
+| **Data** | `backup` · `backups` · `restore` · `drill` · `psql` |
+| **Access** | `secret` · `integration` · `git` · `exec` · `run` · `jobs` |
+| **Network** | `dns` · `exposure` |
+
+Run `bedrock <command> --help` for any of them.
 
 ## Build
 
@@ -229,44 +351,39 @@ make linux   # bin/bedrock-linux-amd64 for the machines
 
 One static binary, no runtime to install.
 
+<details>
+<summary><b>Cutting a release</b></summary>
+
+<br>
+
+Run tests and the lane proof, commit, then run
+`scripts/build-release.sh 0.7.0 /tmp/bedrock-release-0.7.0` from a clean
+checkout. It builds static Linux and macOS binaries for amd64 and arm64 plus
+`SHA256SUMS`, stamped with the version and exact source commit. Publish those
+exact files on the matching GitHub release.
+
+Consumers pin the version and SHA-256 in reviewed source, verify before
+execution, and never pipe a downloaded script into a shell. An artifact
+replacement needs a new reviewed pin; do not overwrite published assets.
+
+</details>
+
+## Status and docs
+
+0.7 is the first Go release. Bedrock is the Go rewrite of Ophelia; the Python
+0.6 line is archived on the `ophelia-0.6` branch and the `ophelia-0.6-final`
+tag, and stays there.
+
+| Document | What it covers |
+|---|---|
+| [docs/plan.html](docs/plan.html) | the 0.7 plan, milestone by milestone |
+| [docs/ideas.html](docs/ideas.html) | the 37 ideas, with the 34 that were chosen |
+| [docs/blueprint.html](docs/blueprint.html) | why the rewrite, and what 0.7 to 1.0 are |
+| [lane/README.md](lane/README.md) | the proving ground |
+
+Every milestone is proven on a real machine that is wiped and rebuilt for the
+purpose.
+
 ## License
 
 Apache 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
-
-## Consistent backups
-
-App backups drain Bedrock-managed jobs, stop running workloads gracefully, stop the
-object store, dump PostgreSQL, and snapshot the unchanged volume files. This is a
-maintenance window: the app is unavailable for the capture and upload, bounded to
-30 minutes. Backups then restart exactly the containers that were running, with
-the object store first. Retention runs after service is restored. Forced shutdowns
-abort the capture instead of certifying an inconsistent snapshot.
-
-The pause journal survives daemon restarts. The daemon restores paused containers
-before accepting work; failed restarts retain the journal and report the error.
-Cron, `bedrock run --stdin`, `bedrock exec`, and `bedrock psql` share the backup lock. Direct Docker/SQL writes and
-external database writers are outside this contract: do not run them during a
-backup. All app writers must be Bedrock-managed. Pick `backup.schedule` for an
-acceptable maintenance window; an app must not use its own paused object store as
-its backup destination. Offsite storage remains the recovery target.
-
-## Separate-host secret transfer
-
-`bedrock secret recipient` initializes the machine identity if needed and prints
-only its public age recipient. Keep `/etc/bedrock/secrets.key` in your recovery
-process; automation never prints its private recovery key.
-
-`bedrock secret export core TOKEN runner --recipient age1...` emits only ciphertext.
-Pipe that to `bedrock secret import runner TOKEN` on the receiving machine through
-pinned SSH connections. Transfers expire after ten minutes, are bound to the
-receiving app/name, and are idempotent. Integration credentials cannot be exported.
-
-## Release artifacts
-
-Run tests and the lane proof, commit, then run
-`scripts/build-release.sh 0.7.0 /tmp/bedrock-release-0.7.0` from a clean checkout.
-It builds static Linux and macOS binaries for amd64/arm64 and `SHA256SUMS`, stamped
-with the version and exact source commit. Publish those exact files on the matching
-GitHub release. Consumers pin the version and SHA-256 in reviewed source, verify
-before execution, and never pipe a downloaded script into a shell. An artifact
-replacement needs a new reviewed pin; do not overwrite published assets.
