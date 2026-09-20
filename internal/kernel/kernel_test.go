@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 func newStore(t *testing.T) *state.Store {

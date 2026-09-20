@@ -1,4 +1,4 @@
-module github.com/kylebegeman/quark
+module github.com/kylebegeman/bedrock
 
 go 1.26.0
 

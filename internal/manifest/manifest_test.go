@@ -54,7 +54,7 @@ func TestParsesASiteWithTwoWorkloads(t *testing.T) {
 	}
 }
 
-func TestLoadReadsQuarkYAML(t *testing.T) {
+func TestLoadReadsBedrockYAML(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, FileName), []byte(site), 0o644); err != nil {
 		t.Fatal(err)

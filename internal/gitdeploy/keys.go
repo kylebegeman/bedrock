@@ -1,6 +1,6 @@
 // Package gitdeploy is how code reaches a machine without anything in
 // between: git push to the machine, a tarball over one SSH session, or a
-// GitHub webhook. Pushes arrive as the quark user, whose every key is
+// GitHub webhook. Pushes arrive as the bedrock user, whose every key is
 // bound to the apps it may deploy; the deploy itself runs in the daemon
 // like any other, and its steps stream back to the person pushing.
 package gitdeploy
@@ -22,16 +22,16 @@ import (
 // Where pushes land.
 const (
 	// User receives pushes over SSH; it has no password and every one of
-	// its keys runs quark and nothing else.
-	User = "quark"
+	// its keys runs bedrock and nothing else.
+	User = "bedrock"
 	// Home holds the repositories and the build directories.
-	Home = "/var/lib/quark-git"
-	// AuthorizedKeys is the quark user's key file, which quark writes.
+	Home = "/var/lib/bedrock-git"
+	// AuthorizedKeys is the bedrock user's key file, which bedrock writes.
 	AuthorizedKeys = Home + "/.ssh/authorized_keys"
 	// BuildsDir holds the source trees deploys are made from.
 	BuildsDir = Home + "/builds"
 	// Binary is what each key runs.
-	Binary = "/usr/local/bin/quark"
+	Binary = "/usr/local/bin/bedrock"
 )
 
 // Key is one SSH public key and the apps it may deploy.
@@ -61,7 +61,7 @@ func ParseKey(text string) (Key, error) {
 	}
 	k := Key{Type: fields[0], Blob: fields[1]}
 	if !keyTypes[k.Type] {
-		return Key{}, fmt.Errorf("%q isn't an SSH public key type quark accepts", k.Type)
+		return Key{}, fmt.Errorf("%q isn't an SSH public key type bedrock accepts", k.Type)
 	}
 	raw, err := base64.StdEncoding.DecodeString(k.Blob)
 	if err != nil {
@@ -114,7 +114,7 @@ func (k Key) Line() string {
 
 var managedLine = regexp.MustCompile(`^command="` + regexp.QuoteMeta(Binary) + ` git serve ([a-z0-9 -]+)",restrict (\S+) (\S+)(?: (.*))?$`)
 
-// KeyFile is the quark user's authorized_keys: the keys quark manages,
+// KeyFile is the bedrock user's authorized_keys: the keys bedrock manages,
 // and any other line, kept as it was.
 type KeyFile struct {
 	Path   string
@@ -141,7 +141,7 @@ func ReadKeys(path string) (*KeyFile, error) {
 			kf.Keys = append(kf.Keys, Key{Type: m[2], Blob: m[3], Comment: m[4], Apps: strings.Fields(m[1])})
 			continue
 		}
-		if strings.TrimSpace(line) != "" && !strings.HasPrefix(line, "# Written by quark") {
+		if strings.TrimSpace(line) != "" && !strings.HasPrefix(line, "# Written by bedrock") {
 			kf.Others = append(kf.Others, line)
 		}
 	}
@@ -206,13 +206,13 @@ func (kf *KeyFile) Deny(app, which string) bool {
 }
 
 // Write replaces the key file in one step, readable by its owner only.
-// Ownership is the caller's (the quark user's, on a machine).
+// Ownership is the caller's (the bedrock user's, on a machine).
 func (kf *KeyFile) Write() error {
 	if err := os.MkdirAll(filepath.Dir(kf.Path), 0o700); err != nil {
 		return err
 	}
 	var b strings.Builder
-	b.WriteString("# Written by quark git allow. Each key deploys the apps its command names, and nothing else.\n")
+	b.WriteString("# Written by bedrock git allow. Each key deploys the apps its command names, and nothing else.\n")
 	for _, line := range kf.Others {
 		b.WriteString(line + "\n")
 	}

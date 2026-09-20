@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// withStdin runs quark with stdin replaced by text, for commands that
+// withStdin runs bedrock with stdin replaced by text, for commands that
 // read values without echo.
 func withStdin(t *testing.T, text string, stateDir string, args ...string) (string, string, int) {
 	t.Helper()
@@ -28,7 +28,7 @@ func withStdin(t *testing.T, text string, stateDir string, args ...string) (stri
 
 func TestIntegrationsAreSetFromStdinAndListedWithoutValues(t *testing.T) {
 	stateDir := t.TempDir()
-	out, errOut, code := withStdin(t, "smtp_host=127.0.0.1\nsmtp_port=1025\nfrom=quark@lane\nto=kyle@lane\n", stateDir, "integration", "set", "email")
+	out, errOut, code := withStdin(t, "smtp_host=127.0.0.1\nsmtp_port=1025\nfrom=bedrock@lane\nto=kyle@lane\n", stateDir, "integration", "set", "email")
 	if code != 0 || !strings.Contains(out, "email set") {
 		t.Fatalf("code %d, out %q, err %q", code, out, errOut)
 	}
@@ -36,7 +36,7 @@ func TestIntegrationsAreSetFromStdinAndListedWithoutValues(t *testing.T) {
 		t.Fatalf("the first secret should make the machine's key: %q", errOut)
 	}
 	out, errOut, code = withStdin(t, "kind=s3\nendpoint=http://127.0.0.1:9000\nkey_id=lane\nkey=hush\nbucket_prefix=lane\n", stateDir, "integration", "set", "storage")
-	if code != 0 || !strings.Contains(out, "storage set") || !strings.Contains(errOut, "quark made a password for storage") {
+	if code != 0 || !strings.Contains(out, "storage set") || !strings.Contains(errOut, "bedrock made a password for storage") {
 		t.Fatalf("code %d, out %q, err %q", code, out, errOut)
 	}
 	out, _, code = run(t, stateDir, "integration", "list")

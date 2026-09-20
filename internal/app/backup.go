@@ -12,14 +12,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/docker"
-	"github.com/kylebegeman/quark/internal/integration"
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/manifest"
-	"github.com/kylebegeman/quark/internal/restic"
-	"github.com/kylebegeman/quark/internal/secrets"
-	"github.com/kylebegeman/quark/internal/state"
-	"github.com/kylebegeman/quark/internal/version"
+	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/integration"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/restic"
+	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/bedrock/internal/version"
 )
 
 // BackupKind snapshots an app's data into its own bucket: a database
@@ -35,7 +35,7 @@ type Backup struct {
 	Hostname func() string
 }
 
-// BackupInput says what to back up: an app, or quark's own name for the
+// BackupInput says what to back up: an app, or bedrock's own name for the
 // machine's state.
 type BackupInput struct {
 	App string `json:"app"`
@@ -127,7 +127,7 @@ func (b Backup) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 		return nil, fmt.Errorf("%s keeps no data; there is nothing to back up", in.App)
 	}
 	if m.Backup != nil && m.Backup.Off {
-		return nil, fmt.Errorf("backups are off for %s in its quark.yaml", in.App)
+		return nil, fmt.Errorf("backups are off for %s in its bedrock.yaml", in.App)
 	}
 	return b.appPlan(st, rev, &m)
 }
@@ -308,12 +308,12 @@ func (b Backup) machinePlan(st *integration.Storage) (*kernel.Plan, error) {
 					return run.fail(fmt.Errorf("copy the secrets: %s", strings.TrimSpace(string(out))))
 				}
 			}
-			for _, f := range []string{"/etc/quark/host.json", b.Secrets.KeyPath + ".pub"} {
+			for _, f := range []string{"/etc/bedrock/host.json", b.Secrets.KeyPath + ".pub"} {
 				if data, err := os.ReadFile(f); err == nil {
 					_ = os.WriteFile(filepath.Join(staging, filepath.Base(f)), data, 0o600)
 				}
 			}
-			info, _ := json.MarshalIndent(map[string]any{"hostname": hostname, "quark": version.Current().Version, "taken_at": time.Now().UTC()}, "", "  ")
+			info, _ := json.MarshalIndent(map[string]any{"hostname": hostname, "bedrock": version.Current().Version, "taken_at": time.Now().UTC()}, "", "  ")
 			if err := os.WriteFile(filepath.Join(staging, "machine.json"), append(info, '\n'), 0o600); err != nil {
 				return run.fail(err)
 			}

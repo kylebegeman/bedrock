@@ -16,10 +16,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/docker"
-	"github.com/kylebegeman/quark/internal/edge"
-	"github.com/kylebegeman/quark/internal/manifest"
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/edge"
+	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 // Retention is how long rollups are kept.
@@ -359,7 +359,7 @@ func du(ctx context.Context, path string) (int64, error) {
 	return strconv.ParseInt(fields[0], 10, 64)
 }
 
-// Summary is an app's signals over a window, in the words quark status
+// Summary is an app's signals over a window, in the words bedrock status
 // uses.
 type Summary struct {
 	Requests int64 `json:"requests"`

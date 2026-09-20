@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/docker"
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/manifest"
-	"github.com/kylebegeman/quark/internal/restic"
-	"github.com/kylebegeman/quark/internal/secrets"
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/restic"
+	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 // DrillKind proves a backup: it restores the latest snapshot beside the
@@ -52,7 +52,7 @@ func newDrillNames(stateDir string, m *manifest.Manifest) drillNames {
 	app := m.App
 	// A dot can't appear in an app's name, so these never collide with
 	// another app's volumes, which the cleanup would otherwise remove.
-	prefix := "quark-" + app + ".drill"
+	prefix := "bedrock-" + app + ".drill"
 	n := drillNames{
 		dir:            filepath.Join(stateDir, "drills", app),
 		network:        prefix,
@@ -166,7 +166,7 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 			if in.Snapshot == "latest" {
 				d.snapshot, err = r.Latest(ctx, app)
 				if errors.Is(err, restic.ErrNoRepository) {
-					return d.abort(e, fmt.Errorf("%s has no backups yet; run quark backup %s first", app, app))
+					return d.abort(e, fmt.Errorf("%s has no backups yet; run bedrock backup %s first", app, app))
 				}
 				if err != nil {
 					return d.abort(e, err)

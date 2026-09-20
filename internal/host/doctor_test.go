@@ -35,7 +35,7 @@ func TestAFreshBoxFailsTheDoctorWithSetupAsTheFix(t *testing.T) {
 			t.Errorf("%s: got %s (%s), want pass", name, r[name].Verdict, r[name].Detail)
 		}
 	}
-	if r["docker"].Fix != "run quark host setup" || r["ssh"].Detail != "password login on" {
+	if r["docker"].Fix != "run bedrock host setup" || r["ssh"].Detail != "password login on" {
 		t.Fatalf("fix text: %+v %+v", r["docker"], r["ssh"])
 	}
 }
@@ -73,7 +73,7 @@ func TestDoctorWarnsAboutPendingReboots(t *testing.T) {
 	f := Gather(context.Background(), m.env(), "")
 	f.DaemonAnswers = true
 	r := byName(Diagnose(f))
-	if r["updates"].Verdict != Warn || r["updates"].Fix != "quark host maintain" {
+	if r["updates"].Verdict != Warn || r["updates"].Fix != "bedrock host maintain" {
 		t.Fatalf("updates: %+v", r["updates"])
 	}
 }

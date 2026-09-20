@@ -38,7 +38,7 @@ type Revision struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
-// App is one app quark runs.
+// App is one app bedrock runs.
 type App struct {
 	Name           string    `json:"name"`
 	ActiveRevision string    `json:"active_revision,omitempty"`

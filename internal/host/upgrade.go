@@ -9,11 +9,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/version"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/version"
 )
 
-// UpgradeKind replaces the quark binary with a staged one and restarts the
+// UpgradeKind replaces the bedrock binary with a staged one and restarts the
 // daemon. If the new daemon can't start, systemd runs the rollback unit,
 // which puts the previous binary back; the resumed operation then reports
 // that.
@@ -21,8 +21,8 @@ const UpgradeKind = "host.upgrade"
 
 // Where the binary and its spares live.
 const (
-	BinaryPath     = "/usr/local/bin/quark"
-	LibDir         = "/usr/local/lib/quark"
+	BinaryPath     = "/usr/local/bin/bedrock"
+	LibDir         = "/usr/local/lib/bedrock"
 	PreviousBinary = LibDir + "/previous"
 	StagedMarker   = LibDir + "/staged"
 	RollbackScript = LibDir + "/rollback.sh"
@@ -35,7 +35,7 @@ type Upgrade struct {
 
 // UpgradeInput says which binary to install.
 type UpgradeInput struct {
-	// Path is a quark binary already on this machine.
+	// Path is a bedrock binary already on this machine.
 	Path string `json:"path"`
 }
 
@@ -114,7 +114,7 @@ func (u Upgrade) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, e
 				}
 				if kernel.Attempt(ctx) <= 1 {
 					fmt.Fprintln(out, "restarting the daemon; the operation resumes on the new build")
-					_, err := env.Run(ctx, "systemctl", "restart", "quark.service")
+					_, err := env.Run(ctx, "systemctl", "restart", "bedrock.service")
 					// A real restart ends the process before this returns.
 					return err
 				}
@@ -146,15 +146,15 @@ func (u Upgrade) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, e
 func identity(v version.Info) string { return v.Version + "@" + v.Commit }
 
 // probeVersion runs a candidate binary's version command and checks that
-// it is a quark build for this machine.
+// it is a bedrock build for this machine.
 func probeVersion(ctx context.Context, env Env, path string) (version.Info, error) {
 	out, err := env.Run(ctx, path, "version", "--json")
 	if err != nil {
-		return version.Info{}, fmt.Errorf("%s doesn't run as quark: %w", path, err)
+		return version.Info{}, fmt.Errorf("%s doesn't run as bedrock: %w", path, err)
 	}
 	var info version.Info
 	if err := json.Unmarshal([]byte(lastLine(out)), &info); err != nil || info.Version == "" {
-		return version.Info{}, fmt.Errorf("%s doesn't report a quark version", path)
+		return version.Info{}, fmt.Errorf("%s doesn't report a bedrock version", path)
 	}
 	running := env.RunningVersion()
 	if info.OS != running.OS || info.Arch != running.Arch {
@@ -182,21 +182,21 @@ func copyFile(from, to string) error {
 // puts the previous binary back only when an upgrade staged the running
 // one within the last ten minutes: a daemon that crashes long after its
 // upgrade verified is restarted, never downgraded. It must not depend on
-// the quark binary, which may be the thing that's broken.
+// the bedrock binary, which may be the thing that's broken.
 const RollbackScriptContent = `#!/bin/sh
-# Installed by quark. Runs when quark.service fails.
+# Installed by bedrock. Runs when bedrock.service fails.
 set -eu
-lib=/usr/local/lib/quark
+lib=/usr/local/lib/bedrock
 if [ -f "$lib/staged" ] && [ -f "$lib/previous" ] && [ -n "$(find "$lib/staged" -mmin -10 2>/dev/null)" ]; then
-  cp "$lib/previous" /usr/local/bin/quark.rollback
-  chmod 755 /usr/local/bin/quark.rollback
-  mv -f /usr/local/bin/quark.rollback /usr/local/bin/quark
+  cp "$lib/previous" /usr/local/bin/bedrock.rollback
+  chmod 755 /usr/local/bin/bedrock.rollback
+  mv -f /usr/local/bin/bedrock.rollback /usr/local/bin/bedrock
   rm -f "$lib/staged"
-  echo "quark: the upgrade didn't start; put the previous binary back"
+  echo "bedrock: the upgrade didn't start; put the previous binary back"
 else
   find "$lib" -maxdepth 1 -name 'staged*' -mmin +10 -delete 2>/dev/null || true
-  echo "quark: the daemon failed with no upgrade in flight; the binary stays and systemd restarts it"
+  echo "bedrock: the daemon failed with no upgrade in flight; the binary stays and systemd restarts it"
 fi
-systemctl reset-failed quark.service
-systemctl start quark.service
+systemctl reset-failed bedrock.service
+systemctl start bedrock.service
 `

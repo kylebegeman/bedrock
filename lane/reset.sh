@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Quark lane: wipe the Hostinger test bed and wait until it answers over SSH.
+# Bedrock lane: wipe the Hostinger test bed and wait until it answers over SSH.
 #
 #   reset.sh            recreate the VM, wait, print "ready"
 #   reset.sh --status   show the VM's state and stop

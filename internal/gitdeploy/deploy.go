@@ -11,26 +11,26 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/api"
-	"github.com/kylebegeman/quark/internal/app"
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/manifest"
-	"github.com/kylebegeman/quark/internal/state"
-	"github.com/kylebegeman/quark/internal/ui"
+	"github.com/kylebegeman/bedrock/internal/api"
+	"github.com/kylebegeman/bedrock/internal/app"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/bedrock/internal/ui"
 )
 
 // Deployer runs a deploy and reports its events.
 type Deployer func(ctx context.Context, in app.DeployInput, emit func(kernel.Event)) (*kernel.Receipt, error)
 
 // ThroughDaemon asks the daemon on a socket to deploy. It never falls back
-// to a kernel of its own: the quark user can't touch the machine's state,
+// to a kernel of its own: the bedrock user can't touch the machine's state,
 // and shouldn't.
 func ThroughDaemon(socket string) Deployer {
 	return func(ctx context.Context, in app.DeployInput, emit func(kernel.Event)) (*kernel.Receipt, error) {
 		c := api.Dial(socket)
 		defer c.Close()
 		if !c.Reachable(ctx) {
-			return nil, fmt.Errorf("the quark daemon isn't answering on %s", socket)
+			return nil, fmt.Errorf("the bedrock daemon isn't answering on %s", socket)
 		}
 		raw, err := json.Marshal(in)
 		if err != nil {
@@ -63,7 +63,7 @@ var hookBuildsDir = BuildsDir
 func Hook(ctx context.Context, appName string, stdin io.Reader, out io.Writer, d Deployer) int {
 	repo, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(out, "quark: %v\n", err)
+		fmt.Fprintf(out, "bedrock: %v\n", err)
 		return 1
 	}
 	branch := Branch(repo)
@@ -75,11 +75,11 @@ func Hook(ctx context.Context, appName string, stdin io.Reader, out io.Writer, d
 			continue
 		}
 		if f[2] != "refs/heads/"+branch {
-			fmt.Fprintf(out, "quark: %s kept; pushes to %s deploy\n", strings.TrimPrefix(f[2], "refs/heads/"), branch)
+			fmt.Fprintf(out, "bedrock: %s kept; pushes to %s deploy\n", strings.TrimPrefix(f[2], "refs/heads/"), branch)
 			continue
 		}
 		if f[1] == zeroCommit {
-			fmt.Fprintf(out, "quark: %s is the branch that deploys %s; it can't be deleted here\n", branch, appName)
+			fmt.Fprintf(out, "bedrock: %s is the branch that deploys %s; it can't be deleted here\n", branch, appName)
 			return 1
 		}
 		target = f[1]
@@ -88,57 +88,57 @@ func Hook(ctx context.Context, appName string, stdin io.Reader, out io.Writer, d
 		return 0
 	}
 	short := target[:12]
-	fmt.Fprintf(out, "quark: deploying %s of %s\n", short, appName)
+	fmt.Fprintf(out, "bedrock: deploying %s of %s\n", short, appName)
 	dir, err := NewBuildDir(hookBuildsDir, appName, short)
 	if err != nil {
-		fmt.Fprintf(out, "quark: %v\n", err)
+		fmt.Fprintf(out, "bedrock: %v\n", err)
 		return 1
 	}
 	defer PruneBuilds(hookBuildsDir, appName, 3)
 	if err := ExportCommit(ctx, repo, target, dir); err != nil {
-		fmt.Fprintf(out, "quark: %v\n", err)
+		fmt.Fprintf(out, "bedrock: %v\n", err)
 		return 1
 	}
 	return deployTree(ctx, appName, dir, short, out, d, "the push is refused and the running revision stays")
 }
 
-// ReceiveTree takes a source tree as a tar stream, as quark deploy --to
+// ReceiveTree takes a source tree as a tar stream, as bedrock deploy --to
 // sends it, and deploys it.
 func ReceiveTree(ctx context.Context, appName string, stdin io.Reader, out io.Writer, d Deployer, buildsRoot string) int {
 	dir, err := NewBuildDir(buildsRoot, appName, "upload")
 	if err != nil {
-		fmt.Fprintf(out, "quark: %v\n", err)
+		fmt.Fprintf(out, "bedrock: %v\n", err)
 		return 1
 	}
 	defer PruneBuilds(buildsRoot, appName, 3)
 	if err := Extract(stdin, dir); err != nil {
-		fmt.Fprintf(out, "quark: %v\n", err)
+		fmt.Fprintf(out, "bedrock: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(out, "quark: deploying %s from the uploaded tree\n", appName)
+	fmt.Fprintf(out, "bedrock: deploying %s from the uploaded tree\n", appName)
 	return deployTree(ctx, appName, dir, "", out, d, "the running revision stays")
 }
 
 func deployTree(ctx context.Context, appName, dir, commit string, out io.Writer, d Deployer, onFailure string) int {
 	m, err := CheckSource(dir, appName)
 	if err != nil {
-		fmt.Fprintf(out, "quark: %v\n", err)
+		fmt.Fprintf(out, "bedrock: %v\n", err)
 		return 1
 	}
 	ok, err := Deploy(ctx, d, dir, commit, out)
 	if errors.Is(err, api.ErrDisconnected) {
-		fmt.Fprintf(out, "quark: %v; the daemon finishes the deploy on its own\n", err)
+		fmt.Fprintf(out, "bedrock: %v; the daemon finishes the deploy on its own\n", err)
 		return 1
 	}
 	if err != nil {
-		fmt.Fprintf(out, "quark: %v; %s\n", err, onFailure)
+		fmt.Fprintf(out, "bedrock: %v; %s\n", err, onFailure)
 		return 1
 	}
 	if !ok {
-		fmt.Fprintf(out, "quark: the deploy failed; %s\n", onFailure)
+		fmt.Fprintf(out, "bedrock: the deploy failed; %s\n", onFailure)
 		return 1
 	}
-	fmt.Fprintf(out, "quark: %s is live%s\n", appName, liveAt(m))
+	fmt.Fprintf(out, "bedrock: %s is live%s\n", appName, liveAt(m))
 	return 0
 }
 

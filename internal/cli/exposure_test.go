@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/quark/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/docker"
 )
 
 func workload(name, app, wl string, nets ...string) docker.Exposure {
@@ -17,9 +17,9 @@ func workload(name, app, wl string, nets ...string) docker.Exposure {
 
 func TestIsolatedAppsShareNothing(t *testing.T) {
 	xs := []docker.Exposure{
-		workload("quark-a-web-1", "a", "web", "quark-a", "quark.edge.a"),
-		workload("quark-b-web-1", "b", "web", "quark-b", "quark.edge.b"),
-		{Name: "quark-edge", Running: true, Networks: []string{"quark-edge", "quark.edge.a", "quark.edge.b"}, Ports: []string{"0.0.0.0:443/tcp"},
+		workload("bedrock-a-web-1", "a", "web", "bedrock-a", "bedrock.edge.a"),
+		workload("bedrock-b-web-1", "b", "web", "bedrock-b", "bedrock.edge.b"),
+		{Name: "bedrock-edge", Running: true, Networks: []string{"bedrock-edge", "bedrock.edge.a", "bedrock.edge.b"}, Ports: []string{"0.0.0.0:443/tcp"},
 			Labels: map[string]string{docker.LabelOwner: docker.OwnerValue, docker.LabelApp: "edge"}},
 	}
 	r := buildExposure(xs)
@@ -32,28 +32,28 @@ func TestIsolatedAppsShareNothing(t *testing.T) {
 }
 
 func TestOldContainersAndOpenings(t *testing.T) {
-	old := workload("quark-a-web-0", "a", "web", "quark-a", "quark-edge")
+	old := workload("bedrock-a-web-0", "a", "web", "bedrock-a", "bedrock-edge")
 	old.AllCapabilities, old.ReadOnlyRoot = true, false
-	b := workload("quark-b-web-1", "b", "web", "quark-b", "quark-edge")
+	b := workload("bedrock-b-web-1", "b", "web", "bedrock-b", "bedrock-edge")
 	b.User = "0:0"
 	b.Capabilities = []string{"NET_BIND_SERVICE"}
 	b.Mounts = []string{"/var/run/docker.sock:/var/run/docker.sock"}
-	runner := workload("quark-c-runner-1", "c", "runner", "quark-c")
+	runner := workload("bedrock-c-runner-1", "c", "runner", "bedrock-c")
 	runner.Privileged = true
 	stray := docker.Exposure{Name: "lane-minio", Running: true, Ports: []string{"127.0.0.1:9000/tcp"}, Labels: map[string]string{}}
 	r := buildExposure([]docker.Exposure{old, b, runner, stray})
-	if len(r.Shared) != 1 || r.Shared[0] != "quark-edge: a, b" {
+	if len(r.Shared) != 1 || r.Shared[0] != "bedrock-edge: a, b" {
 		t.Fatalf("shared: %v", r.Shared)
 	}
 	joined := strings.Join(r.Findings, "\n")
 	for _, want := range []string{
-		"quark-a-web-0 runs with Docker's default privileges: started before isolation; redeploy a",
-		"quark-a-web-0 can write its root filesystem",
-		"quark-b-web-1 runs as root",
-		"quark-b-web-1 keeps NET_BIND_SERVICE",
-		"quark-b-web-1 mounts a path from the machine: /var/run/docker.sock",
-		"quark-c-runner-1 is privileged",
-		"lane-minio isn't managed by quark and publishes 127.0.0.1:9000/tcp",
+		"bedrock-a-web-0 runs with Docker's default privileges: started before isolation; redeploy a",
+		"bedrock-a-web-0 can write its root filesystem",
+		"bedrock-b-web-1 runs as root",
+		"bedrock-b-web-1 keeps NET_BIND_SERVICE",
+		"bedrock-b-web-1 mounts a path from the machine: /var/run/docker.sock",
+		"bedrock-c-runner-1 is privileged",
+		"lane-minio isn't managed by bedrock and publishes 127.0.0.1:9000/tcp",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("findings lack %q:\n%s", want, joined)

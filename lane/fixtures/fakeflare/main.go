@@ -1,5 +1,5 @@
 // Fakeflare stands in for Cloudflare's API on the lane: zones and DNS
-// records, kept in memory, behind a token. The M6 proof points quark's
+// records, kept in memory, behind a token. The M6 proof points bedrock's
 // cloudflare integration at it so no real token is needed; the records it
 // keeps don't change public DNS (the lane's wildcard does that).
 //
@@ -13,7 +13,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kylebegeman/quark/internal/cloudflare/cloudflaretest"
+	"github.com/kylebegeman/bedrock/internal/cloudflare/cloudflaretest"
 )
 
 func main() {

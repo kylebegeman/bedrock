@@ -1,5 +1,5 @@
 // Package restic drives restic in a container: one repository per app in
-// its own bucket, encrypted with the machine's backup password. quark
+// its own bucket, encrypted with the machine's backup password. bedrock
 // mounts what to back up under /data and restores back into the same
 // places, so a snapshot's paths mean the same thing on every machine.
 package restic
@@ -14,20 +14,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/docker"
 )
 
 // Image is restic, pinned by digest.
 const Image = "restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510"
 
 // CacheVolume keeps restic's index cache between runs, for every repository.
-const CacheVolume = "quark-restic-cache"
+const CacheVolume = "bedrock-restic-cache"
 
 // DataRoot is where the backed-up tree sits inside the container.
 const DataRoot = "/data"
 
-// Tag marks snapshots quark made.
-const Tag = "quark"
+// Tag marks snapshots bedrock made.
+const Tag = "bedrock"
 
 // Repo is one repository and how to open it.
 type Repo struct {
@@ -93,7 +93,7 @@ var ErrNoRepository = errors.New("no repository")
 func (r Runner) run(ctx context.Context, mounts []string, args ...string) ([]string, error) {
 	env := append([]string{"RESTIC_REPOSITORY=" + r.Repo.Repository, "RESTIC_PASSWORD=" + r.Repo.Password, "RESTIC_CACHE_DIR=/cache"}, r.Repo.Env...)
 	spec := docker.Spec{
-		Name:        fmt.Sprintf("quark-%s-restic-%d", r.Owner, time.Now().UnixMilli()),
+		Name:        fmt.Sprintf("bedrock-%s-restic-%d", r.Owner, time.Now().UnixMilli()),
 		Image:       Image,
 		Cmd:         args,
 		Env:         env,

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 type fakeNotifier struct {

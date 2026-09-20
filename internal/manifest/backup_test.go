@@ -77,7 +77,7 @@ workloads:
 backup:
   schedule: "0 3 * * *"
 `, "keeps no data"},
-		{strings.Replace(withDataApp, "app: dragon-writer", "app: quark", 1), "a name quark uses for itself"},
+		{strings.Replace(withDataApp, "app: dragon-writer", "app: bedrock", 1), "a name bedrock uses for itself"},
 	}
 	for _, c := range cases {
 		_, err := Parse([]byte(c.yaml))

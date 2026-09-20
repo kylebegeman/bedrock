@@ -1,5 +1,5 @@
 // Package edge is the web front door: one Caddy on ports 80 and 443 whose
-// whole configuration quark owns and rebuilds from the apps it runs.
+// whole configuration bedrock owns and rebuilds from the apps it runs.
 package edge
 
 import (
@@ -14,7 +14,7 @@ type Route struct {
 	// Path is a normalized prefix ending in "/"; "/" is the catch-all.
 	Path string
 	// Dial is the upstream as Caddy reaches it on the edge network,
-	// such as quark-kylebegeman-site-3f2a9c:8080.
+	// such as bedrock-kylebegeman-site-3f2a9c:8080.
 	Dial string
 }
 
@@ -60,7 +60,7 @@ func Config(routes []Route) ([]byte, error) {
 	}
 	cfg := map[string]any{
 		// The admin API is a socket in a directory only this machine and
-		// the edge share. quark keeps the configuration itself (BootFile),
+		// the edge share. bedrock keeps the configuration itself (BootFile),
 		// so Caddy's own copy is off.
 		"admin": map[string]any{"listen": adminListen, "config": map[string]any{"persist": false}},
 		"logging": map[string]any{"logs": map[string]any{
@@ -69,10 +69,10 @@ func Config(routes []Route) ([]byte, error) {
 		"apps": map[string]any{
 			"http": map[string]any{
 				// Per-host counters and latency histograms on the admin
-				// API's /metrics: the traffic signals quark keeps per app.
+				// API's /metrics: the traffic signals bedrock keeps per app.
 				"metrics": map[string]any{"per_host": true},
 				"servers": map[string]any{
-					"quark": map[string]any{
+					"bedrock": map[string]any{
 						"listen": []string{":80", ":443"},
 						"routes": serverRoutes,
 						"logs":   map[string]any{},
@@ -85,9 +85,9 @@ func Config(routes []Route) ([]byte, error) {
 }
 
 // Initial is the configuration the edge starts with before any app is
-// deployed: an admin API quark can reach, and nothing to serve.
+// deployed: an admin API bedrock can reach, and nothing to serve.
 //
-// A route's Dial may be a Unix socket (unix//path), for quark's own
+// A route's Dial may be a Unix socket (unix//path), for bedrock's own
 // endpoints.
 func Initial() []byte {
 	b, _ := Config(nil)

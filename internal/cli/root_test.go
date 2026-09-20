@@ -10,12 +10,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/secrets"
-	"github.com/kylebegeman/quark/internal/version"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/bedrock/internal/version"
 )
 
-// run executes quark with a private state directory and no daemon.
+// run executes bedrock with a private state directory and no daemon.
 func run(t *testing.T, stateDir string, args ...string) (string, string, int) {
 	t.Helper()
 	var out, errOut bytes.Buffer
@@ -140,8 +140,8 @@ func TestSecretCopyGivesAnotherAppTheSameValueUnseen(t *testing.T) {
 		t.Fatalf("second copy: code %d, version %d then %d, out %q", code, version, again, out)
 	}
 	for _, args := range [][]string{
-		{"quark", "EMAIL_PASSWORD", "loom"},
-		{"loom", "RUNNER_TOKEN", "quark"},
+		{"bedrock", "EMAIL_PASSWORD", "loom"},
+		{"loom", "RUNNER_TOKEN", "bedrock"},
 		{"loom", "MISSING", "loom-runner"},
 		{"loom", "RUNNER_TOKEN", "loom"},
 	} {

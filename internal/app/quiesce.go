@@ -14,8 +14,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/kylebegeman/quark/internal/docker"
-	"github.com/kylebegeman/quark/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/manifest"
 )
 
 // Jobs hold a shared lock for their entire lifetime, including cleanup. Backups

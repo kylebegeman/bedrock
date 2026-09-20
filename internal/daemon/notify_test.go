@@ -22,7 +22,7 @@ func newFakeSystemd(t *testing.T) *fakeSystemd {
 	t.Helper()
 	// Unix socket paths are limited to about 100 bytes, and t.TempDir() is
 	// longer than that on macOS.
-	dir, err := os.MkdirTemp("/tmp", "quark-notify-")
+	dir, err := os.MkdirTemp("/tmp", "bedrock-notify-")
 	if err != nil {
 		t.Fatal(err)
 	}

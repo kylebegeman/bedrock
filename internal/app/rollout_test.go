@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/manifest"
-	"github.com/kylebegeman/quark/internal/restic"
-	"github.com/kylebegeman/quark/internal/secrets"
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/restic"
+	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 // coreYAML is shaped like Loom's Core: one image for several workloads, a
@@ -169,7 +169,7 @@ func TestSecretsAreMadeOnceAndDerivedAgainWhenTheirSourceChanges(t *testing.T) {
 	if len(first["LOOM_CORE_API_PASSWORD"]) != 64 {
 		t.Fatalf("hex:32 makes 64 hex digits: %q", first["LOOM_CORE_API_PASSWORD"])
 	}
-	wantURL := "postgres://loom_core_api:" + first["LOOM_CORE_API_PASSWORD"] + "@quark-loom-postgres:5432/loom"
+	wantURL := "postgres://loom_core_api:" + first["LOOM_CORE_API_PASSWORD"] + "@bedrock-loom-postgres:5432/loom"
 	if first["LOOM_CORE_API_DATABASE_URL"] != wantURL {
 		t.Fatalf("derived URL %q, want %q", first["LOOM_CORE_API_DATABASE_URL"], wantURL)
 	}
@@ -219,7 +219,7 @@ func TestTheDefaultDatabaseURLNamesTheAppsOwnUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	values, _, _ := sec.LoadCurrent("shop-front")
-	want := "postgres://shop_front:" + values[postgresPasswordName] + "@quark-shop-front-postgres:5432/shop_front?sslmode=disable"
+	want := "postgres://shop_front:" + values[postgresPasswordName] + "@bedrock-shop-front-postgres:5432/shop_front?sslmode=disable"
 	if values[DatabaseURLName] != want {
 		t.Fatalf("DATABASE_URL %q, want %q", values[DatabaseURLName], want)
 	}
@@ -374,7 +374,7 @@ func TestAFailedContainerIsExplainedByItsErrorNotItsLastBrace(t *testing.T) {
 	if got := lastWords("listening on 8000\n}\n"); got != "listening on 8000" {
 		t.Fatalf("got %q", got)
 	}
-	if got := lastWords("\n\n"); got != "it wrote nothing; see quark logs" {
+	if got := lastWords("\n\n"); got != "it wrote nothing; see bedrock logs" {
 		t.Fatalf("got %q", got)
 	}
 }

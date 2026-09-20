@@ -1,6 +1,6 @@
-// Package host inspects and prepares the machine quark runs on: facts about
+// Package host inspects and prepares the machine bedrock runs on: facts about
 // it, the doctor's verdicts, and the operations that set it up, maintain it
-// and upgrade quark itself.
+// and upgrade bedrock itself.
 package host
 
 import (
@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/version"
+	"github.com/kylebegeman/bedrock/internal/version"
 )
 
 // Env is how the host package touches the machine, so tests can hand it a
@@ -96,7 +96,7 @@ func (e Env) WriteFile(p string, content string, mode os.FileMode) (bool, error)
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		return false, err
 	}
-	tmp := full + ".quark-tmp"
+	tmp := full + ".bedrock-tmp"
 	if err := os.WriteFile(tmp, []byte(content), mode); err != nil {
 		return false, err
 	}

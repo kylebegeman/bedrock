@@ -10,14 +10,14 @@ import (
 	"sort"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/cloudflare"
-	"github.com/kylebegeman/quark/internal/dns"
-	"github.com/kylebegeman/quark/internal/edge"
-	"github.com/kylebegeman/quark/internal/integration"
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/manifest"
-	"github.com/kylebegeman/quark/internal/secrets"
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/cloudflare"
+	"github.com/kylebegeman/bedrock/internal/dns"
+	"github.com/kylebegeman/bedrock/internal/edge"
+	"github.com/kylebegeman/bedrock/internal/integration"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 // DNSManager opens the Cloudflare integration for this machine, or says
@@ -38,7 +38,7 @@ func DNSManager(sec *secrets.Store, addresses []string) (*dns.Manager, error) {
 // errNoCloudflare says what to do when a manifest asks for records and
 // the machine can't keep them.
 func errNoCloudflare(app string, err error) error {
-	return fmt.Errorf("%s's routes ask quark to keep their DNS records (dns: direct or proxied), but %w", app, err)
+	return fmt.Errorf("%s's routes ask bedrock to keep their DNS records (dns: direct or proxied), but %w", app, err)
 }
 
 // managedHostsOf reads a revision's managed hosts.
@@ -52,7 +52,7 @@ func managedHostsOf(rev state.Revision) map[string]manifest.DNSMode {
 
 // keepRecords makes the records a manifest asks for and waits until every
 // host points here. A record that points at another machine stops the
-// deploy: moving a name is `quark dns point`, never a side effect.
+// deploy: moving a name is `bedrock dns point`, never a side effect.
 func keepRecords(ctx context.Context, sec *secrets.Store, m *manifest.Manifest, addrs []string, out io.Writer) error {
 	managed := m.ManagedHosts()
 	if len(managed) > 0 {
@@ -85,7 +85,7 @@ func keepRecords(ctx context.Context, sec *secrets.Store, m *manifest.Manifest, 
 }
 
 // waitResolves checks a host's public DNS, waiting up to two minutes for a
-// record quark just made to reach the resolvers.
+// record bedrock just made to reach the resolvers.
 func waitResolves(ctx context.Context, host string, addrs []string, patient bool) error {
 	deadline := time.Now().Add(2 * time.Minute)
 	for {
@@ -107,7 +107,7 @@ func waitResolves(ctx context.Context, host string, addrs []string, patient bool
 	}
 }
 
-// pruneRecords removes the records quark keeps for an app's hosts that
+// pruneRecords removes the records bedrock keeps for an app's hosts that
 // its active revision no longer routes. It needs the integration only
 // when there is something to remove.
 func pruneRecords(ctx context.Context, store *state.Store, sec *secrets.Store, app string, addrs []string, out io.Writer) error {

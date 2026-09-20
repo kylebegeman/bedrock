@@ -1,4 +1,4 @@
-<title>Quark 0.7 Plan</title>
+<title>Bedrock 0.7 Plan</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
@@ -79,9 +79,9 @@
 <main>
   <header>
     <div class="eyebrow">Plan for execution · September 19, 2026</div>
-    <h1>Quark 0.7 Plan</h1>
+    <h1>Bedrock 0.7 Plan</h1>
     <p class="lead">Thirty-four locked items, in an order where every milestone leaves the test bed running something real. 0.7 runs the personal machine. 0.8 wires Loom. 0.9 opens the launchpad. 1.0 keeps the promise.</p>
-    <p class="muted">Item numbers refer to <a href="https://claude.ai/artifact/8CkxxhsT75mKX5EB8t7z8H">Quark Ideas</a>. Dropped: 5, 13 and 17. Background is in the <a href="https://claude.ai/artifact/BUCyRXjPV4bqHRm2p5v6U6">blueprint</a>.</p>
+    <p class="muted">Item numbers refer to <a href="https://claude.ai/artifact/8CkxxhsT75mKX5EB8t7z8H">Bedrock Ideas</a>. Dropped: 5, 13 and 17. Background is in the <a href="https://claude.ai/artifact/BUCyRXjPV4bqHRm2p5v6U6">blueprint</a>.</p>
   </header>
 
   <section>
@@ -102,14 +102,14 @@
       <table>
         <thead><tr><th>Area</th><th>Choice</th><th>Why</th></tr></thead>
         <tbody>
-          <tr><td class="k">Language</td><td>Go, current stable. One module, <code>github.com/kylebegeman/quark</code>. Static builds for linux/amd64 (the machines) and darwin/arm64 (the Mac CLI).</td><td>One file per machine, no runtime to install.</td></tr>
+          <tr><td class="k">Language</td><td>Go, current stable. One module, <code>github.com/kylebegeman/bedrock</code>. Static builds for linux/amd64 (the machines) and darwin/arm64 (the Mac CLI).</td><td>One file per machine, no runtime to install.</td></tr>
           <tr><td class="k">CLI</td><td>cobra. Every command takes <code>--json</code>; every mutating command takes <code>--plan</code> and <code>--yes</code>.</td><td>Scripts and agents get the same surface people do.</td></tr>
-          <tr><td class="k">State</td><td>SQLite through a pure-Go driver, WAL mode, one file: <code>/var/lib/quark/state.db</code>.</td><td>A crash-safe journal without cgo, so the binary stays static.</td></tr>
+          <tr><td class="k">State</td><td>SQLite through a pure-Go driver, WAL mode, one file: <code>/var/lib/bedrock/state.db</code>.</td><td>A crash-safe journal without cgo, so the binary stays static.</td></tr>
           <tr><td class="k">Containers</td><td>The Docker Engine API through the official Go client. Never the CLI.</td><td>Typed calls and streaming, no output parsing.</td></tr>
-          <tr><td class="k">Edge</td><td>Caddy in a container, configured through its admin API. Quark owns the whole config.</td><td>Atomic traffic switches, readable certificate state, no snippet files.</td></tr>
+          <tr><td class="k">Edge</td><td>Caddy in a container, configured through its admin API. Bedrock owns the whole config.</td><td>Atomic traffic switches, readable certificate state, no snippet files.</td></tr>
           <tr><td class="k">Builds</td><td>BuildKit through the Engine API, into a local registry on <code>127.0.0.1:5000</code>, pinned by digest, at low priority.</td><td>Builds on the machine; no Actions in the path.</td></tr>
-          <tr><td class="k">Backups</td><td>restic, a pinned binary Quark installs; one repository per app in its own B2 bucket.</td><td>Encrypted, deduplicated, proven. Drills restore from it.</td></tr>
-          <tr><td class="k">Secrets</td><td>An age-sealed store; the host key in <code>/etc/quark</code>, a recovery key shown once.</td><td>Small and auditable.</td></tr>
+          <tr><td class="k">Backups</td><td>restic, a pinned binary Bedrock installs; one repository per app in its own B2 bucket.</td><td>Encrypted, deduplicated, proven. Drills restore from it.</td></tr>
+          <tr><td class="k">Secrets</td><td>An age-sealed store; the host key in <code>/etc/bedrock</code>, a recovery key shown once.</td><td>Small and auditable.</td></tr>
           <tr><td class="k">DNS</td><td>The Cloudflare API with a zone-scoped token.</td><td>Records follow the manifest.</td></tr>
           <tr><td class="k">Service</td><td>A systemd unit with <code>Type=notify</code>; the daemon's own loop pings the watchdog.</td><td>Ends the 0.6.18 bug class.</td></tr>
           <tr><td class="k">Loom link</td><td>Outbound mutual TLS, signed scoped commands, sequence replay (0.8).</td><td>The protocol shape Ophelia proved, without the fleet-control baggage.</td></tr>
@@ -125,14 +125,14 @@
       <table>
         <thead><tr><th>Release</th><th>Goal</th><th>Items</th></tr></thead>
         <tbody>
-          <tr><td class="k">0.7</td><td>Run the personal machine. The personal sites and Loom on Quark, backups and alerts on, and OVH set up as the business machine running braintreelabs.io.</td><td class="items">20 21 22 23 24 25 26 27 28 29 33a 36 37 · 1 2 3 4 6 7 8 9 10 11 12 14 15 16 18 19</td></tr>
+          <tr><td class="k">0.7</td><td>Run the personal machine. The personal sites and Loom on Bedrock, backups and alerts on, and OVH set up as the business machine running braintreelabs.io.</td><td class="items">20 21 22 23 24 25 26 27 28 29 33a 36 37 · 1 2 3 4 6 7 8 9 10 11 12 14 15 16 18 19</td></tr>
           <tr><td class="k">0.8</td><td>Wire Loom. Enrollment, the fleet view, alerts as push, the Core's lifecycle from the app, agent approvals, Loom sign-in for routes.</td><td class="items">32 33b 34 35 · 25 to push, 19 in the fleet view</td></tr>
           <tr><td class="k">0.9</td><td>Open the launchpad. Launch, previews, graduate.</td><td class="items">30 31</td></tr>
           <tr><td class="k">1.0</td><td>Keep the promise. Stable manifest and API, upgrade guarantees, a security review, docs.</td><td class="items"></td></tr>
         </tbody>
       </table>
     </div>
-    <p class="muted">33 splits: 33a (the Core runs as Quark apps and <code>loom core create</code> drives Quark) is needed for moving day; 33b (upgrade, rollback and backups from inside the app) needs the Loom link. Alerts are email in 0.7 and push once the link exists.</p>
+    <p class="muted">33 splits: 33a (the Core runs as Bedrock apps and <code>loom core create</code> drives Bedrock) is needed for moving day; 33b (upgrade, rollback and backups from inside the app) needs the Loom link. Alerts are email in 0.7 and push once the link exists.</p>
   </section>
 
   <section>
@@ -143,15 +143,15 @@
       <div class="ms">
         <div class="ms-head"><span class="id">M0</span><h3>Repo and lane</h3><span class="chip">Small</span><span class="chip items">36</span></div>
         <dl>
-          <dt>Builds</dt><dd>The repo renamed to <code>quark</code>; the Python code archived on a branch <code>ophelia-0.6</code> and a tag; a Go scaffold with build, vet and test in CI; the test lane, which rents an hourly VM (or resets the Hostinger box), installs the binary and runs a smoke; the blueprint, ideas and this plan moved into <code>docs/</code>.</dd>
-          <dt>Proof</dt><dd><code>quark version</code> runs on a fresh VM the lane created.</dd>
+          <dt>Builds</dt><dd>The repo renamed to <code>bedrock</code>; the Python code archived on a branch <code>ophelia-0.6</code> and a tag; a Go scaffold with build, vet and test in CI; the test lane, which rents an hourly VM (or resets the Hostinger box), installs the binary and runs a smoke; the blueprint, ideas and this plan moved into <code>docs/</code>.</dd>
+          <dt>Proof</dt><dd><code>bedrock version</code> runs on a fresh VM the lane created.</dd>
         </dl>
       </div>
 
       <div class="ms">
         <div class="ms-head"><span class="id">M1</span><h3>Kernel</h3><span class="chip">Large</span><span class="chip items">20 · 3 · 4</span></div>
         <dl>
-          <dt>Builds</dt><dd>The operation journal (plan, steps, receipt, leases), the renderer, <code>--plan</code>, <code>quark history</code>, the Unix-socket API, the systemd unit with its watchdog.</dd>
+          <dt>Builds</dt><dd>The operation journal (plan, steps, receipt, leases), the renderer, <code>--plan</code>, <code>bedrock history</code>, the Unix-socket API, the systemd unit with its watchdog.</dd>
           <dt>Proof</dt><dd>An operation killed halfway resumes or compensates on restart, and <code>history</code> shows exactly what happened.</dd>
         </dl>
       </div>
@@ -178,7 +178,7 @@
         <dl>
           <dt>Builds</dt><dd>The secrets store, managed Postgres and object storage, cron and <code>run</code>, deploy from a backup.</dd>
           <dt>Live</dt><dd>begamin with its data volume from the archive, and Dragon Writer on Postgres 16 restored from the July 5 backup, on test hostnames.</dd>
-          <dt>Proof</dt><dd>Olive's 24 chapters count; <code>quark run</code> executes a migration; a rollback restores the previous secrets version.</dd>
+          <dt>Proof</dt><dd>Olive's 24 chapters count; <code>bedrock run</code> executes a migration; a rollback restores the previous secrets version.</dd>
         </dl>
       </div>
 
@@ -194,32 +194,32 @@
         <div class="ms-head"><span class="id">M6</span><h3>DNS, isolation, git</h3><span class="chip">Medium</span><span class="chip items">11 · 28 · 29</span></div>
         <dl>
           <dt>Builds</dt><dd>Cloudflare records from the manifest, isolation defaults and the exposure report, push-to-deploy.</dd>
-          <dt>Proof</dt><dd><code>git push quark main</code> deploys begamin; its record appears and disappears with the app; no app can reach another's network.</dd>
+          <dt>Proof</dt><dd><code>git push bedrock main</code> deploys begamin; its record appears and disappears with the app; no app can reach another's network.</dd>
         </dl>
       </div>
 
       <div class="ms">
         <div class="ms-head"><span class="id">M7</span><h3>Loom Core and moving day</h3><span class="chip">Large</span><span class="chip items">33a · 37</span></div>
         <dl>
-          <dt>Builds</dt><dd>One Loom manifest (Core, processor, Runner, data) replacing the four Ophelia manifests and the data-authority scripts; <code>loom core create</code> keeps its host-key pinning, DNS check and owner code and drives Quark for the rest; the moving-day tooling.</dd>
+          <dt>Builds</dt><dd>One Loom manifest (Core, processor, Runner, data) replacing the four Ophelia manifests and the data-authority scripts; <code>loom core create</code> keeps its host-key pinning, DNS check and owner code and drives Bedrock for the rest; the moving-day tooling.</dd>
           <dt>Proof</dt><dd>A Core created on the test bed passes CORE-02's verification and the Mac connects to it. Then moving day, below.</dd>
         </dl>
       </div>
 
     </div>
-    <p class="muted">0.7 ships when the personal machine runs kylebegeman.com, begamin and Dragon Writer with Loom on Quark, backups and alerts on, and OVH is set up as the business machine with braintreelabs.io on it.</p>
+    <p class="muted">0.7 ships when the personal machine runs kylebegeman.com, begamin and Dragon Writer with Loom on Bedrock, backups and alerts on, and OVH is set up as the business machine with braintreelabs.io on it.</p>
   </section>
 
   <section>
     <div class="eyebrow">Moving day</div>
     <h2>The sequence, and who does each step</h2>
     <ol class="steps">
-      <li><span class="who me">Claude</span>Before anything is wiped, clear the lane's DNS records: <code>quark dns audit</code>, then <code>quark remove</code> each lane app that still keeps one. begamin holds <code>api.lane.begam.in</code> and <code>go.lane.begam.in</code> in the real zone. <span class="who kyle">Kyle</span>Decide whether <code>*.lane.begam.in</code> stays.</li>
-      <li><span class="who kyle">Kyle</span>Reinstall the Hostinger box with Ubuntu 24.04 and the <code>bagel-box-deploy</code> key. <span class="who me">Claude</span>Run <code>quark host setup</code>, which installs the published 0.7.0 release after verifying its checksum.</li>
-      <li><span class="who me">Claude</span>Deploy the personal apps on test hostnames from their <code>quark-manifest</code> branches and the Dropbox archives: kylebegeman.com, begamin and Dragon Writer. Run a drill for each and check every page. Dragon Writer needs one <code>npm run db:migrate</code> after its restore, to record migrations 0018 to 0020 that reached the schema through <code>drizzle-kit push</code>; it applies nothing new.</li>
+      <li><span class="who me">Claude</span>Before anything is wiped, clear the lane's DNS records: <code>bedrock dns audit</code>, then <code>bedrock remove</code> each lane app that still keeps one. begamin holds <code>api.lane.begam.in</code> and <code>go.lane.begam.in</code> in the real zone. <span class="who kyle">Kyle</span>Decide whether <code>*.lane.begam.in</code> stays.</li>
+      <li><span class="who kyle">Kyle</span>Reinstall the Hostinger box with Ubuntu 24.04 and the <code>bagel-box-deploy</code> key. <span class="who me">Claude</span>Run <code>bedrock host setup</code>, which installs the published 0.7.0 release after verifying its checksum.</li>
+      <li><span class="who me">Claude</span>Deploy the personal apps on test hostnames from their <code>bedrock-manifest</code> branches and the Dropbox archives: kylebegeman.com, begamin and Dragon Writer. Run a drill for each and check every page. Dragon Writer needs one <code>npm run db:migrate</code> after its restore, to record migrations 0018 to 0020 that reached the schema through <code>drizzle-kit push</code>; it applies nothing new.</li>
       <li><span class="who kyle">Kyle</span>Switch the three sites' DNS records, one at a time. <span class="who me">Claude</span>Verify each, then stop the OVH copies. Nothing is deleted yet.</li>
       <li><span class="who me">Claude</span>Create a Core on a test hostname with <code>--same-host-runner</code>, walk the first run, tear it down. The old Core on OVH stays live throughout. Then, in one sitting: take the old Core's final archive with its services stopped, to Dropbox, and stop it. <span class="who kyle">Kyle</span>Point <code>core.begam.in</code> at Hostinger. <span class="who me">Claude</span>Create the final Core at <code>core.begam.in</code>. <span class="who kyle">Kyle</span>Enroll the Mac with the owner code and your passkey. The hostname has to be final before the Mac enrolls, because device secrets are keyed to it. Loom is down for the few hours in between. That's the fresh start.</li>
-      <li><span class="who me">Claude</span>Take the final OVH archive. <span class="who kyle">Kyle</span>Reinstall OVH. <span class="who me">Claude</span>Run <code>quark host setup</code> as the business machine, then deploy braintreelabs.io there from its <code>quark-manifest</code> branch. Its zone is not on Cloudflare and its record still names the lapsed Spaceship VPS, so <span class="who kyle">Kyle</span>either moves the zone to Cloudflare, after which both routes become <code>dns: direct</code>, or repoints the A record at Spaceship by hand. Until 0.9, products deploy there with <code>quark deploy</code>.</li>
+      <li><span class="who me">Claude</span>Take the final OVH archive. <span class="who kyle">Kyle</span>Reinstall OVH. <span class="who me">Claude</span>Run <code>bedrock host setup</code> as the business machine, then deploy braintreelabs.io there from its <code>bedrock-manifest</code> branch. Its zone is not on Cloudflare and its record still names the lapsed Spaceship VPS, so <span class="who kyle">Kyle</span>either moves the zone to Cloudflare, after which both routes become <code>dns: direct</code>, or repoints the A record at Spaceship by hand. Until 0.9, products deploy there with <code>bedrock deploy</code>.</li>
       <li><span class="who kyle">Kyle</span>Delete the read-only Backblaze key.</li>
     </ol>
     <p class="muted"><strong>The Runner shares the Core's machine.</strong> Two machines with roles, and no spare, so <code>loom core create</code> runs with <code>--same-host-runner</code>. That knowingly accepts the P1 finding: a privileged container beside the Core's data is not a hard boundary. It holds while Kyle is the Runner's only user. Move it to its own host when a third machine exists or Loom gains other users.</p>
@@ -234,7 +234,7 @@
       <div class="box">
         <h3>In 0.7</h3>
         <ul>
-          <li><code>packages/core-provisioning</code> keeps connect, host-key trust, the DNS check and the owner code; its prepare, build, manifest and deploy steps become calls to <code>quark</code>.</li>
+          <li><code>packages/core-provisioning</code> keeps connect, host-key trust, the DNS check and the owner code; its prepare, build, manifest and deploy steps become calls to <code>bedrock</code>.</li>
           <li><code>deploy/ophelia/</code> (58 files, about 12,000 lines) is deleted after moving day, along with the Ophelia pin in <code>toolchain.json</code>.</li>
           <li>The Runner is declared as a privileged workload in the Loom manifest.</li>
           <li>CORE-05, the fresh start, is moving day.</li>
@@ -243,7 +243,7 @@
       <div class="box">
         <h3>In 0.8</h3>
         <ul>
-          <li>CORE-03 (set up a new Core from the app) and CORE-04 (upgrade, rollback, status and backups from the app) build on Quark's API and the enrollment link.</li>
+          <li>CORE-03 (set up a new Core from the app) and CORE-04 (upgrade, rollback, status and backups from the app) build on Bedrock's API and the enrollment link.</li>
           <li>A Fleet view: machines, apps, health, deploys, backups, drills, alerts, logs, approvals.</li>
           <li>Alerts become push notifications.</li>
           <li>Two Core endpoints for Loom sign-in on routes (35), and approval records for agent-run operations (34).</li>
@@ -257,7 +257,7 @@
     <h2>What could go wrong, and the answer</h2>
     <ul class="rules">
       <li><b>A lot of build before the payoff.</b> Each milestone leaves something live on the test bed, and the old machines stay up until moving day, so nothing is at risk while it's built.</li>
-      <li><b>Quark owns Caddy's whole config</b>, so every site on a machine must be a Quark app. On these two machines that's true by design.</li>
+      <li><b>Bedrock owns Caddy's whole config</b>, so every site on a machine must be a Bedrock app. On these two machines that's true by design.</li>
       <li><b>Postgres major upgrades.</b> 0.7 answers with dump and restore through the backup path; in-place upgrades come later.</li>
       <li><b>The Runner needs privileges.</b> Isolation (28) lands before previews from anyone else's branches, which is 0.9, not before your own.</li>
       <li><b>The Loom link (32) is the largest Loom-side item.</b> 0.7 doesn't wait on it; alerts go by email until it exists.</li>
@@ -277,7 +277,7 @@
   <footer class="sources">
     <div class="eyebrow">Sources</div>
     <ul>
-      <li><a href="https://claude.ai/artifact/8CkxxhsT75mKX5EB8t7z8H">Quark Ideas</a> (items 1 to 37) and the <a href="https://claude.ai/artifact/BUCyRXjPV4bqHRm2p5v6U6">blueprint</a></li>
+      <li><a href="https://claude.ai/artifact/8CkxxhsT75mKX5EB8t7z8H">Bedrock Ideas</a> (items 1 to 37) and the <a href="https://claude.ai/artifact/BUCyRXjPV4bqHRm2p5v6U6">blueprint</a></li>
       <li>Loom's core-provisioning charter (CORE-01 to CORE-06), <code>packages/core-provisioning/</code> and <code>deploy/ophelia/</code></li>
       <li>The September 18 server audit and the Dragon Writer recovery</li>
     </ul>

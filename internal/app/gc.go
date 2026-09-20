@@ -8,14 +8,14 @@ import (
 	"sort"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/docker"
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
-// GCKind removes what quark created and no longer needs: containers and
+// GCKind removes what bedrock created and no longer needs: containers and
 // images of revisions that are neither active nor kept for rollback, and
-// the build cache. It never touches anything without quark's label.
+// the build cache. It never touches anything without bedrock's label.
 const GCKind = "app.gc"
 
 // GC is the Definition for GCKind.
@@ -179,7 +179,7 @@ func keptRevisions(ctx context.Context, store *state.Store) (map[string]bool, er
 	return keep, nil
 }
 
-// staleContainers are quark's containers that belong to a revision nobody
+// staleContainers are bedrock's containers that belong to a revision nobody
 // keeps. Containers without a revision label (the edge, the registry) stay.
 func staleContainers(ctx context.Context, e *docker.Engine, keep map[string]bool) ([]docker.Info, error) {
 	owned, err := e.Owned(ctx)
@@ -198,7 +198,7 @@ func staleContainers(ctx context.Context, e *docker.Engine, keep map[string]bool
 	return stale, nil
 }
 
-// staleImages are images quark built for revisions nobody keeps.
+// staleImages are images bedrock built for revisions nobody keeps.
 func staleImages(ctx context.Context, e *docker.Engine, keep map[string]bool) ([]docker.Image, error) {
 	images, err := e.OwnedImages(ctx)
 	if err != nil {

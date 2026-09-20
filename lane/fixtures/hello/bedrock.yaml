@@ -31,4 +31,4 @@ data:
       description: One line per cron run
 checks:
   - url: https://hello.lane.begam.in/
-    contains: hello from quark
+    contains: hello from bedrock

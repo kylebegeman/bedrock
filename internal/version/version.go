@@ -1,4 +1,4 @@
-// Package version reports which build of quark is running.
+// Package version reports which build of bedrock is running.
 package version
 
 import (
@@ -11,7 +11,7 @@ import (
 
 // number is set at release time:
 //
-//	go build -ldflags "-X github.com/kylebegeman/quark/internal/version.number=0.7.0"
+//	go build -ldflags "-X github.com/kylebegeman/bedrock/internal/version.number=0.7.0"
 var number = "0.7.0-dev"
 
 // Info describes one build.
@@ -38,7 +38,7 @@ func Current() Info {
 }
 
 func (i Info) String() string {
-	return fmt.Sprintf("quark %s (%s, %s %s/%s)", i.Version, i.Commit, i.Go, i.OS, i.Arch)
+	return fmt.Sprintf("bedrock %s (%s, %s %s/%s)", i.Version, i.Commit, i.Go, i.OS, i.Arch)
 }
 
 // WriteJSON writes the Info as one JSON object followed by a newline.

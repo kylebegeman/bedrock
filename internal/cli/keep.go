@@ -15,15 +15,15 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	apps "github.com/kylebegeman/quark/internal/app"
-	"github.com/kylebegeman/quark/internal/docker"
-	"github.com/kylebegeman/quark/internal/edge"
-	"github.com/kylebegeman/quark/internal/integration"
-	"github.com/kylebegeman/quark/internal/manifest"
-	"github.com/kylebegeman/quark/internal/signals"
-	"github.com/kylebegeman/quark/internal/state"
-	"github.com/kylebegeman/quark/internal/version"
-	"github.com/kylebegeman/quark/internal/watch"
+	apps "github.com/kylebegeman/bedrock/internal/app"
+	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/edge"
+	"github.com/kylebegeman/bedrock/internal/integration"
+	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/signals"
+	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/bedrock/internal/version"
+	"github.com/kylebegeman/bedrock/internal/watch"
 )
 
 // appRow is one app as ls and status see it.
@@ -166,7 +166,7 @@ func newLs(a *app) *cobra.Command {
 			}
 			if len(unmanaged) > 0 {
 				sort.Strings(unmanaged)
-				fmt.Fprintf(a.stdout, "not managed by quark: %s\n", strings.Join(unmanaged, ", "))
+				fmt.Fprintf(a.stdout, "not managed by bedrock: %s\n", strings.Join(unmanaged, ", "))
 			}
 			return nil
 		},
@@ -189,7 +189,7 @@ func orDash(s string) string {
 
 // machineLine says how the machine is doing, in one line.
 func machineLine(ctx context.Context, hostname string, open []state.Incident) string {
-	parts := []string{"quark " + version.Current().Version}
+	parts := []string{"bedrock " + version.Current().Version}
 	if engine, err := docker.Connect(ctx); err != nil {
 		parts = append(parts, "DOCKER NOT ANSWERING")
 	} else {
@@ -362,7 +362,7 @@ func (a *app) appStatus(ctx context.Context, store *state.Store, r appRow, sums 
 			fmt.Fprintf(a.stdout, "    last drill: %s\n", orDash(firstNonEmpty(r.LastDrill.Detail, r.LastDrill.Error)))
 		}
 	} else if r.manifest.HasData() {
-		fmt.Fprintln(a.stdout, "  backups: off in quark.yaml")
+		fmt.Fprintln(a.stdout, "  backups: off in bedrock.yaml")
 	}
 	return nil
 }
@@ -453,7 +453,7 @@ func newBackup(a *app) *cobra.Command {
 	var planOnly bool
 	cmd := &cobra.Command{
 		Use:   "backup <app>",
-		Short: "Back the app's data up to its bucket now. \"quark\" backs up the machine's own state.",
+		Short: "Back the app's data up to its bucket now. \"bedrock\" backs up the machine's own state.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.operate(cmd.Context(), apps.BackupKind, apps.BackupInput{App: args[0]}, planOnly)
@@ -633,7 +633,7 @@ func newWatch(a *app) *cobra.Command {
 				return json.NewEncoder(a.stdout).Encode(ws)
 			}
 			if len(ws) == 0 {
-				fmt.Fprintln(a.stdout, "watching nothing; add a URL with quark watch add https://...")
+				fmt.Fprintln(a.stdout, "watching nothing; add a URL with bedrock watch add https://...")
 			}
 			for _, w := range ws {
 				fmt.Fprintf(a.stdout, "%s (since %s)\n", w.URL, w.AddedAt.Local().Format("2006-01-02"))
@@ -688,7 +688,7 @@ func newWatch(a *app) *cobra.Command {
 func newIntegration(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "integration",
-		Short: "The credentials quark itself uses: storage for backups, email for alerts, Cloudflare for DNS.",
+		Short: "The credentials bedrock itself uses: storage for backups, email for alerts, Cloudflare for DNS.",
 	}
 	set := &cobra.Command{
 		Use:   "set <name>",
@@ -713,9 +713,9 @@ func newIntegration(a *app) *cobra.Command {
 				return err
 			}
 			for field, value := range generated {
-				fmt.Fprintf(a.stderr, "\nquark made a %s for %s. It is shown once, here, and nowhere else. Keep it with the recovery identity in your password manager; a new machine needs it to read these backups:\n\n  %s\n\n", field, def.Name, value)
+				fmt.Fprintf(a.stderr, "\nbedrock made a %s for %s. It is shown once, here, and nowhere else. Keep it with the recovery identity in your password manager; a new machine needs it to read these backups:\n\n  %s\n\n", field, def.Name, value)
 			}
-			fmt.Fprintf(a.stdout, "%s set (quark's secrets version %d)\n", def.Name, version)
+			fmt.Fprintf(a.stdout, "%s set (bedrock's secrets version %d)\n", def.Name, version)
 			return nil
 		},
 	}
@@ -768,7 +768,7 @@ func newIntegration(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(a.stdout, "%s removed (quark's secrets version %d)\n", args[0], version)
+			fmt.Fprintf(a.stdout, "%s removed (bedrock's secrets version %d)\n", args[0], version)
 			return nil
 		},
 	}

@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/docker"
-	"github.com/kylebegeman/quark/internal/manifest"
-	"github.com/kylebegeman/quark/internal/secrets"
+	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/secrets"
 )
 
 // Names the data services use.
@@ -28,16 +28,16 @@ const (
 	DatabaseURLName = "DATABASE_URL"
 	// postgresPasswordName is the internal secret the database container
 	// itself is started with.
-	postgresPasswordName = "QUARK_POSTGRES_PASSWORD"
+	postgresPasswordName = "BEDROCK_POSTGRES_PASSWORD"
 )
 
 // PostgresPasswordName is the secret holding the database superuser's
-// password, for quark's own commands.
+// password, for bedrock's own commands.
 const PostgresPasswordName = postgresPasswordName
 
 // PostgresContainer names an app's database container. It carries no
 // revision: the database outlives every revision.
-func PostgresContainer(app string) string { return "quark-" + app + "-" + postgresWorkload }
+func PostgresContainer(app string) string { return "bedrock-" + app + "-" + postgresWorkload }
 
 // postgresName turns an app name into a database and role name.
 func postgresName(app string) string { return strings.ReplaceAll(app, "-", "_") }
@@ -140,7 +140,7 @@ func ensureServiceCredentials(store *secrets.Store, m *manifest.Manifest, out io
 	return nil
 }
 
-// ensureAppSecrets makes the secrets the manifest asks quark to generate
+// ensureAppSecrets makes the secrets the manifest asks bedrock to generate
 // and derives the rest. Values never reach the output, only names.
 func ensureAppSecrets(store *secrets.Store, m *manifest.Manifest, out io.Writer) error {
 	if err := ensureServiceCredentials(store, m, out); err != nil {
@@ -342,7 +342,7 @@ func ensurePostgres(ctx context.Context, e *docker.Engine, store *secrets.Store,
 // Object store names.
 const (
 	objectsWorkload = "objects"
-	// ObjectsImage is quark's MinIO, pinned by digest.
+	// ObjectsImage is bedrock's MinIO, pinned by digest.
 	ObjectsImage = "quay.io/minio/minio@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e"
 	// ObjectsUserName and ObjectsPasswordName are the object store's root
 	// credentials in the app's secrets.
@@ -351,7 +351,7 @@ const (
 )
 
 // ObjectsContainer names an app's object store.
-func ObjectsContainer(app string) string { return "quark-" + app + "-" + objectsWorkload }
+func ObjectsContainer(app string) string { return "bedrock-" + app + "-" + objectsWorkload }
 
 // objectsService describes an object store container.
 type objectsService struct {

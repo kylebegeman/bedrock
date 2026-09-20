@@ -1,5 +1,5 @@
 // Package cloudflaretest is a small stand-in for the part of Cloudflare's
-// API quark uses: zones, and DNS records in them. The tests use it, and so
+// API bedrock uses: zones, and DNS records in them. The tests use it, and so
 // does the lane, so no real token is needed to prove the record logic.
 package cloudflaretest
 
@@ -267,7 +267,7 @@ func (s *Server) record(w http.ResponseWriter, r *http.Request, z zone, id strin
 	}
 }
 
-// check applies the rules Cloudflare applies that quark could trip over.
+// check applies the rules Cloudflare applies that bedrock could trip over.
 func (s *Server) check(in Record, z zone, self string) (apiError, bool) {
 	if in.Name != z.Name && !strings.HasSuffix(in.Name, "."+z.Name) {
 		return apiError{81031, "Invalid DNS record name: " + in.Name + " is not in " + z.Name}, false

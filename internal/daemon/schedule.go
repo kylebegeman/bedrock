@@ -6,13 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/api"
-	"github.com/kylebegeman/quark/internal/app"
-	"github.com/kylebegeman/quark/internal/integration"
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/manifest"
-	"github.com/kylebegeman/quark/internal/secrets"
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/api"
+	"github.com/kylebegeman/bedrock/internal/app"
+	"github.com/kylebegeman/bedrock/internal/integration"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 // MachineBackupSchedule is when the machine's own state is backed up.
@@ -60,7 +60,7 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) {
 		// hour, only when there is something that wants backing up.
 		if len(active) > 0 && now.Sub(s.warnedAt) >= time.Hour {
 			s.warnedAt = now
-			s.Log("schedule: no backups run until storage is set: quark integration set storage")
+			s.Log("schedule: no backups run until storage is set: bedrock integration set storage")
 		}
 		return
 	}

@@ -1,10 +1,10 @@
 .PHONY: build test check linux lane-reset lane-status
 
 build:
-	CGO_ENABLED=0 go build -trimpath -o bin/quark ./cmd/quark
+	CGO_ENABLED=0 go build -trimpath -o bin/bedrock ./cmd/bedrock
 
 linux:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/quark-linux-amd64 ./cmd/quark
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/bedrock-linux-amd64 ./cmd/bedrock
 
 test:
 	go test ./...

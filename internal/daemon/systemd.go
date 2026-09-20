@@ -10,21 +10,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/api"
-	"github.com/kylebegeman/quark/internal/host"
+	"github.com/kylebegeman/bedrock/internal/api"
+	"github.com/kylebegeman/bedrock/internal/host"
 )
 
 // UnitPath is where the daemon's systemd unit lives.
-const UnitPath = "/etc/systemd/system/quark.service"
+const UnitPath = "/etc/systemd/system/bedrock.service"
 
 const unitTemplate = `[Unit]
-Description=Quark host daemon
-Documentation=https://github.com/kylebegeman/quark
+Description=Bedrock host daemon
+Documentation=https://github.com/kylebegeman/bedrock
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=60
 StartLimitBurst=3
-OnFailure=quark-rollback.service
+OnFailure=bedrock-rollback.service
 
 [Service]
 Type=notify
@@ -33,9 +33,9 @@ ExecStart=%s daemon run
 Restart=always
 RestartSec=2
 WatchdogSec=30
-StateDirectory=quark
+StateDirectory=bedrock
 StateDirectoryMode=0700
-RuntimeDirectory=quark
+RuntimeDirectory=bedrock
 RuntimeDirectoryMode=0750
 KillMode=mixed
 TimeoutStopSec=60
@@ -45,10 +45,10 @@ WantedBy=multi-user.target
 `
 
 // RollbackUnitPath is the unit systemd runs when the daemon can't start.
-const RollbackUnitPath = "/etc/systemd/system/quark-rollback.service"
+const RollbackUnitPath = "/etc/systemd/system/bedrock-rollback.service"
 
 const rollbackUnit = `[Unit]
-Description=Put the previous quark binary back after a failed start
+Description=Put the previous bedrock binary back after a failed start
 
 [Service]
 Type=oneshot
@@ -88,7 +88,7 @@ func Install(ctx context.Context, out io.Writer) error {
 		}
 		fmt.Fprintf(out, "wrote %s\n", host.RollbackScript)
 	}
-	for _, args := range [][]string{{"daemon-reload"}, {"enable", "quark.service"}, {"restart", "quark.service"}} {
+	for _, args := range [][]string{{"daemon-reload"}, {"enable", "bedrock.service"}, {"restart", "bedrock.service"}} {
 		if err := systemctl(ctx, args...); err != nil {
 			return err
 		}
@@ -98,11 +98,11 @@ func Install(ctx context.Context, out io.Writer) error {
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		if info, err := client.Version(ctx); err == nil {
-			fmt.Fprintf(out, "quark daemon %s is running\n", info.Version)
+			fmt.Fprintf(out, "bedrock daemon %s is running\n", info.Version)
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("the daemon didn't answer on %s within 20s; see journalctl -u quark", DefaultSocket)
+			return fmt.Errorf("the daemon didn't answer on %s within 20s; see journalctl -u bedrock", DefaultSocket)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -112,7 +112,7 @@ func Install(ctx context.Context, out io.Writer) error {
 func Status(ctx context.Context, socket string) (string, error) {
 	var b strings.Builder
 	if _, err := os.Stat("/run/systemd/system"); err == nil {
-		outp, _ := exec.CommandContext(ctx, "systemctl", "show", "quark.service", "--property=ActiveState,SubState,NRestarts,MainPID").Output()
+		outp, _ := exec.CommandContext(ctx, "systemctl", "show", "bedrock.service", "--property=ActiveState,SubState,NRestarts,MainPID").Output()
 		props := map[string]string{}
 		for _, line := range strings.Split(string(outp), "\n") {
 			if k, v, ok := strings.Cut(line, "="); ok {

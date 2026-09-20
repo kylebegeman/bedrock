@@ -16,7 +16,7 @@ func TestCurrentDescribesThisBuild(t *testing.T) {
 	if info.Go != runtime.Version() || info.OS != runtime.GOOS || info.Arch != runtime.GOARCH {
 		t.Fatalf("wrong runtime facts: %+v", info)
 	}
-	if s := info.String(); !strings.HasPrefix(s, "quark "+info.Version) {
+	if s := info.String(); !strings.HasPrefix(s, "bedrock "+info.Version) {
 		t.Fatalf("unexpected rendering %q", s)
 	}
 }

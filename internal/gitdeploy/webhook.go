@@ -19,23 +19,23 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/app"
-	"github.com/kylebegeman/quark/internal/integration"
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/secrets"
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/app"
+	"github.com/kylebegeman/bedrock/internal/integration"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 // HookPath is where webhooks arrive, on the app's own first host.
-const HookPath = "/_quark/hook"
+const HookPath = "/_bedrock/hook"
 
-// secretName names an app's webhook secret and deploy key in quark's own
+// secretName names an app's webhook secret and deploy key in bedrock's own
 // secrets. App names have no underscores, so the mapping is one to one.
 func secretName(kind, app string) string {
 	return kind + "_" + strings.ToUpper(strings.ReplaceAll(app, "-", "_"))
 }
 
-// ValidRepo checks a repository URL quark can fetch.
+// ValidRepo checks a repository URL bedrock can fetch.
 func ValidRepo(repo string) error {
 	switch {
 	case strings.HasPrefix(repo, "https://"), strings.HasPrefix(repo, "http://"), strings.HasPrefix(repo, "ssh://"), strings.HasPrefix(repo, "file:///"):
@@ -43,7 +43,7 @@ func ValidRepo(repo string) error {
 	case strings.HasPrefix(repo, "git@") && strings.Contains(repo, ":"):
 		return nil
 	}
-	return fmt.Errorf("%q isn't a repository URL quark can fetch (https://, git@host:owner/repo.git, ssh:// or file:///)", repo)
+	return fmt.Errorf("%q isn't a repository URL bedrock can fetch (https://, git@host:owner/repo.git, ssh:// or file:///)", repo)
 }
 
 func usesSSH(repo string) bool {
@@ -61,7 +61,7 @@ type Webhook struct {
 
 // Configure sets an app's webhook up: a secret for GitHub to sign with,
 // and, for a repository reached over SSH, a deploy key of its own. Both
-// live in quark's own secrets; the caller shows them once.
+// live in bedrock's own secrets; the caller shows them once.
 func Configure(ctx context.Context, store *state.Store, sec *secrets.Store, appName, repo, branch, host string) (*Webhook, error) {
 	if err := ValidRepo(repo); err != nil {
 		return nil, err
@@ -102,14 +102,14 @@ func Disable(ctx context.Context, store *state.Store, sec *secrets.Store, appNam
 // newDeployKey makes an ed25519 key pair with ssh-keygen and returns the
 // private key's text and the public key's line.
 func newDeployKey(appName string) (string, string, error) {
-	dir, err := os.MkdirTemp("", "quark-key-")
+	dir, err := os.MkdirTemp("", "bedrock-key-")
 	if err != nil {
 		return "", "", err
 	}
 	defer os.RemoveAll(dir)
 	host, _ := os.Hostname()
 	path := filepath.Join(dir, "key")
-	if out, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "quark deploy key for "+appName+" on "+host, "-f", path).CombinedOutput(); err != nil {
+	if out, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "bedrock deploy key for "+appName+" on "+host, "-f", path).CombinedOutput(); err != nil {
 		return "", "", fmt.Errorf("ssh-keygen: %s", strings.TrimSpace(string(out)))
 	}
 	private, err := os.ReadFile(path)
@@ -201,7 +201,7 @@ func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	switch req.Header.Get("X-GitHub-Event") {
 	case "ping":
-		fmt.Fprintf(w, "quark hears %s's pushes to %s\n", appName, hook.Branch)
+		fmt.Fprintf(w, "bedrock hears %s's pushes to %s\n", appName, hook.Branch)
 		return
 	case "push":
 	default:
@@ -320,7 +320,7 @@ func (r *Receiver) deployOnce(appName string) {
 	r.Log("webhook deploy of %s %s: %s", appName, short(commit), result)
 	if result != "deployed" && r.Notify != nil {
 		r.Notify(ctx, appName+": the deploy from "+hook.Repo+" failed",
-			fmt.Sprintf("A push to %s of %s asked for a deploy, and it %s.\n\nThe running revision stays. quark history on the machine has the receipt.\n", hook.Branch, hook.Repo, result))
+			fmt.Sprintf("A push to %s of %s asked for a deploy, and it %s.\n\nThe running revision stays. bedrock history on the machine has the receipt.\n", hook.Branch, hook.Repo, result))
 	}
 }
 
@@ -357,7 +357,7 @@ func (r *Receiver) fetch(ctx context.Context, h state.GitHook) (string, string, 
 		}
 		key := values[secretName("DEPLOY_KEY", h.App)]
 		if key == "" {
-			return "", "", errors.New("no deploy key; run quark git webhook again")
+			return "", "", errors.New("no deploy key; run bedrock git webhook again")
 		}
 		keyFile := filepath.Join(r.SourcesDir, "."+h.App+".key")
 		if err := os.WriteFile(keyFile, []byte(key), 0o600); err != nil {

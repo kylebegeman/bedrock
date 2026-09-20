@@ -77,22 +77,22 @@ func serve(t *testing.T) (*fakeSMTP, Server) {
 	}()
 	_, port, _ := net.SplitHostPort(l.Addr().String())
 	p, _ := strconv.Atoi(port)
-	return f, Server{Host: "127.0.0.1", Port: p, User: "quark", Password: "pw"}
+	return f, Server{Host: "127.0.0.1", Port: p, User: "bedrock", Password: "pw"}
 }
 
 func TestSendsAPlainTextMessageWithAuthToALocalServer(t *testing.T) {
 	f, srv := serve(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	err := Send(ctx, srv, Message{From: "quark@example.com", To: []string{"kyle@example.com", "ops@example.com"}, Subject: "hello is down", Body: "web isn't running\n.\nsecond line"})
+	err := Send(ctx, srv, Message{From: "bedrock@example.com", To: []string{"kyle@example.com", "ops@example.com"}, Subject: "hello is down", Body: "web isn't running\n.\nsecond line"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	decoded, _ := base64.StdEncoding.DecodeString(f.auth)
-	if string(decoded) != "\x00quark\x00pw" {
+	if string(decoded) != "\x00bedrock\x00pw" {
 		t.Fatalf("auth %q", decoded)
 	}
-	if f.from != "MAIL FROM:<quark@example.com>" || len(f.rcpt) != 2 || f.rcpt[1] != "RCPT TO:<ops@example.com>" {
+	if f.from != "MAIL FROM:<bedrock@example.com>" || len(f.rcpt) != 2 || f.rcpt[1] != "RCPT TO:<ops@example.com>" {
 		t.Fatalf("envelope %q %q", f.from, f.rcpt)
 	}
 	for _, want := range []string{"Subject: hello is down\r\n", "To: kyle@example.com, ops@example.com\r\n", "Content-Type: text/plain; charset=utf-8", "web isn't running\r\n..\r\nsecond line\r\n"} {

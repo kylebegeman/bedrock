@@ -22,13 +22,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/docker"
-	"github.com/kylebegeman/quark/internal/edge"
-	"github.com/kylebegeman/quark/internal/integration"
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/manifest"
-	"github.com/kylebegeman/quark/internal/secrets"
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/edge"
+	"github.com/kylebegeman/bedrock/internal/integration"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 // DeployKind deploys a source directory as a new revision of its app.
@@ -43,13 +43,13 @@ type Deploy struct {
 	Secrets *secrets.Store
 	// Addresses are this machine's public addresses, for the DNS check.
 	Addresses func(ctx context.Context) []string
-	// StateDir is quark's state directory; empty means /var/lib/quark.
+	// StateDir is bedrock's state directory; empty means /var/lib/bedrock.
 	StateDir string
 }
 
 // DeployInput says what to deploy.
 type DeployInput struct {
-	// Source is the directory holding quark.yaml and the code.
+	// Source is the directory holding bedrock.yaml and the code.
 	Source string `json:"source"`
 	// Revision names the new revision; the CLI makes one from the clock.
 	Revision string `json:"revision"`
@@ -58,7 +58,7 @@ type DeployInput struct {
 	// Commit is the source's commit when the caller knows it, as a push
 	// does; otherwise it is read from the source when it is a checkout.
 	Commit string `json:"commit,omitempty"`
-	// Manifest names the manifest at the source's root; empty is quark.yaml.
+	// Manifest names the manifest at the source's root; empty is bedrock.yaml.
 	Manifest string `json:"manifest,omitempty"`
 }
 
@@ -243,7 +243,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 			},
 		})
 	}
-	// Secrets the manifest asks quark to make come before the data: the
+	// Secrets the manifest asks bedrock to make come before the data: the
 	// database starts with its password, and derived values name it.
 	if from != nil && (m.PostgresVersion() != "" || m.HasObjects() || m.Secrets != nil) {
 		add(kernel.Step{
@@ -581,9 +581,9 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 	return plan, nil
 }
 
-// defaultStateDir is quark's state on a machine, where a Deploy that
+// defaultStateDir is bedrock's state on a machine, where a Deploy that
 // doesn't say otherwise keeps what it copies.
-const defaultStateDir = "/var/lib/quark"
+const defaultStateDir = "/var/lib/bedrock"
 
 // buildGroups lists the images a deploy makes, each with the workloads
 // that share it: workloads built from the same context, Dockerfile,
@@ -761,7 +761,7 @@ func containerSpec(m *manifest.Manifest, name string, w manifest.Workload, revis
 		// The one network it shares with the edge, and with no other app.
 		spec.Networks = append(spec.Networks, edge.AppNetwork(m.App))
 	}
-	spec.Env = []string{"QUARK_APP=" + m.App, "QUARK_WORKLOAD=" + name, "QUARK_REVISION=" + revision}
+	spec.Env = []string{"BEDROCK_APP=" + m.App, "BEDROCK_WORKLOAD=" + name, "BEDROCK_REVISION=" + revision}
 	for _, k := range sortedKeys(w.Env) {
 		spec.Env = append(spec.Env, k+"="+w.Env[k])
 	}
@@ -889,7 +889,7 @@ func HealthCommand(ctx context.Context, e *docker.Engine, container string, comm
 		if ctx.Err() != nil {
 			return errors.New("the health command took longer than 30s")
 		}
-		if words := lastWords(out); words != "it wrote nothing; see quark logs" {
+		if words := lastWords(out); words != "it wrote nothing; see bedrock logs" {
 			return fmt.Errorf("the health command failed: %s", words)
 		}
 		return errors.New("the health command failed")
@@ -898,7 +898,7 @@ func HealthCommand(ctx context.Context, e *docker.Engine, container string, comm
 }
 
 // servePort is the port a route reaches, or with no route the port the
-// workload listens on: static workloads serve on quark's own.
+// workload listens on: static workloads serve on bedrock's own.
 func servePort(w manifest.Workload, r *manifest.Route) int {
 	if w.Kind == manifest.Static {
 		port, _ := strconv.Atoi(docker.StaticPort)
@@ -911,7 +911,7 @@ func servePort(w manifest.Workload, r *manifest.Route) int {
 }
 
 // ReloadEdge gives the edge the configuration the active revisions call
-// for, when it is up. The daemon does this at start, so a quark that
+// for, when it is up. The daemon does this at start, so a bedrock that
 // changed how it configures the edge takes effect without a deploy.
 func ReloadEdge(ctx context.Context, store *state.Store) error {
 	admin := edge.NewAdmin()
@@ -925,7 +925,7 @@ func ReloadEdge(ctx context.Context, store *state.Store) error {
 	return admin.Load(ctx, cfg)
 }
 
-// UpgradeEdge replaces an edge an older quark made, keeping its routes,
+// UpgradeEdge replaces an edge an older bedrock made, keeping its routes,
 // and then gives it the current configuration. A machine without an edge
 // yet is left for host setup.
 func UpgradeEdge(ctx context.Context, store *state.Store, out io.Writer) error {
@@ -979,7 +979,7 @@ func EdgeConfig(ctx context.Context, store *state.Store) ([]byte, error) {
 }
 
 // HookRoute is the path webhooks arrive on, as the edge routes it.
-const HookRoute = "/_quark/hook/"
+const HookRoute = "/_bedrock/hook/"
 
 // lastWords picks the line of a container's output that best says why it
 // stopped, for an error message: the last one that names an error, or else
@@ -996,7 +996,7 @@ func lastWords(logs string) string {
 			return l
 		}
 	}
-	return "it wrote nothing; see quark logs"
+	return "it wrote nothing; see bedrock logs"
 }
 
 var (
@@ -1039,7 +1039,7 @@ func edgeConfig(ctx context.Context, store *state.Store) ([]byte, error) {
 		}
 		if hosts := m.Hosts(); hooked[rev.App] && len(hosts) > 0 {
 			// Webhooks for the app arrive on its first host and go to
-			// quark, not to the app.
+			// bedrock, not to the app.
 			routes = append(routes, edge.Route{Host: hosts[0], Path: HookRoute, Dial: edge.HooksDial})
 		}
 		for _, name := range m.WorkloadNames() {
@@ -1265,7 +1265,7 @@ func checkSecrets(m *manifest.Manifest, values map[string]string) error {
 		}
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("secrets not set: %s; set each with quark secret set %s NAME", strings.Join(missing, ", "), m.App)
+		return fmt.Errorf("secrets not set: %s; set each with bedrock secret set %s NAME", strings.Join(missing, ", "), m.App)
 	}
 	return nil
 }

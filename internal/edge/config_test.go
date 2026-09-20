@@ -8,9 +8,9 @@ import (
 
 func TestConfigGroupsByHostAndOrdersPrefixes(t *testing.T) {
 	cfg, err := Config([]Route{
-		{Host: "kylebegeman.com", Path: "/", Dial: "quark-kylebegeman-site-abc:8080"},
-		{Host: "kylebegeman.com", Path: "/thebatteredbaker/", Dial: "quark-kylebegeman-bakery-abc:8383"},
-		{Host: "www.kylebegeman.com", Path: "/", Dial: "quark-kylebegeman-site-abc:8080"},
+		{Host: "kylebegeman.com", Path: "/", Dial: "bedrock-kylebegeman-site-abc:8080"},
+		{Host: "kylebegeman.com", Path: "/thebatteredbaker/", Dial: "bedrock-kylebegeman-bakery-abc:8383"},
+		{Host: "www.kylebegeman.com", Path: "/", Dial: "bedrock-kylebegeman-site-abc:8080"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -51,10 +51,10 @@ func TestConfigGroupsByHostAndOrdersPrefixes(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Never a network address: an app on an edge network must not reach it.
-	if parsed.Admin.Listen != "unix//run/quark/caddy.sock" {
+	if parsed.Admin.Listen != "unix//run/bedrock/caddy.sock" {
 		t.Fatalf("admin: %+v", parsed.Admin)
 	}
-	server := parsed.Apps.HTTP.Servers["quark"]
+	server := parsed.Apps.HTTP.Servers["bedrock"]
 	if strings.Join(server.Listen, ",") != ":80,:443" || len(server.Routes) != 2 {
 		t.Fatalf("server: %+v", server)
 	}
@@ -63,10 +63,10 @@ func TestConfigGroupsByHostAndOrdersPrefixes(t *testing.T) {
 		t.Fatalf("first route: %+v", first)
 	}
 	sub := first.Handle[0].Routes
-	if len(sub) != 2 || strings.Join(sub[0].Match[0].Path, ",") != "/thebatteredbaker,/thebatteredbaker/*" || sub[0].Handle[0].Upstreams[0].Dial != "quark-kylebegeman-bakery-abc:8383" {
+	if len(sub) != 2 || strings.Join(sub[0].Match[0].Path, ",") != "/thebatteredbaker,/thebatteredbaker/*" || sub[0].Handle[0].Upstreams[0].Dial != "bedrock-kylebegeman-bakery-abc:8383" {
 		t.Fatalf("prefix route first: %+v", sub[0])
 	}
-	if len(sub[1].Match) != 0 || sub[1].Handle[0].Upstreams[0].Dial != "quark-kylebegeman-site-abc:8080" {
+	if len(sub[1].Match) != 0 || sub[1].Handle[0].Upstreams[0].Dial != "bedrock-kylebegeman-site-abc:8080" {
 		t.Fatalf("catch-all last: %+v", sub[1])
 	}
 	if server.Routes[1].Match[0].Host[0] != "www.kylebegeman.com" {

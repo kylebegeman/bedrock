@@ -9,4 +9,4 @@ workloads:
       - host: site.lane.begam.in
 checks:
   - url: https://site.lane.begam.in/
-    contains: A static site served by quark
+    contains: A static site served by bedrock

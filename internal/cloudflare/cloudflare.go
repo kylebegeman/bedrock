@@ -1,4 +1,4 @@
-// Package cloudflare is the little of Cloudflare's API quark needs: find
+// Package cloudflare is the little of Cloudflare's API bedrock needs: find
 // a zone, and list, make, change and remove DNS records in it.
 package cloudflare
 

@@ -27,7 +27,7 @@ type transfer struct {
 // Export seals exactly one secret for another machine. Only ciphertext leaves
 // this store; the receiver must also specify the expected app and secret name.
 func (s *Store) Export(from, name, to, recipient string) (string, error) {
-	if !transferApp.MatchString(from) || !transferApp.MatchString(to) || from == "quark" || to == "quark" {
+	if !transferApp.MatchString(from) || !transferApp.MatchString(to) || from == "bedrock" || to == "bedrock" {
 		return "", errors.New("integration credentials cannot be transferred")
 	}
 	if !ValidName(name) {
@@ -73,7 +73,7 @@ func (s *Store) Export(from, name, to, recipient string) (string, error) {
 // Import accepts only authenticated ciphertext for this machine and the named
 // destination. Parse failures deliberately never include decrypted bytes.
 func (s *Store) Import(app, name string, input io.Reader) (int, error) {
-	if !transferApp.MatchString(app) || app == "quark" || !ValidName(name) {
+	if !transferApp.MatchString(app) || app == "bedrock" || !ValidName(name) {
 		return 0, errors.New("invalid secret transfer destination")
 	}
 	id, err := s.identity()

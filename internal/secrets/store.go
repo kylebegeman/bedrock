@@ -24,7 +24,7 @@ import (
 )
 
 // DefaultKeyPath is where a machine keeps its secrets key.
-const DefaultKeyPath = "/etc/quark/secrets.key"
+const DefaultKeyPath = "/etc/bedrock/secrets.key"
 
 // Store is the sealed store for one machine.
 type Store struct {
@@ -356,7 +356,7 @@ func Missing(values map[string]string, wanted []string) []string {
 }
 
 // DefaultStore is the store for a machine whose state lives in stateDir:
-// the key under /etc/quark for root on Linux, beside the state elsewhere.
+// the key under /etc/bedrock for root on Linux, beside the state elsewhere.
 func DefaultStore(stateDir string) *Store {
 	keyPath := filepath.Join(stateDir, "secrets.key")
 	if runtime.GOOS == "linux" && os.Geteuid() == 0 {

@@ -7,8 +7,8 @@ import (
 )
 
 func TestExecNamesEnvironmentVariablesWithoutTheirValues(t *testing.T) {
-	args := execArgs("quark-loom-postgres", map[string]string{"PGPASSWORD": "hunter2", "B": "x"}, true, []string{"psql", "-c", "select 1"})
-	want := []string{"exec", "-i", "-e", "B", "-e", "PGPASSWORD", "quark-loom-postgres", "psql", "-c", "select 1"}
+	args := execArgs("bedrock-loom-postgres", map[string]string{"PGPASSWORD": "hunter2", "B": "x"}, true, []string{"psql", "-c", "select 1"})
+	want := []string{"exec", "-i", "-e", "B", "-e", "PGPASSWORD", "bedrock-loom-postgres", "psql", "-c", "select 1"}
 	if !slices.Equal(args, want) {
 		t.Fatalf("args %v, want %v", args, want)
 	}

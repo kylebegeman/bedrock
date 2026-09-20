@@ -39,7 +39,7 @@ type Exposure struct {
 	PidsLimit   int64    `json:"pids_limit"`
 }
 
-// Exposures describes every container on the machine, quark's and not.
+// Exposures describes every container on the machine, bedrock's and not.
 func (e *Engine) Exposures(ctx context.Context) ([]Exposure, error) {
 	res, err := e.cli.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {

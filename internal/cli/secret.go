@@ -13,8 +13,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/kylebegeman/quark/internal/manifest"
-	"github.com/kylebegeman/quark/internal/secrets"
+	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/secrets"
 )
 
 // secretsStore is the machine's store.
@@ -124,7 +124,7 @@ store. Copying the same value again changes nothing.`,
 		RunE: func(_ *cobra.Command, args []string) error {
 			from, name, to := args[0], args[1], args[2]
 			if from == manifest.ReservedApp || to == manifest.ReservedApp {
-				return fmt.Errorf("the integrations' credentials stay quark's own")
+				return fmt.Errorf("the integrations' credentials stay bedrock's own")
 			}
 			if from == to {
 				return fmt.Errorf("%s would copy onto itself", name)

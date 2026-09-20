@@ -19,7 +19,7 @@ import (
 const HelperImage = "alpine:3.21"
 
 // VolumeName names an app's volume.
-func VolumeName(app, volume string) string { return "quark-" + app + "-" + volume }
+func VolumeName(app, volume string) string { return "bedrock-" + app + "-" + volume }
 
 // EnsureVolume creates a named volume if it doesn't exist.
 func (e *Engine) EnsureVolume(ctx context.Context, name string) error {

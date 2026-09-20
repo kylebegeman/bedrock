@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/kylebegeman/quark/internal/version"
+	"github.com/kylebegeman/bedrock/internal/version"
 )
 
 // fakeMachine answers commands from a table and keeps files under a temp
@@ -120,7 +120,7 @@ func freshUbuntu(t *testing.T) *fakeMachine {
 	return m
 }
 
-// setUpBox is a machine after quark host setup.
+// setUpBox is a machine after bedrock host setup.
 func setUpBox(t *testing.T) *fakeMachine {
 	t.Helper()
 	m := freshUbuntu(t)
@@ -131,12 +131,12 @@ func setUpBox(t *testing.T) *fakeMachine {
 	m.answers["docker compose version"] = "Docker Compose version v2.40.0"
 	m.answers["docker buildx version"] = "github.com/docker/buildx v0.30.0"
 	m.answers["docker inspect -f {{.State.Running}} "+RegistryContainer] = "true"
-	m.answers["docker inspect -f {{.State.Running}} quark-edge"] = "true"
+	m.answers["docker inspect -f {{.State.Running}} bedrock-edge"] = "true"
 	m.answers["ufw status"] = "Status: active\n\nTo                         Action      From\n--                         ------      ----\nOpenSSH                    ALLOW       Anywhere\n80/tcp                     ALLOW       Anywhere\n443/tcp                    ALLOW       Anywhere\nOpenSSH (v6)               ALLOW       Anywhere (v6)\n"
 	m.answers["sshd -T"] = "passwordauthentication no\npermitrootlogin prohibit-password\n"
 	m.answers["apt-get -s -o Debug::NoLocking=true upgrade"] = "Reading package lists...\n"
 	m.answers["systemctl is-active fail2ban"] = "active"
 	m.write("/etc/apt/apt.conf.d/20auto-upgrades", "APT::Periodic::Update-Package-Lists \"1\";\nAPT::Periodic::Unattended-Upgrade \"1\";\n")
-	m.write("/etc/systemd/journald.conf.d/quark.conf", "[Journal]\nSystemMaxUse=500M\n")
+	m.write("/etc/systemd/journald.conf.d/bedrock.conf", "[Journal]\nSystemMaxUse=500M\n")
 	return m
 }

@@ -42,7 +42,7 @@ func TestTransferIsSealedBoundToDestinationAndIdempotent(t *testing.T) {
 	if err != nil || values["TOKEN"] != token {
 		t.Fatal("value not delivered")
 	}
-	for _, app := range []string{"quark", "../escape", ""} {
+	for _, app := range []string{"bedrock", "../escape", ""} {
 		if _, err := sender.Export("core", "TOKEN", app, recipient); err == nil {
 			t.Fatal("invalid destination")
 		}

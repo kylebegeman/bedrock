@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 func profileJSON(t *testing.T, p Profile) json.RawMessage {
@@ -70,7 +70,7 @@ func TestSetupPlansEveryStepAndSaysWhatEachWillChange(t *testing.T) {
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("steps %v, want %v", got, want)
 	}
-	for name, note := range map[string]string{"hostname": "currently srv1614602", "swap": "none yet", "docker": "not installed", "registry": "not running", "ssh": "password logins on", "firewall": "inactive", "pushes": "no quark user yet"} {
+	for name, note := range map[string]string{"hostname": "currently srv1614602", "swap": "none yet", "docker": "not installed", "registry": "not running", "ssh": "password logins on", "firewall": "inactive", "pushes": "no bedrock user yet"} {
 		if notes[name] != note {
 			t.Errorf("%s note %q, want %q", name, notes[name], note)
 		}
@@ -111,7 +111,7 @@ func TestSetupAppliesInASafeOrderOnAFreshBox(t *testing.T) {
 		return -1
 	}
 	// Docker comes from Docker's repository, and the registry after it.
-	if index("curl -fsSL https://download.docker.com/linux/ubuntu/gpg") > index("apt-get install -y docker-ce") || index("apt-get install -y docker-ce") > index("docker run -d --name quark-registry") {
+	if index("curl -fsSL https://download.docker.com/linux/ubuntu/gpg") > index("apt-get install -y docker-ce") || index("apt-get install -y docker-ce") > index("docker run -d --name bedrock-registry") {
 		t.Fatalf("docker order: %v", cmds)
 	}
 	if !strings.Contains(m.read("/etc/apt/sources.list.d/docker.list"), "https://download.docker.com/linux/ubuntu noble stable") {
@@ -121,14 +121,14 @@ func TestSetupAppliesInASafeOrderOnAFreshBox(t *testing.T) {
 	if index("ufw allow OpenSSH") > index("ufw --force enable") || index("ufw default deny incoming") > index("ufw --force enable") {
 		t.Fatalf("firewall order: %v", cmds)
 	}
-	// Files quark owns exist with the expected content.
+	// Files bedrock owns exist with the expected content.
 	for path, want := range map[string]string{
 		"/etc/docker/daemon.json":                 `"live-restore": true`,
-		"/etc/ssh/sshd_config.d/00-quark.conf":    "PasswordAuthentication no",
-		"/etc/systemd/journald.conf.d/quark.conf": "SystemMaxUse=500M",
+		"/etc/ssh/sshd_config.d/00-bedrock.conf":    "PasswordAuthentication no",
+		"/etc/systemd/journald.conf.d/bedrock.conf": "SystemMaxUse=500M",
 		"/etc/apt/apt.conf.d/20auto-upgrades":     `Unattended-Upgrade "1"`,
-		"/etc/apt/apt.conf.d/52quark-unattended":  `Automatic-Reboot "false"`,
-		"/etc/fail2ban/jail.d/quark.conf":         "[sshd]",
+		"/etc/apt/apt.conf.d/52bedrock-unattended":  `Automatic-Reboot "false"`,
+		"/etc/fail2ban/jail.d/bedrock.conf":         "[sshd]",
 		"/etc/hosts":                              "127.0.1.1 personal-vps",
 		"/etc/fstab":                              "/swapfile none swap sw 0 0",
 		ProfilePath:                               `"hostname": "personal-vps"`,
@@ -141,8 +141,8 @@ func TestSetupAppliesInASafeOrderOnAFreshBox(t *testing.T) {
 	index("timedatectl set-timezone America/New_York")
 	index("fallocate -l 4G /swapfile")
 	index("sshd -t")
-	index("useradd --system --user-group --create-home --home-dir /var/lib/quark-git --shell /bin/sh")
-	index("install -o quark -g quark -m 0600 /dev/null /var/lib/quark-git/.ssh/authorized_keys")
+	index("useradd --system --user-group --create-home --home-dir /var/lib/bedrock-git --shell /bin/sh")
+	index("install -o bedrock -g bedrock -m 0600 /dev/null /var/lib/bedrock-git/.ssh/authorized_keys")
 	p, err := LoadProfile(m.env())
 	if err != nil || p.Hostname != "personal-vps" || p.SwapGiB != 4 {
 		t.Fatalf("profile: %v %+v", err, p)
@@ -154,7 +154,7 @@ func TestSetupOnASetUpBoxChangesNothingHeavy(t *testing.T) {
 	allowEverything(m)
 	m.answers["dpkg-query *"] = "ca-certificates install ok installed\ncurl install ok installed\ngnupg install ok installed\nufw install ok installed\nfail2ban install ok installed\nunattended-upgrades install ok installed\njq install ok installed\ngit install ok installed\ndocker-ce install ok installed\ndocker-ce-cli install ok installed\ncontainerd.io install ok installed\ndocker-buildx-plugin install ok installed\ndocker-compose-plugin install ok installed\n"
 	m.write("/etc/docker/daemon.json", dockerDaemonJSON)
-	m.write(SSHDropIn, sshdQuark)
+	m.write(SSHDropIn, sshdBedrock)
 	m.write("/etc/hosts", "127.0.0.1 localhost\n127.0.1.1 personal-vps\n")
 	_, notes := planSteps(t, m, Profile{Hostname: "personal-vps", SwapGiB: 4})
 	for name, note := range map[string]string{"packages": "all installed", "hostname": "already personal-vps", "swap": "already 4.0 GiB", "docker": "already 29.5.2", "registry": "already running", "ssh": "already keys only", "firewall": "already active", "fail2ban": "already active", "journal": "already capped", "security-updates": "already on"} {

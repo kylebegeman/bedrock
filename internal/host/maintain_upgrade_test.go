@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/state"
-	"github.com/kylebegeman/quark/internal/version"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/bedrock/internal/version"
 )
 
 func maintainRegistry(m *fakeMachine) kernel.Registry {
@@ -95,9 +95,9 @@ func TestUpgradeStagesSwitchesRestartsAndVerifies(t *testing.T) {
 	m := setUpBox(t)
 	allowEverything(m)
 	m.write(BinaryPath, "old binary")
-	m.write("/tmp/quark-new", "new binary")
+	m.write("/tmp/bedrock-new", "new binary")
 	// The candidate reports the build this test process will "become".
-	m.answers["/tmp/quark-new version --json"] = `{"version":"0.7.0-test","commit":"aaaaaaaaaaaa","go":"go1.26","os":"linux","arch":"amd64"}`
+	m.answers["/tmp/bedrock-new version --json"] = `{"version":"0.7.0-test","commit":"aaaaaaaaaaaa","go":"go1.26","os":"linux","arch":"amd64"}`
 	running := m.runningVersion()
 	running.Commit = "000000000000"
 	env := m.env()
@@ -106,7 +106,7 @@ func TestUpgradeStagesSwitchesRestartsAndVerifies(t *testing.T) {
 	reg.Add(Upgrade{Env: env})
 	engine := kernel.New(openStore(t), reg, "test")
 
-	view, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/quark-new"))
+	view, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/bedrock-new"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestUpgradeStagesSwitchesRestartsAndVerifies(t *testing.T) {
 	// Run with the old build: stage, switch, and the restart that ends the
 	// process. The fake's restart returns, so the step reports it restarted.
 	var seen []string
-	receipt, err := engine.Run(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/quark-new"), func(ev kernel.Event) {
+	receipt, err := engine.Run(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/bedrock-new"), func(ev kernel.Event) {
 		if ev.Type == kernel.EventStepFinished {
 			seen = append(seen, ev.Step.Name+":"+string(ev.Step.Status))
 		}
@@ -133,7 +133,7 @@ func TestUpgradeStagesSwitchesRestartsAndVerifies(t *testing.T) {
 	if m.read(BinaryPath) != "new binary" || m.read(PreviousBinary) != "old binary" || strings.TrimSpace(m.read(StagedMarker)) != "0.7.0-test@aaaaaaaaaaaa" {
 		t.Fatalf("files: bin=%q previous=%q staged=%q", m.read(BinaryPath), m.read(PreviousBinary), m.read(StagedMarker))
 	}
-	if !m.ranCommand("systemctl restart quark.service") {
+	if !m.ranCommand("systemctl restart bedrock.service") {
 		t.Fatalf("commands: %v", m.commands())
 	}
 }
@@ -144,18 +144,18 @@ func TestUpgradeResumedOnTheNewBuildSucceeds(t *testing.T) {
 	m.write(BinaryPath, "new binary")
 	m.write(PreviousBinary, "old binary")
 	m.write(StagedMarker, "0.7.0-test@aaaaaaaaaaaa\n")
-	m.write("/tmp/quark-new", "new binary")
-	m.answers["/tmp/quark-new version --json"] = `{"version":"0.7.0-test","commit":"aaaaaaaaaaaa","go":"go1.26","os":"linux","arch":"amd64"}`
+	m.write("/tmp/bedrock-new", "new binary")
+	m.answers["/tmp/bedrock-new version --json"] = `{"version":"0.7.0-test","commit":"aaaaaaaaaaaa","go":"go1.26","os":"linux","arch":"amd64"}`
 	// This process is the new build now. The plan says so in a note, its
 	// digest is unchanged, and the restart step sees no restart to do.
 	reg := kernel.Registry{}
 	reg.Add(Upgrade{Env: m.env()})
 	engine := kernel.New(openStore(t), reg, "test")
-	view, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/quark-new"))
+	view, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/bedrock-new"))
 	if err != nil || view.Steps[0].Note != "already the running build" {
 		t.Fatalf("%v %+v", err, view)
 	}
-	receipt, err := engine.Run(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/quark-new"), func(kernel.Event) {})
+	receipt, err := engine.Run(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/bedrock-new"), func(kernel.Event) {})
 	if err != nil || receipt.Status != state.Succeeded {
 		t.Fatalf("%v %+v", err, receipt)
 	}
@@ -184,11 +184,11 @@ func TestUpgradeRefusesWrongBinaries(t *testing.T) {
 	reg := kernel.Registry{}
 	reg.Add(Upgrade{Env: m.env()})
 	engine := kernel.New(openStore(t), reg, "test")
-	if _, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/not-quark")); err == nil || !strings.Contains(err.Error(), "doesn't run as quark") {
-		t.Fatalf("not quark: %v", err)
+	if _, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/not-bedrock")); err == nil || !strings.Contains(err.Error(), "doesn't run as bedrock") {
+		t.Fatalf("not bedrock: %v", err)
 	}
-	m.answers["/tmp/quark-mac version --json"] = `{"version":"0.7.1","commit":"bbbbbbbbbbbb","go":"go1.26","os":"darwin","arch":"arm64"}`
-	if _, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/quark-mac")); err == nil || !strings.Contains(err.Error(), "built for darwin/arm64") {
+	m.answers["/tmp/bedrock-mac version --json"] = `{"version":"0.7.1","commit":"bbbbbbbbbbbb","go":"go1.26","os":"darwin","arch":"arm64"}`
+	if _, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/bedrock-mac")); err == nil || !strings.Contains(err.Error(), "built for darwin/arm64") {
 		t.Fatalf("wrong platform: %v", err)
 	}
 	if _, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "relative/path")); err == nil {

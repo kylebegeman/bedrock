@@ -13,9 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/quark/internal/app"
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/app"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 // A real ed25519 public key (a throwaway, generated for this test).
@@ -47,7 +47,7 @@ func TestKeysAreBoundToTheirApps(t *testing.T) {
 		t.Fatal(err)
 	}
 	text, _ := os.ReadFile(path)
-	want := `command="/usr/local/bin/quark git serve begamin dragon-writer",restrict ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJbl2PAEEDEdOcJbAgHmimw2G6VM5yyT4XHNwMjpm8gV kyle@mac`
+	want := `command="/usr/local/bin/bedrock git serve begamin dragon-writer",restrict ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJbl2PAEEDEdOcJbAgHmimw2G6VM5yyT4XHNwMjpm8gV kyle@mac`
 	if !strings.Contains(string(text), want) || !strings.Contains(string(text), "someone-else-by-hand") {
 		t.Fatalf("key file:\n%s", text)
 	}
@@ -74,7 +74,7 @@ func TestOnlyTheAllowedCommandsRun(t *testing.T) {
 		"git-receive-pack '/begamin.git'":     {Receive, "begamin"},
 		"git receive-pack 'begamin'":          {Receive, "begamin"},
 		"git-upload-pack 'dragon-writer.git'": {Upload, "dragon-writer"},
-		"quark receive begamin":               {Tarball, "begamin"},
+		"bedrock receive begamin":               {Tarball, "begamin"},
 	}
 	for cmd, want := range cases {
 		got, err := ParseCommand(cmd)
@@ -82,7 +82,7 @@ func TestOnlyTheAllowedCommandsRun(t *testing.T) {
 			t.Errorf("%q: %+v %v", cmd, got, err)
 		}
 	}
-	for _, cmd := range []string{"", "bash", "git-receive-pack '../../etc.git'", "git-receive-pack 'Begamin.git'", "quark remove begamin", "git-receive-pack 'a b.git'", "scp -t /tmp"} {
+	for _, cmd := range []string{"", "bash", "git-receive-pack '../../etc.git'", "git-receive-pack 'Begamin.git'", "bedrock remove begamin", "git-receive-pack 'a b.git'", "scp -t /tmp"} {
 		if _, err := ParseCommand(cmd); err == nil {
 			t.Errorf("allowed %q", cmd)
 		}
@@ -113,7 +113,7 @@ func tarOf(t *testing.T, entries ...[3]string) []byte {
 func TestExtractKeepsEverythingInside(t *testing.T) {
 	dir := t.TempDir()
 	err := Extract(bytes.NewReader(tarOf(t,
-		[3]string{"file", "quark.yaml", "app: x"},
+		[3]string{"file", "bedrock.yaml", "app: x"},
 		[3]string{"file", "src/main.go", "package main"},
 		[3]string{"link", "src/current", "main.go"},
 		[3]string{"link", "shadow", "/etc/shadow"},
@@ -141,7 +141,7 @@ func TestCheckSourceWantsItsOwnManifest(t *testing.T) {
 		t.Fatal("no manifest")
 	}
 	yaml := "app: hello\nworkloads:\n  web:\n    kind: worker\n    image: alpine:3.21\n"
-	_ = os.WriteFile(filepath.Join(dir, "quark.yaml"), []byte(yaml), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "bedrock.yaml"), []byte(yaml), 0o644)
 	if _, err := CheckSource(dir, "site"); err == nil || !strings.Contains(err.Error(), "says app: hello, but this is site's remote") {
 		t.Fatalf("%v", err)
 	}
@@ -149,7 +149,7 @@ func TestCheckSourceWantsItsOwnManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	linked := t.TempDir()
-	_ = os.Symlink(filepath.Join(dir, "quark.yaml"), filepath.Join(linked, "quark.yaml"))
+	_ = os.Symlink(filepath.Join(dir, "bedrock.yaml"), filepath.Join(linked, "bedrock.yaml"))
 	if _, err := CheckSource(linked, "hello"); err == nil {
 		t.Fatal("a linked manifest must be refused")
 	}
@@ -212,7 +212,7 @@ func fakeDeployer(status state.OperationStatus, seen *[]app.DeployInput) Deploye
 }
 
 func TestTheHookDeploysTheBranchAndRefusesAFailure(t *testing.T) {
-	bare, commit := repoWith(t, map[string]string{"quark.yaml": helloYAML, "main.go": "package main"})
+	bare, commit := repoWith(t, map[string]string{"bedrock.yaml": helloYAML, "main.go": "package main"})
 	old, _ := os.Getwd()
 	if err := os.Chdir(bare); err != nil {
 		t.Fatal(err)
@@ -222,7 +222,7 @@ func TestTheHookDeploysTheBranchAndRefusesAFailure(t *testing.T) {
 	var out bytes.Buffer
 	line := zeroCommit + " " + commit + " refs/heads/main\n"
 	code := hookWithBuilds(t, "hello", line, &out, fakeDeployer(state.Succeeded, &seen))
-	if code != 0 || len(seen) != 1 || seen[0].Commit != commit[:12] || !strings.Contains(out.String(), "quark: hello is live") {
+	if code != 0 || len(seen) != 1 || seen[0].Commit != commit[:12] || !strings.Contains(out.String(), "bedrock: hello is live") {
 		t.Fatalf("code %d, seen %+v, out:\n%s", code, seen, out.String())
 	}
 	if b, err := os.ReadFile(filepath.Join(seen[0].Source, "main.go")); err != nil || string(b) != "package main" {

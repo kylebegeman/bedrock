@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Facts is what quark knows about the machine after looking, without
+// Facts is what bedrock knows about the machine after looking, without
 // changing anything.
 type Facts struct {
 	OSID      string `json:"os_id"`
@@ -55,12 +55,12 @@ type Facts struct {
 	} `json:"registry"`
 	EdgeRunning   bool `json:"edge_running"`
 	DaemonAnswers bool `json:"daemon_answers"`
-	// PushUser is whether the quark user, which receives pushes, exists.
+	// PushUser is whether the bedrock user, which receives pushes, exists.
 	PushUser bool `json:"push_user"`
 }
 
 // RegistryContainer is the local image registry every build lands in.
-const RegistryContainer = "quark-registry"
+const RegistryContainer = "bedrock-registry"
 
 // Gather looks at the machine. Every probe tolerates its command being
 // missing; the facts just stay zero.
@@ -117,7 +117,7 @@ func Gather(ctx context.Context, env Env, socket string) Facts {
 			f.Registry.Present = true
 			f.Registry.Running = strings.TrimSpace(state) == "true"
 		}
-		if state, err := env.Run(ctx, "docker", "inspect", "-f", "{{.State.Running}}", "quark-edge"); err == nil {
+		if state, err := env.Run(ctx, "docker", "inspect", "-f", "{{.State.Running}}", "bedrock-edge"); err == nil {
 			f.EdgeRunning = strings.TrimSpace(state) == "true"
 		}
 	}
@@ -158,10 +158,10 @@ func Gather(ctx context.Context, env Env, socket string) Facts {
 	if conf, err := env.ReadFile("/etc/apt/apt.conf.d/20auto-upgrades"); err == nil {
 		f.UnattendedUpgrades = strings.Contains(conf, `Unattended-Upgrade "1"`)
 	}
-	if conf, err := env.ReadFile("/etc/systemd/journald.conf.d/quark.conf"); err == nil {
+	if conf, err := env.ReadFile("/etc/systemd/journald.conf.d/bedrock.conf"); err == nil {
 		f.JournalMaxUse = parseKeyValues(conf)["SystemMaxUse"]
 	}
-	if _, err := env.Run(ctx, "id", "-u", "quark"); err == nil {
+	if _, err := env.Run(ctx, "id", "-u", "bedrock"); err == nil {
 		f.PushUser = true
 	}
 	if out, err := env.Run(ctx, "systemctl", "is-active", "fail2ban"); err == nil {

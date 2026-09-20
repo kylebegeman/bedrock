@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/quark/internal/cloudflare"
-	"github.com/kylebegeman/quark/internal/cloudflare/cloudflaretest"
-	"github.com/kylebegeman/quark/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/cloudflare"
+	"github.com/kylebegeman/bedrock/internal/cloudflare/cloudflaretest"
+	"github.com/kylebegeman/bedrock/internal/manifest"
 )
 
 const here = "187.127.249.208"
@@ -21,7 +21,7 @@ func setup(t *testing.T) (*Manager, *cloudflaretest.Server) {
 	t.Cleanup(srv.Close)
 	cf := cloudflare.New("t0ken")
 	cf.Base = srv.URL + "/client/v4"
-	return &Manager{CF: cf, Hostname: "quark-lane", Addresses: []string{here, "2a02:4780:75:de40::1"}}, fake
+	return &Manager{CF: cf, Hostname: "bedrock-lane", Addresses: []string{here, "2a02:4780:75:de40::1"}}, fake
 }
 
 func TestRecordsAreMadeKeptUpdatedAndRemoved(t *testing.T) {
@@ -32,7 +32,7 @@ func TestRecordsAreMadeKeptUpdatedAndRemoved(t *testing.T) {
 		t.Fatalf("%+v %v", out, err)
 	}
 	recs := fake.Records()
-	if len(recs) != 1 || recs[0].Content != here || recs[0].Proxied || recs[0].Comment != "quark: begamin on quark-lane" || recs[0].Type != "A" {
+	if len(recs) != 1 || recs[0].Content != here || recs[0].Proxied || recs[0].Comment != "bedrock: begamin on bedrock-lane" || recs[0].Type != "A" {
 		t.Fatalf("%+v", recs)
 	}
 	if out, _ := m.Ensure(ctx, "begamin", "api.lane.begam.in", manifest.DNSDirect, false); out.Action != "kept" {
@@ -55,9 +55,9 @@ func TestRecordsAreMadeKeptUpdatedAndRemoved(t *testing.T) {
 func TestARecordElsewhereIsNeverTakenSilently(t *testing.T) {
 	ctx := context.Background()
 	m, fake := setup(t)
-	fake.Seed(cloudflaretest.Record{Type: "A", Name: "dragonwriter.begam.in", Content: "15.204.243.222", Comment: "quark: dragon-writer on lumen"})
+	fake.Seed(cloudflaretest.Record{Type: "A", Name: "dragonwriter.begam.in", Content: "15.204.243.222", Comment: "bedrock: dragon-writer on lumen"})
 	_, err := m.Ensure(ctx, "dragon-writer", "dragonwriter.begam.in", manifest.DNSDirect, false)
-	if !errors.Is(err, ErrElsewhere) || !strings.Contains(err.Error(), "15.204.243.222 (dragon-writer on lumen)") || !strings.Contains(err.Error(), "quark dns point dragonwriter.begam.in") {
+	if !errors.Is(err, ErrElsewhere) || !strings.Contains(err.Error(), "15.204.243.222 (dragon-writer on lumen)") || !strings.Contains(err.Error(), "bedrock dns point dragonwriter.begam.in") {
 		t.Fatalf("%v", err)
 	}
 	// The other machine's record must not be removed by this machine.
@@ -68,7 +68,7 @@ func TestARecordElsewhereIsNeverTakenSilently(t *testing.T) {
 	if err != nil || out.Action != "updated" {
 		t.Fatalf("point: %+v %v", out, err)
 	}
-	if r := fake.Records()[0]; r.Content != here || r.Comment != "quark: dragon-writer on quark-lane" {
+	if r := fake.Records()[0]; r.Content != here || r.Comment != "bedrock: dragon-writer on bedrock-lane" {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -96,7 +96,7 @@ func TestLookAndAudit(t *testing.T) {
 	}
 	fake.Seed(cloudflaretest.Record{Type: "A", Name: "*.lane.begam.in", Content: here})
 	fake.Seed(cloudflaretest.Record{Type: "A", Name: "begam.in", Content: here})
-	fake.Seed(cloudflaretest.Record{Type: "A", Name: "old.lane.begam.in", Content: here, Comment: "quark: gone on quark-lane"})
+	fake.Seed(cloudflaretest.Record{Type: "A", Name: "old.lane.begam.in", Content: here, Comment: "bedrock: gone on bedrock-lane"})
 	fake.Seed(cloudflaretest.Record{Type: "A", Name: "hello.lane.begam.in", Content: "198.51.100.7"})
 	routes := []Route{
 		{App: "begamin", Host: "api.lane.begam.in", Mode: manifest.DNSDirect},
@@ -126,7 +126,7 @@ func TestLookAndAudit(t *testing.T) {
 	joined := strings.Join(lines, "\n")
 	for _, want := range []string{
 		"begam.in: points at this machine without a route: nothing answers for it",
-		"old.lane.begam.in: made by quark for gone on quark-lane, which no longer routes it",
+		"old.lane.begam.in: made by bedrock for gone on bedrock-lane, which no longer routes it",
 		"hello.lane.begam.in: routed by hello here but points at 198.51.100.7",
 		"shop.nowhere.test: routed by shop but in no zone this token sees",
 	} {

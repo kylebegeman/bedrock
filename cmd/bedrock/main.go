@@ -1,11 +1,11 @@
-// Command quark is the Quark command line and, on a machine it manages, the
+// Command bedrock is the Bedrock command line and, on a machine it manages, the
 // host daemon. One binary serves both.
 package main
 
 import (
 	"os"
 
-	"github.com/kylebegeman/quark/internal/cli"
+	"github.com/kylebegeman/bedrock/internal/cli"
 )
 
 func main() {

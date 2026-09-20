@@ -13,10 +13,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	apps "github.com/kylebegeman/quark/internal/app"
-	"github.com/kylebegeman/quark/internal/docker"
-	"github.com/kylebegeman/quark/internal/manifest"
-	"github.com/kylebegeman/quark/internal/state"
+	apps "github.com/kylebegeman/bedrock/internal/app"
+	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 func newDeploy(a *app) *cobra.Command {
@@ -45,7 +45,7 @@ func newDeploy(a *app) *cobra.Command {
 					return fmt.Errorf("restores read files on the machine; run them there")
 				}
 				if manifestName != manifest.FileName {
-					return fmt.Errorf("--to sends the source with its quark.yaml; deploy another manifest on the machine")
+					return fmt.Errorf("--to sends the source with its bedrock.yaml; deploy another manifest on the machine")
 				}
 				return deployTo(cmd.Context(), a, source, m.App, to)
 			}
@@ -75,7 +75,7 @@ func newDeploy(a *app) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&restorePostgres, "restore-postgres", "", "a pg_dump file to load into the app's empty database first")
 	cmd.Flags().StringArrayVar(&restoreVolumes, "restore-volume", nil, "name=file.tar.gz to unpack into an empty volume first")
-	cmd.Flags().StringVar(&to, "to", "", "send the source to a machine over SSH, such as quark@203.0.113.7, and deploy it there ($QUARK_SSH replaces ssh)")
+	cmd.Flags().StringVar(&to, "to", "", "send the source to a machine over SSH, such as bedrock@203.0.113.7, and deploy it there ($BEDROCK_SSH replaces ssh)")
 	cmd.Flags().StringVar(&manifestName, "manifest", manifest.FileName, "the manifest at the source's root, for a source that holds several apps")
 	a.mutatingFlags(cmd, &planOnly)
 	return cmd
@@ -331,7 +331,7 @@ func newPs(a *app) *cobra.Command {
 				w.Flush()
 			}
 			if unowned, err := engine.Unowned(ctx); err == nil && len(unowned) > 0 {
-				fmt.Fprintf(a.stdout, "not managed by quark: %d container(s)\n", len(unowned))
+				fmt.Fprintf(a.stdout, "not managed by bedrock: %d container(s)\n", len(unowned))
 			}
 			return nil
 		},

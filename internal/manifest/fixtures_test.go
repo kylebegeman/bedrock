@@ -31,14 +31,14 @@ func TestTheLaneFixturesAreValid(t *testing.T) {
 func TestAnotherManifestIsAPlainYAMLFileAtTheSourcesRoot(t *testing.T) {
 	dir := t.TempDir()
 	body := []byte("app: runner\nworkloads:\n  run:\n    kind: worker\n    image: alpine:3.21\n")
-	if err := os.WriteFile(filepath.Join(dir, "quark.runner.yaml"), body, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "bedrock.runner.yaml"), body, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m, err := LoadFile(dir, "quark.runner.yaml")
+	m, err := LoadFile(dir, "bedrock.runner.yaml")
 	if err != nil || m.App != "runner" {
 		t.Fatalf("%v %+v", err, m)
 	}
-	for _, name := range []string{"", "../quark.yaml", "sub/quark.yaml", ".quark.yaml", "quark.json", "/etc/quark.yaml"} {
+	for _, name := range []string{"", "../bedrock.yaml", "sub/bedrock.yaml", ".bedrock.yaml", "bedrock.json", "/etc/bedrock.yaml"} {
 		if _, err := LoadFile(dir, name); err == nil {
 			t.Fatalf("%q must be refused", name)
 		}

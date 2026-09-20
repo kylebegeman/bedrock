@@ -10,11 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kylebegeman/quark/internal/gitdeploy"
-	"github.com/kylebegeman/quark/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/gitdeploy"
+	"github.com/kylebegeman/bedrock/internal/kernel"
 )
 
-// SetupKind is the operation that turns a fresh machine into a quark host,
+// SetupKind is the operation that turns a fresh machine into a bedrock host,
 // and brings a drifted one back. Every step is safe to run again.
 const SetupKind = "host.setup"
 
@@ -29,13 +29,13 @@ type Setup struct {
 // Kind implements kernel.Definition.
 func (Setup) Kind() string { return SetupKind }
 
-// Packages quark installs on every machine.
+// Packages bedrock installs on every machine.
 var basePackages = []string{"ca-certificates", "curl", "gnupg", "ufw", "fail2ban", "unattended-upgrades", "jq", "git"}
 
 // Packages Docker's repository provides.
 var dockerPackages = []string{"docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin", "docker-compose-plugin"}
 
-// Files quark writes. Each is complete: quark owns them.
+// Files bedrock writes. Each is complete: bedrock owns them.
 const (
 	dockerDaemonJSON = `{
   "log-driver": "json-file",
@@ -49,18 +49,18 @@ APT::Periodic::AutocleanInterval "7";
 `
 	// Security updates install themselves; reboots wait for a maintenance
 	// window, so apps come back in order and get checked.
-	unattendedQuark = `Unattended-Upgrade::Automatic-Reboot "false";
+	unattendedBedrock = `Unattended-Upgrade::Automatic-Reboot "false";
 Unattended-Upgrade::Remove-Unused-Dependencies "true";
 `
-	journaldQuark = `[Journal]
+	journaldBedrock = `[Journal]
 SystemMaxUse=500M
 `
-	sshdQuark = `# Written by quark host setup. Keys only.
+	sshdBedrock = `# Written by bedrock host setup. Keys only.
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin prohibit-password
 `
-	fail2banQuark = `[sshd]
+	fail2banBedrock = `[sshd]
 enabled = true
 `
 )
@@ -81,7 +81,7 @@ func (s Setup) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, err
 	env := s.Env
 	f := Gather(ctx, env, s.Socket)
 	if !Supported(f) {
-		return nil, fmt.Errorf("%s on %s isn't supported: quark needs Ubuntu 22.04 or 24.04, or Debian 12 or 13, on x86_64 or aarch64", orUnknown(f.OSName), orUnknown(f.Arch))
+		return nil, fmt.Errorf("%s on %s isn't supported: bedrock needs Ubuntu 22.04 or 24.04, or Debian 12 or 13, on x86_64 or aarch64", orUnknown(f.OSName), orUnknown(f.Arch))
 	}
 	if !f.Privileged {
 		return nil, errors.New("host setup needs root")
@@ -169,7 +169,7 @@ func (s Setup) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, err
 			if _, err := env.WriteFile("/etc/apt/apt.conf.d/20auto-upgrades", autoUpgrades, 0o644); err != nil {
 				return err
 			}
-			_, err := env.WriteFile("/etc/apt/apt.conf.d/52quark-unattended", unattendedQuark, 0o644)
+			_, err := env.WriteFile("/etc/apt/apt.conf.d/52bedrock-unattended", unattendedBedrock, 0o644)
 			return err
 		},
 	})
@@ -177,7 +177,7 @@ func (s Setup) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, err
 		Name: "journal", Change: "cap the system journal at 500M",
 		Note: doneIf(f.JournalMaxUse == "500M", "already capped", "unbounded"),
 		Apply: func(ctx context.Context, _ io.Writer) error {
-			changed, err := env.WriteFile("/etc/systemd/journald.conf.d/quark.conf", journaldQuark, 0o644)
+			changed, err := env.WriteFile("/etc/systemd/journald.conf.d/bedrock.conf", journaldBedrock, 0o644)
 			if err != nil || !changed {
 				return err
 			}
@@ -203,7 +203,7 @@ func (s Setup) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, err
 		Name: "fail2ban", Change: "ban repeated SSH failures",
 		Note: doneIf(f.Fail2ban, "already active", "inactive"),
 		Apply: func(ctx context.Context, _ io.Writer) error {
-			if _, err := env.WriteFile("/etc/fail2ban/jail.d/quark.conf", fail2banQuark, 0o644); err != nil {
+			if _, err := env.WriteFile("/etc/fail2ban/jail.d/bedrock.conf", fail2banBedrock, 0o644); err != nil {
 				return err
 			}
 			_, err := env.Run(ctx, "systemctl", "enable", "--now", "fail2ban")
@@ -215,8 +215,8 @@ func (s Setup) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, err
 		},
 	})
 	add(kernel.Step{
-		Name: "pushes", Change: "keep the quark user, which receives git pushes; each of its keys deploys only the apps it names",
-		Note: doneIf(f.PushUser, "already there", "no quark user yet"),
+		Name: "pushes", Change: "keep the bedrock user, which receives git pushes; each of its keys deploys only the apps it names",
+		Note: doneIf(f.PushUser, "already there", "no bedrock user yet"),
 		Apply: func(ctx context.Context, out io.Writer) error {
 			return ensurePushUser(ctx, env, s.Socket, out)
 		},
@@ -376,7 +376,7 @@ func ensureRegistry(ctx context.Context, env Env, out io.Writer) error {
 		return err
 	}
 	_, err = env.Run(ctx, "docker", "run", "-d", "--name", RegistryContainer, "--restart", "unless-stopped",
-		"--label", "quark.owner=quark", "-p", "127.0.0.1:5000:5000", "-v", "quark-registry:/var/lib/registry",
+		"--label", "bedrock.owner=bedrock", "-p", "127.0.0.1:5000:5000", "-v", "bedrock-registry:/var/lib/registry",
 		"-e", "REGISTRY_STORAGE_DELETE_ENABLED=true", RegistryImage)
 	if err != nil {
 		return err
@@ -385,10 +385,10 @@ func ensureRegistry(ctx context.Context, env Env, out io.Writer) error {
 	return nil
 }
 
-// SSHDropIn is quark's sshd configuration. sshd keeps the first value it
+// SSHDropIn is bedrock's sshd configuration. sshd keeps the first value it
 // reads and reads sshd_config.d in name order, so the name sorts before
 // anything cloud-init or an image leaves there.
-const SSHDropIn = "/etc/ssh/sshd_config.d/00-quark.conf"
+const SSHDropIn = "/etc/ssh/sshd_config.d/00-bedrock.conf"
 
 // ensureSSHKeysOnly turns password logins off, but never before root has a
 // key to get back in with.
@@ -397,12 +397,12 @@ func ensureSSHKeysOnly(ctx context.Context, env Env, out io.Writer) error {
 	if strings.TrimSpace(keys) == "" {
 		return errors.New("root has no SSH key in /root/.ssh/authorized_keys; turning passwords off would lock you out")
 	}
-	changed, err := env.WriteFile(SSHDropIn, sshdQuark, 0o644)
+	changed, err := env.WriteFile(SSHDropIn, sshdBedrock, 0o644)
 	if err != nil {
 		return err
 	}
-	// An earlier quark wrote a name that lost to cloud-init's drop-in.
-	if stale := env.Path("/etc/ssh/sshd_config.d/50-quark.conf"); env.Exists("/etc/ssh/sshd_config.d/50-quark.conf") {
+	// An earlier bedrock wrote a name that lost to cloud-init's drop-in.
+	if stale := env.Path("/etc/ssh/sshd_config.d/50-bedrock.conf"); env.Exists("/etc/ssh/sshd_config.d/50-bedrock.conf") {
 		_ = os.Remove(stale)
 		changed = true
 	}
@@ -437,13 +437,13 @@ func ensureFirewall(ctx context.Context, env Env, out io.Writer) error {
 }
 
 // ensurePushUser keeps the system user pushes arrive as: no password, a
-// home that only it and root read, and a key file quark writes.
+// home that only it and root read, and a key file bedrock writes.
 func ensurePushUser(ctx context.Context, env Env, socket string, out io.Writer) error {
 	if _, err := env.Run(ctx, "id", "-u", gitdeploy.User); err != nil {
-		if _, err := env.Run(ctx, "useradd", "--system", "--user-group", "--create-home", "--home-dir", gitdeploy.Home, "--shell", "/bin/sh", "--comment", "quark receives git pushes", gitdeploy.User); err != nil {
+		if _, err := env.Run(ctx, "useradd", "--system", "--user-group", "--create-home", "--home-dir", gitdeploy.Home, "--shell", "/bin/sh", "--comment", "bedrock receives git pushes", gitdeploy.User); err != nil {
 			return err
 		}
-		fmt.Fprintln(out, "quark user made")
+		fmt.Fprintln(out, "bedrock user made")
 	}
 	for dir, mode := range map[string]string{gitdeploy.Home: "0750", gitdeploy.Home + "/.ssh": "0700", gitdeploy.BuildsDir: "0750"} {
 		if _, err := env.Run(ctx, "install", "-d", "-o", gitdeploy.User, "-g", gitdeploy.User, "-m", mode, dir); err != nil {
@@ -456,7 +456,7 @@ func ensurePushUser(ctx context.Context, env Env, socket string, out io.Writer) 
 		}
 	}
 	// A push asks the daemon to deploy through its socket, which the
-	// daemon shares with the quark group when it starts; one already
+	// daemon shares with the bedrock group when it starts; one already
 	// running is given to the group here.
 	if socket != "" && env.Exists(socket) {
 		for _, args := range [][]string{{"chgrp", gitdeploy.User, filepath.Dir(socket)}, {"chmod", "0750", filepath.Dir(socket)}, {"chgrp", gitdeploy.User, socket}} {

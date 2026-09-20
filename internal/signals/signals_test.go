@@ -7,32 +7,32 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 const scrape1 = `# HELP caddy_http_requests_total Counter of HTTP(S) requests made.
 # TYPE caddy_http_requests_total counter
-caddy_http_requests_total{handler="subroute",host="hello.lane.begam.in",server="quark"} 10
-caddy_http_request_duration_seconds_count{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="quark"} 8
-caddy_http_request_duration_seconds_count{code="502",handler="subroute",host="hello.lane.begam.in",method="GET",server="quark"} 2
-caddy_http_request_duration_seconds_sum{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="quark"} 0.4
-caddy_http_request_duration_seconds_bucket{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="quark",le="0.05"} 6
-caddy_http_request_duration_seconds_bucket{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="quark",le="0.25"} 8
-caddy_http_request_duration_seconds_bucket{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="quark",le="+Inf"} 8
-caddy_http_response_size_bytes_sum{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="quark"} 800
-caddy_http_requests_total{handler="subroute",host="nobody.example",server="quark"} 99
-caddy_http_requests_total{handler="reverse_proxy",host="hello.lane.begam.in",server="quark"} 1000
+caddy_http_requests_total{handler="subroute",host="hello.lane.begam.in",server="bedrock"} 10
+caddy_http_request_duration_seconds_count{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="bedrock"} 8
+caddy_http_request_duration_seconds_count{code="502",handler="subroute",host="hello.lane.begam.in",method="GET",server="bedrock"} 2
+caddy_http_request_duration_seconds_sum{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="bedrock"} 0.4
+caddy_http_request_duration_seconds_bucket{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="bedrock",le="0.05"} 6
+caddy_http_request_duration_seconds_bucket{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="bedrock",le="0.25"} 8
+caddy_http_request_duration_seconds_bucket{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="bedrock",le="+Inf"} 8
+caddy_http_response_size_bytes_sum{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="bedrock"} 800
+caddy_http_requests_total{handler="subroute",host="nobody.example",server="bedrock"} 99
+caddy_http_requests_total{handler="reverse_proxy",host="hello.lane.begam.in",server="bedrock"} 1000
 `
 
-const scrape2 = `caddy_http_requests_total{handler="subroute",host="hello.lane.begam.in",server="quark"} 25
-caddy_http_request_duration_seconds_count{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="quark"} 22
-caddy_http_request_duration_seconds_count{code="502",handler="subroute",host="hello.lane.begam.in",method="GET",server="quark"} 3
-caddy_http_request_duration_seconds_count{code="503",handler="subroute",host="hello.lane.begam.in",method="POST",server="quark"} 2
-caddy_http_request_duration_seconds_sum{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="quark"} 1.9
-caddy_http_request_duration_seconds_bucket{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="quark",le="0.05"} 16
-caddy_http_request_duration_seconds_bucket{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="quark",le="0.25"} 22
-caddy_http_request_duration_seconds_bucket{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="quark",le="+Inf"} 22
-caddy_http_response_size_bytes_sum{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="quark"} 2000
+const scrape2 = `caddy_http_requests_total{handler="subroute",host="hello.lane.begam.in",server="bedrock"} 25
+caddy_http_request_duration_seconds_count{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="bedrock"} 22
+caddy_http_request_duration_seconds_count{code="502",handler="subroute",host="hello.lane.begam.in",method="GET",server="bedrock"} 3
+caddy_http_request_duration_seconds_count{code="503",handler="subroute",host="hello.lane.begam.in",method="POST",server="bedrock"} 2
+caddy_http_request_duration_seconds_sum{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="bedrock"} 1.9
+caddy_http_request_duration_seconds_bucket{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="bedrock",le="0.05"} 16
+caddy_http_request_duration_seconds_bucket{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="bedrock",le="0.25"} 22
+caddy_http_request_duration_seconds_bucket{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="bedrock",le="+Inf"} 22
+caddy_http_response_size_bytes_sum{code="200",handler="subroute",host="hello.lane.begam.in",method="GET",server="bedrock"} 2000
 `
 
 func TestParsesPrometheusText(t *testing.T) {

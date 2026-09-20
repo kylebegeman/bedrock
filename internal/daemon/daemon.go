@@ -1,4 +1,4 @@
-// Package daemon is quark on a machine it manages: it owns the state store,
+// Package daemon is bedrock on a machine it manages: it owns the state store,
 // recovers interrupted operations at start, serves the API on a Unix socket,
 // and keeps systemd's watchdog fed from its own loop.
 package daemon
@@ -16,18 +16,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/api"
-	"github.com/kylebegeman/quark/internal/app"
-	"github.com/kylebegeman/quark/internal/docker"
-	"github.com/kylebegeman/quark/internal/edge"
-	"github.com/kylebegeman/quark/internal/gitdeploy"
-	"github.com/kylebegeman/quark/internal/host"
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/secrets"
-	"github.com/kylebegeman/quark/internal/signals"
-	"github.com/kylebegeman/quark/internal/state"
-	"github.com/kylebegeman/quark/internal/version"
-	"github.com/kylebegeman/quark/internal/watch"
+	"github.com/kylebegeman/bedrock/internal/api"
+	"github.com/kylebegeman/bedrock/internal/app"
+	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/edge"
+	"github.com/kylebegeman/bedrock/internal/gitdeploy"
+	"github.com/kylebegeman/bedrock/internal/host"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/bedrock/internal/signals"
+	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/bedrock/internal/version"
+	"github.com/kylebegeman/bedrock/internal/watch"
 )
 
 // Config says where the daemon keeps things.
@@ -42,10 +42,10 @@ type Config struct {
 }
 
 // DefaultSocket is where the daemon listens on a machine it manages.
-const DefaultSocket = "/run/quark/quark.sock"
+const DefaultSocket = "/run/bedrock/bedrock.sock"
 
 // DefaultStateDir is where the daemon keeps its store on a machine it manages.
-const DefaultStateDir = "/var/lib/quark"
+const DefaultStateDir = "/var/lib/bedrock"
 
 // Registry returns the operation kinds the daemon knows, for the machine
 // this process runs on.
@@ -96,7 +96,7 @@ func registry(store *state.Store, sec *secrets.Store, socket, stateDir string) k
 func hostname() string {
 	h, err := os.Hostname()
 	if err != nil || h == "" {
-		return "quark"
+		return "bedrock"
 	}
 	return h
 }
@@ -140,7 +140,7 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	clearStaleUpgrade(logf)
 	sec := secrets.DefaultStore(cfg.StateDir)
 	engine := kernel.New(store, RegistryIn(store, sec, cfg.Socket, cfg.StateDir), cfg.Owner)
-	logf("quark daemon %s, state %s, owner %s", version.Current().Version, store.Path(), cfg.Owner)
+	logf("bedrock daemon %s, state %s, owner %s", version.Current().Version, store.Path(), cfg.Owner)
 
 	apiServer := &api.Server{Engine: engine, Store: store}
 	recoveryLog := func(ev kernel.Event) {
@@ -179,9 +179,9 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 		}
 	}()
 
-	// The edge gets the configuration this build of quark makes for the
+	// The edge gets the configuration this build of bedrock makes for the
 	// active revisions, in case the shape changed since the last deploy;
-	// an edge an older quark made is replaced, keeping its routes.
+	// an edge an older bedrock made is replaced, keeping its routes.
 	if err := app.UpgradeEdge(ctx, store, logWriter{logf}); err != nil {
 		logf("edge: %v", err)
 	}
@@ -323,7 +323,7 @@ func listenHooks() (net.Listener, error) {
 // clearStaleUpgrade removes an upgrade marker too old to belong to an
 // upgrade in flight, so the rollback unit never acts on it; an upgrade
 // that verified removes its own. The .restarting marker is an older
-// quark's.
+// bedrock's.
 func clearStaleUpgrade(logf func(string, ...any)) {
 	if info, err := os.Stat(host.StagedMarker); err == nil && time.Since(info.ModTime()) > 10*time.Minute {
 		if os.Remove(host.StagedMarker) == nil {

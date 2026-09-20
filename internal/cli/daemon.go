@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/kylebegeman/quark/internal/daemon"
+	"github.com/kylebegeman/bedrock/internal/daemon"
 )
 
 func newDaemon(a *app) *cobra.Command {

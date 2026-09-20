@@ -20,7 +20,7 @@ type Profile struct {
 }
 
 // ProfilePath is where the profile lives on the machine.
-const ProfilePath = "/etc/quark/host.json"
+const ProfilePath = "/etc/bedrock/host.json"
 
 var hostnamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
@@ -52,7 +52,7 @@ func LoadProfile(env Env) (Profile, error) {
 }
 
 // ErrNoProfile means the machine was never set up.
-var ErrNoProfile = errors.New("this machine has no profile yet: run quark host setup")
+var ErrNoProfile = errors.New("this machine has no profile yet: run bedrock host setup")
 
 // SaveProfile writes the profile where reconcile finds it.
 func SaveProfile(env Env, p Profile) error {

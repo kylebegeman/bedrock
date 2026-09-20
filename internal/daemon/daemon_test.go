@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/api"
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/secrets"
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/api"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 // TestASweepRecoversAnOperationWhoseLeaseOutlivesTheRestart is the lane's
@@ -54,7 +54,7 @@ func TestASweepRecoversAnOperationWhoseLeaseOutlivesTheRestart(t *testing.T) {
 	}
 	store.Close()
 
-	socketDir, err := os.MkdirTemp("/tmp", "quark-daemon-")
+	socketDir, err := os.MkdirTemp("/tmp", "bedrock-daemon-")
 	if err != nil {
 		t.Fatal(err)
 	}

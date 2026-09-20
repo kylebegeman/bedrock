@@ -76,7 +76,7 @@ func run(ctx context.Context, out io.Writer, name string, args ...string) error 
 // StaticContext writes a build context that serves dir with Caddy's file
 // server on port 8080, and returns its path. The caller removes it.
 func StaticContext(sourceDir, dir string) (string, error) {
-	tmp, err := os.MkdirTemp("", "quark-static-")
+	tmp, err := os.MkdirTemp("", "bedrock-static-")
 	if err != nil {
 		return "", err
 	}

@@ -31,7 +31,7 @@ func main() {
 }
 
 func serve() {
-	revision := os.Getenv("QUARK_REVISION")
+	revision := os.Getenv("BEDROCK_REVISION")
 	health := func(w http.ResponseWriter, _ *http.Request) {
 		// Ready when the database in the derived URL takes connections.
 		if raw := os.Getenv("NOTES_DATABASE_URL"); raw != "" {
@@ -93,7 +93,7 @@ func worker() {
 			conn.Close()
 		}
 	}()
-	fmt.Println("worker up, revision", os.Getenv("QUARK_REVISION"))
+	fmt.Println("worker up, revision", os.Getenv("BEDROCK_REVISION"))
 	<-ctx.Done()
 	fmt.Println("worker stopping")
 }

@@ -1,4 +1,4 @@
-// Package state is quark's one store: a SQLite file that journals every
+// Package state is bedrock's one store: a SQLite file that journals every
 // operation and its steps, so a crash can be resumed or undone and every
 // change leaves a receipt.
 package state

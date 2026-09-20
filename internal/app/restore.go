@@ -10,12 +10,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kylebegeman/quark/internal/docker"
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/manifest"
-	"github.com/kylebegeman/quark/internal/restic"
-	"github.com/kylebegeman/quark/internal/secrets"
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/restic"
+	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 // RestoreKind brings an app's data back from its bucket onto this
@@ -57,7 +57,7 @@ func (r RestoreDef) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 	if rev, err := r.Store.RevisionWithStatus(ctx, in.App, state.RevisionActive); err != nil {
 		return nil, err
 	} else if rev != nil {
-		return nil, fmt.Errorf("%s is deployed on this machine; a restore is for a machine that doesn't run it yet (quark remove %s --data first), or run quark drill %s to test the backup", in.App, in.App, in.App)
+		return nil, fmt.Errorf("%s is deployed on this machine; a restore is for a machine that doesn't run it yet (bedrock remove %s --data first), or run bedrock drill %s to test the backup", in.App, in.App, in.App)
 	}
 	app := in.App
 	staging := filepath.Join(r.StateDir, "restore", app)
@@ -248,7 +248,7 @@ func (r RestoreDef) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 				return err
 			}
 			_ = os.RemoveAll(staging)
-			fmt.Fprintf(out, "%s's data is on this machine; deploy it with quark deploy <its source directory>\n", app)
+			fmt.Fprintf(out, "%s's data is on this machine; deploy it with bedrock deploy <its source directory>\n", app)
 			return nil
 		},
 	})

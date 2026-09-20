@@ -14,11 +14,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/app"
-	"github.com/kylebegeman/quark/internal/docker"
-	"github.com/kylebegeman/quark/internal/edge"
-	"github.com/kylebegeman/quark/internal/manifest"
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/app"
+	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/edge"
+	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 // What the prober considers wrong.
@@ -77,7 +77,7 @@ func (p *Prober) Observe(ctx context.Context) []Condition {
 	}
 	defer e.Close()
 	if info, err := e.Inspect(ctx, edge.Container); err != nil || !info.Running {
-		conditions = append(conditions, Condition{Key: "host:edge", Subject: "the edge", Severity: state.SeverityCritical, Message: "the edge (quark-edge) isn't running; no site is reachable"})
+		conditions = append(conditions, Condition{Key: "host:edge", Subject: "the edge", Severity: state.SeverityCritical, Message: "the edge (bedrock-edge) isn't running; no site is reachable"})
 	}
 
 	active, err := p.Store.ActiveRevisions(ctx)

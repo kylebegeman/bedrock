@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/quark/internal/secrets"
+	"github.com/kylebegeman/bedrock/internal/secrets"
 )
 
 func newStore(t *testing.T) *secrets.Store {
@@ -18,7 +18,7 @@ func newStore(t *testing.T) *secrets.Store {
 	return s
 }
 
-func TestStorageIsStoredUnderQuarkAndListedWithoutSecrets(t *testing.T) {
+func TestStorageIsStoredUnderBedrockAndListedWithoutSecrets(t *testing.T) {
 	s := newStore(t)
 	version, generated, err := Set(s, StorageName, map[string]string{"kind": "s3", "endpoint": "http://127.0.0.1:9000", "key_id": "id", "key": "k", "bucket_prefix": "lane"})
 	if err != nil {
@@ -47,7 +47,7 @@ func TestStorageIsStoredUnderQuarkAndListedWithoutSecrets(t *testing.T) {
 	if list[1].Set {
 		t.Fatal("email shouldn't be set")
 	}
-	// The values live under quark's own name and never leak into an app.
+	// The values live under bedrock's own name and never leak into an app.
 	names, _, _ := s.Names(App)
 	if strings.Join(names, ",") != "STORAGE_BUCKET_PREFIX,STORAGE_ENDPOINT,STORAGE_KEY,STORAGE_KEY_ID,STORAGE_KIND,STORAGE_PASSWORD" {
 		t.Fatalf("names %v", names)
@@ -91,7 +91,7 @@ func TestFieldsAreValidated(t *testing.T) {
 			t.Errorf("%s %v: got %v, want %q", c.name, c.values, err, c.want)
 		}
 	}
-	if _, _, err := Set(s, EmailName, map[string]string{"smtp_host": "127.0.0.1", "smtp_port": "1025", "from": "quark@lane", "to": "kyle@lane, olive@lane"}); err != nil {
+	if _, _, err := Set(s, EmailName, map[string]string{"smtp_host": "127.0.0.1", "smtp_port": "1025", "from": "bedrock@lane", "to": "kyle@lane, olive@lane"}); err != nil {
 		t.Fatal(err)
 	}
 	e, err := LoadEmail(s)

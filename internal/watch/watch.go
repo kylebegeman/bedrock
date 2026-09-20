@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 // Condition is one thing found wrong in a round.
@@ -166,7 +166,7 @@ func (w *Watcher) Round(ctx context.Context, conditions []Condition) error {
 // next round.
 func (w *Watcher) notify(ctx context.Context, inc *state.Incident, n Notice, now time.Time) {
 	if w.Notifier == nil {
-		inc.NotifyError = "no way to send alerts is set up; run quark integration set email"
+		inc.NotifyError = "no way to send alerts is set up; run bedrock integration set email"
 		return
 	}
 	if err := w.Notifier.Notify(ctx, n); err != nil {
@@ -187,7 +187,7 @@ func (w *Watcher) openNotice(inc state.Incident) Notice {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n\n", inc.Message)
 	fmt.Fprintf(&b, "Since %s (%s), seen in %d rounds.\n", inc.OpenedAt.Format("2006-01-02 15:04 UTC"), ago(inc.OpenedAt, w.Now()), inc.Observations)
-	fmt.Fprintf(&b, "Machine: %s\n\nquark status and quark alerts on the machine show more. You'll hear again when it recovers, or in %s if it doesn't.\n", w.Hostname, w.Renotify)
+	fmt.Fprintf(&b, "Machine: %s\n\nbedrock status and bedrock alerts on the machine show more. You'll hear again when it recovers, or in %s if it doesn't.\n", w.Hostname, w.Renotify)
 	return Notice{Subject: subject, Body: b.String()}
 }
 

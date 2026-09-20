@@ -13,8 +13,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/version"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/version"
 )
 
 // Client talks to a daemon.
@@ -36,7 +36,7 @@ func Dial(socket string) *Client {
 			return d.DialContext(ctx, "unix", socket)
 		},
 	}
-	return &Client{http: &http.Client{Transport: transport}, base: "http://quark"}
+	return &Client{http: &http.Client{Transport: transport}, base: "http://bedrock"}
 }
 
 // NewClient returns a client for an HTTP base URL, for tests.

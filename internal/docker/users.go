@@ -76,7 +76,7 @@ func (e *Engine) imageAccounts(ctx context.Context, image string) (*accounts, er
 		return a, nil
 	}
 	accountsMu.Unlock()
-	name := fmt.Sprintf("quark-probe-%d", time.Now().UnixNano())
+	name := fmt.Sprintf("bedrock-probe-%d", time.Now().UnixNano())
 	created, err := e.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Name:       name,
 		Config:     &container.Config{Image: image, Entrypoint: []string{"/nonexistent"}, Labels: map[string]string{LabelOwner: OwnerValue}},

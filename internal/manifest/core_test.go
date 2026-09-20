@@ -90,18 +90,18 @@ func TestSecretsAreDerivedFromOthersAndHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 	values := map[string]string{"LOOM_CORE_API_PASSWORD": "pw", "LOOM_RUNNER_ENROLLMENT_TOKEN": "abc"}
-	got, err := Derive(m.Secrets.Derive, values, map[string]string{"postgres": "quark-loom-postgres", "objects": "quark-loom-objects"})
+	got, err := Derive(m.Secrets.Derive, values, map[string]string{"postgres": "bedrock-loom-postgres", "objects": "bedrock-loom-objects"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["LOOM_CORE_API_DATABASE_URL"] != "postgresql://loom_core_api:pw@quark-loom-postgres:5432/loom" {
+	if got["LOOM_CORE_API_DATABASE_URL"] != "postgresql://loom_core_api:pw@bedrock-loom-postgres:5432/loom" {
 		t.Fatalf("%q", got["LOOM_CORE_API_DATABASE_URL"])
 	}
 	// sha256("abc")
 	if got["LOOM_CORE_RUNNER_PAIRING_TOKEN_SHA256"] != "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" {
 		t.Fatalf("%q", got["LOOM_CORE_RUNNER_PAIRING_TOKEN_SHA256"])
 	}
-	if got["LOOM_OBJECTS_URL"] != "http://quark-loom-objects:9000" {
+	if got["LOOM_OBJECTS_URL"] != "http://bedrock-loom-objects:9000" {
 		t.Fatalf("%q", got["LOOM_OBJECTS_URL"])
 	}
 	chain := map[string]string{"B": "{A}-b", "C": "{B}-c"}

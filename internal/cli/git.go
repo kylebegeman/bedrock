@@ -23,11 +23,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	apps "github.com/kylebegeman/quark/internal/app"
-	"github.com/kylebegeman/quark/internal/gitdeploy"
-	"github.com/kylebegeman/quark/internal/host"
-	"github.com/kylebegeman/quark/internal/manifest"
-	"github.com/kylebegeman/quark/internal/state"
+	apps "github.com/kylebegeman/bedrock/internal/app"
+	"github.com/kylebegeman/bedrock/internal/gitdeploy"
+	"github.com/kylebegeman/bedrock/internal/host"
+	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 // quietError ends the program with a code, its message already shown.
@@ -42,7 +42,7 @@ func newGit(a *app) *cobra.Command {
 	}
 	allow := &cobra.Command{
 		Use:   "allow <app> [public key]",
-		Short: "Let an SSH key deploy an app with git push or quark deploy --to. The key comes from the argument or stdin.",
+		Short: "Let an SSH key deploy an app with git push or bedrock deploy --to. The key comes from the argument or stdin.",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			appName := args[0]
@@ -70,7 +70,7 @@ func newGit(a *app) *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(a.stdout, "%s may deploy %s\n", key.Fingerprint(), strings.Join(key.Apps, ", "))
-			fmt.Fprintf(a.stdout, "from its machine: git remote add quark %s && git push quark main\n", remoteFor(cmd.Context(), appName))
+			fmt.Fprintf(a.stdout, "from its machine: git remote add bedrock %s && git push bedrock main\n", remoteFor(cmd.Context(), appName))
 			return nil
 		},
 	}
@@ -115,7 +115,7 @@ func newGit(a *app) *cobra.Command {
 				return json.NewEncoder(a.stdout).Encode(rows)
 			}
 			if len(kf.Keys) == 0 {
-				fmt.Fprintln(a.stdout, "no key may push yet; quark git allow <app> <public key> adds one")
+				fmt.Fprintln(a.stdout, "no key may push yet; bedrock git allow <app> <public key> adds one")
 				return nil
 			}
 			w := tabwriter.NewWriter(a.stdout, 0, 4, 2, ' ', 0)
@@ -305,13 +305,13 @@ func newGit(a *app) *cobra.Command {
 	return cmd
 }
 
-// newReceive deploys a source tree sent on stdin, for quark deploy --to
-// over a root login; the quark user's keys reach the same code through
+// newReceive deploys a source tree sent on stdin, for bedrock deploy --to
+// over a root login; the bedrock user's keys reach the same code through
 // git serve.
 func newReceive(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:    "receive <app>",
-		Short:  "Deploy the source tree on stdin (what quark deploy --to sends).",
+		Short:  "Deploy the source tree on stdin (what bedrock deploy --to sends).",
 		Hidden: true,
 		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -352,11 +352,11 @@ func writeKeys(kf *gitdeploy.KeyFile) error {
 	return chownToPushUser(kf.Path)
 }
 
-// chownToPushUser gives a path, and everything under it, to the quark user.
+// chownToPushUser gives a path, and everything under it, to the bedrock user.
 func chownToPushUser(path string) error {
 	u, err := user.Lookup(gitdeploy.User)
 	if err != nil {
-		return fmt.Errorf("the %s user doesn't exist; run quark host reconcile", gitdeploy.User)
+		return fmt.Errorf("the %s user doesn't exist; run bedrock host reconcile", gitdeploy.User)
 	}
 	uid, _ := strconv.Atoi(u.Uid)
 	gid, _ := strconv.Atoi(u.Gid)
@@ -394,8 +394,8 @@ func deployTo(ctx context.Context, a *app, dir, appName, target string) error {
 		}
 	}
 	fmt.Fprintf(a.stderr, "sending %d files (%s) of %s to %s\n", len(files), bytesWord(size), appName, target)
-	ssh := strings.Fields(envOr("QUARK_SSH", "ssh"))
-	args := append(append([]string{}, ssh[1:]...), target, "quark", "receive", appName)
+	ssh := strings.Fields(envOr("BEDROCK_SSH", "ssh"))
+	args := append(append([]string{}, ssh[1:]...), target, "bedrock", "receive", appName)
 	cmd := exec.CommandContext(ctx, ssh[0], args...)
 	cmd.Stdout, cmd.Stderr = a.stdout, a.stderr
 	stdin, err := cmd.StdinPipe()

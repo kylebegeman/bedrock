@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/state"
-	"github.com/kylebegeman/quark/internal/version"
+	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/bedrock/internal/version"
 )
 
 // Step is one unit of work in a plan.
@@ -141,7 +141,7 @@ type Receipt struct {
 	InputDigest   string                `json:"input_digest"`
 	PlanDigest    string                `json:"plan_digest"`
 	Steps         []StepView            `json:"steps"`
-	Version       string                `json:"quark"`
+	Version       string                `json:"bedrock"`
 }
 
 // Engine plans and applies operations against one store.

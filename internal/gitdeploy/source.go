@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/manifest"
 )
 
 // MaxSource bounds an uploaded or exported source tree.
@@ -162,7 +162,7 @@ func Extract(r io.Reader, dest string) error {
 }
 
 // CheckSource makes sure a tree is the app it is deployed as: a real
-// quark.yaml at its root naming that app.
+// bedrock.yaml at its root naming that app.
 func CheckSource(dir, app string) (*manifest.Manifest, error) {
 	info, err := os.Lstat(filepath.Join(dir, manifest.FileName))
 	if err != nil {

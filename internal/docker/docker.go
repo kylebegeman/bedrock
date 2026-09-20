@@ -1,4 +1,4 @@
-// Package docker is quark's view of the Docker Engine: containers,
+// Package docker is bedrock's view of the Docker Engine: containers,
 // networks and images it owns, named readably and labeled so nothing else
 // is ever touched. Builds go through the docker CLI, everything else
 // through the Engine API.
@@ -20,17 +20,17 @@ import (
 	"github.com/moby/moby/client"
 )
 
-// Labels quark puts on everything it creates.
+// Labels bedrock puts on everything it creates.
 const (
-	LabelOwner    = "quark.owner"
-	LabelApp      = "quark.app"
-	LabelWorkload = "quark.workload"
-	LabelRevision = "quark.revision"
-	OwnerValue    = "quark"
+	LabelOwner    = "bedrock.owner"
+	LabelApp      = "bedrock.app"
+	LabelWorkload = "bedrock.workload"
+	LabelRevision = "bedrock.revision"
+	OwnerValue    = "bedrock"
 )
 
 // EdgeNetwork is the network the edge and every routed workload share.
-const EdgeNetwork = "quark-edge"
+const EdgeNetwork = "bedrock-edge"
 
 // Engine is a connection to the local Docker daemon.
 type Engine struct {
@@ -54,11 +54,11 @@ func Connect(ctx context.Context) (*Engine, error) {
 func (e *Engine) Close() error { return e.cli.Close() }
 
 // AppNetwork names an app's own network.
-func AppNetwork(app string) string { return "quark-" + app }
+func AppNetwork(app string) string { return "bedrock-" + app }
 
 // ContainerName names a workload's container for one revision.
 func ContainerName(app, workload, revision string) string {
-	return "quark-" + app + "-" + workload + "-" + revision
+	return "bedrock-" + app + "-" + workload + "-" + revision
 }
 
 // EnsureNetwork creates a bridge network if it doesn't exist.
@@ -111,7 +111,7 @@ func (e *Engine) DisconnectNetwork(ctx context.Context, containerName, networkNa
 	return nil
 }
 
-// Networks lists the networks quark made whose names start with prefix.
+// Networks lists the networks bedrock made whose names start with prefix.
 func (e *Engine) Networks(ctx context.Context, prefix string) ([]string, error) {
 	res, err := e.cli.NetworkList(ctx, client.NetworkListOptions{})
 	if err != nil {
@@ -126,7 +126,7 @@ func (e *Engine) Networks(ctx context.Context, prefix string) ([]string, error) 
 	return out, nil
 }
 
-// Spec is a container quark wants running.
+// Spec is a container bedrock wants running.
 type Spec struct {
 	Name   string
 	Image  string
@@ -165,7 +165,7 @@ type Spec struct {
 	// is closed at its end.
 	Stdin io.Reader
 	// NoHealthcheck turns off the image's own HEALTHCHECK, for a container
-	// whose health quark checks its own way.
+	// whose health bedrock checks its own way.
 	NoHealthcheck bool
 }
 
@@ -317,7 +317,7 @@ func parsePublish(spec string) (network.Port, network.PortBinding, error) {
 	return port, binding, nil
 }
 
-// Info is what quark needs to know about a container.
+// Info is what bedrock needs to know about a container.
 type Info struct {
 	ID      string
 	Name    string
@@ -400,7 +400,7 @@ func (e *Engine) Start(ctx context.Context, name string) error {
 	return nil
 }
 
-// Owned lists every container quark created, running or not.
+// Owned lists every container bedrock created, running or not.
 func (e *Engine) Owned(ctx context.Context) ([]Info, error) {
 	res, err := e.cli.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
@@ -420,7 +420,7 @@ func (e *Engine) Owned(ctx context.Context) ([]Info, error) {
 	return out, nil
 }
 
-// Unowned counts containers quark didn't create.
+// Unowned counts containers bedrock didn't create.
 func (e *Engine) Unowned(ctx context.Context) ([]string, error) {
 	res, err := e.cli.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
@@ -499,7 +499,7 @@ func repository(ref string) string {
 	return ref
 }
 
-// RemoveImage deletes an image quark built. Missing is fine.
+// RemoveImage deletes an image bedrock built. Missing is fine.
 func (e *Engine) RemoveImage(ctx context.Context, ref string) error {
 	_, err := e.cli.ImageRemove(ctx, ref, client.ImageRemoveOptions{})
 	if err != nil && !IsNotFound(err) {

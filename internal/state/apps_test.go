@@ -14,7 +14,7 @@ func TestActivateRotatesRevisions(t *testing.T) {
 	s := open(t)
 	t0 := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
 	for i, id := range []string{"r1", "r2", "r3"} {
-		if err := s.SaveRevision(ctx, Revision{App: "site", ID: id, Status: RevisionFailed, Manifest: json.RawMessage(`{"app":"site"}`), Images: map[string]string{"web": "img:" + id}, Containers: map[string]string{"web": "quark-site-web-" + id}, CreatedAt: t0.Add(time.Duration(i) * time.Minute)}); err != nil {
+		if err := s.SaveRevision(ctx, Revision{App: "site", ID: id, Status: RevisionFailed, Manifest: json.RawMessage(`{"app":"site"}`), Images: map[string]string{"web": "img:" + id}, Containers: map[string]string{"web": "bedrock-site-web-" + id}, CreatedAt: t0.Add(time.Duration(i) * time.Minute)}); err != nil {
 			t.Fatal(err)
 		}
 		if err := s.Activate(ctx, "site", id, t0.Add(time.Duration(i)*time.Minute)); err != nil {
@@ -32,7 +32,7 @@ func TestActivateRotatesRevisions(t *testing.T) {
 	if got["r3"] != RevisionActive || got["r2"] != RevisionPrevious || got["r1"] != RevisionRetired {
 		t.Fatalf("statuses: %v", got)
 	}
-	if revs[0].ID != "r3" || revs[0].Images["web"] != "img:r3" || revs[0].Containers["web"] != "quark-site-web-r3" {
+	if revs[0].ID != "r3" || revs[0].Images["web"] != "img:r3" || revs[0].Containers["web"] != "bedrock-site-web-r3" {
 		t.Fatalf("newest first with its data: %+v", revs[0])
 	}
 	apps, err := s.Apps(ctx)

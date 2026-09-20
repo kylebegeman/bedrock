@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	apps "github.com/kylebegeman/quark/internal/app"
-	"github.com/kylebegeman/quark/internal/dns"
-	"github.com/kylebegeman/quark/internal/edge"
-	"github.com/kylebegeman/quark/internal/host"
+	apps "github.com/kylebegeman/bedrock/internal/app"
+	"github.com/kylebegeman/bedrock/internal/dns"
+	"github.com/kylebegeman/bedrock/internal/edge"
+	"github.com/kylebegeman/bedrock/internal/host"
 )
 
 func newDNS(a *app) *cobra.Command {
@@ -69,9 +69,9 @@ func newDNS(a *app) *cobra.Command {
 				kept := "you (manual)"
 				switch st.Mode {
 				case "direct":
-					kept = "quark, direct"
+					kept = "bedrock, direct"
 				case "proxied":
-					kept = "quark, proxied"
+					kept = "bedrock, proxied"
 				}
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", st.Host, st.App, kept, orDash(st.Record), st.Verdict)
 			}
@@ -84,7 +84,7 @@ func newDNS(a *app) *cobra.Command {
 	}
 	audit := &cobra.Command{
 		Use:   "audit",
-		Short: "Records that point here without a route, records quark left behind, routes whose records point elsewhere.",
+		Short: "Records that point here without a route, records bedrock left behind, routes whose records point elsewhere.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()

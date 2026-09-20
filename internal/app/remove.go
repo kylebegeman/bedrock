@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/docker"
-	"github.com/kylebegeman/quark/internal/edge"
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/manifest"
-	"github.com/kylebegeman/quark/internal/secrets"
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/edge"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 // RemoveKind takes an app off the machine: its routes, containers, images
@@ -28,7 +28,7 @@ type Remove struct {
 	Store     *state.Store
 	Secrets   *secrets.Store
 	Addresses func(ctx context.Context) []string
-	// StateDir is quark's state directory; empty means /var/lib/quark.
+	// StateDir is bedrock's state directory; empty means /var/lib/bedrock.
 	StateDir string
 }
 
@@ -96,7 +96,7 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 			},
 		},
 		kernel.Step{
-			Name: "dns", Change: "remove the DNS records quark keeps for the app" + recordsNote(m),
+			Name: "dns", Change: "remove the DNS records bedrock keeps for the app" + recordsNote(m),
 			Apply: func(ctx context.Context, out io.Writer) error {
 				managed := m.ManagedHosts()
 				if len(managed) == 0 {

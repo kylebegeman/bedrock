@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/kylebegeman/quark/internal/host"
+	"github.com/kylebegeman/bedrock/internal/host"
 )
 
 func newDoctor(a *app) *cobra.Command {
@@ -62,7 +62,7 @@ func newHost(a *app) *cobra.Command {
 	)
 	setup := &cobra.Command{
 		Use:   "setup",
-		Short: "Turn this machine into a quark host: Docker, firewall, key-only SSH, updates, swap, registry.",
+		Short: "Turn this machine into a bedrock host: Docker, firewall, key-only SSH, updates, swap, registry.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if profile.Hostname == "" {
@@ -117,8 +117,8 @@ func newHost(a *app) *cobra.Command {
 func newUpgrade(a *app) *cobra.Command {
 	var planOnly bool
 	cmd := &cobra.Command{
-		Use:   "upgrade <path-to-new-quark>",
-		Short: "Replace quark with a new build and restart the daemon; systemd rolls back if it can't start.",
+		Use:   "upgrade <path-to-new-bedrock>",
+		Short: "Replace bedrock with a new build and restart the daemon; systemd rolls back if it can't start.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path, err := filepath.Abs(args[0])

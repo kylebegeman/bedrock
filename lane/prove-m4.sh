@@ -21,9 +21,9 @@ fetch() { curl -sS --max-time 30 "$@"; }
 quiet() { grep -v '^  \.\.\.  ' ; }
 
 echo "== build and install"
-(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/quark-linux-amd64 ./cmd/quark)
-put "$here/../bin/quark-linux-amd64" /usr/local/bin/quark.new
-run 'chmod 755 /usr/local/bin/quark.new && mv -f /usr/local/bin/quark.new /usr/local/bin/quark && quark daemon install >/dev/null && quark version'
+(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/bedrock-linux-amd64 ./cmd/bedrock)
+put "$here/../bin/bedrock-linux-amd64" /usr/local/bin/bedrock.new
+run 'chmod 755 /usr/local/bin/bedrock.new && mv -f /usr/local/bin/bedrock.new /usr/local/bin/bedrock && bedrock daemon install >/dev/null && bedrock version'
 
 echo "== copy the fixtures, the sources and the archives"
 run 'mkdir -p /srv/lane/archives'
@@ -33,30 +33,30 @@ for f in "$stage"/archives/*; do put "$f" "/srv/lane/archives/$(basename "$f")";
 run 'ls -la /srv/lane/archives'
 
 echo "== start clean: remove the apps and their lane data if a previous run left them"
-for a in hello begamin dragon-writer; do run "quark remove $a --data --yes >/dev/null 2>&1 || true"; done
+for a in hello begamin dragon-writer; do run "bedrock remove $a --data --yes >/dev/null 2>&1 || true"; done
 
 echo "== secrets: the first set makes the machine's key"
-run 'printf alpha | quark secret set hello SECRET_WORD' 2>&1 | sed 's/AGE-SECRET-KEY-1[A-Z0-9]*/AGE-SECRET-KEY-1.../'
-run 'quark secret list hello; quark secret versions hello'
+run 'printf alpha | bedrock secret set hello SECRET_WORD' 2>&1 | sed 's/AGE-SECRET-KEY-1[A-Z0-9]*/AGE-SECRET-KEY-1.../'
+run 'bedrock secret list hello; bedrock secret versions hello'
 
 echo "== hello with a secret and a cron workload"
-run 'quark deploy /srv/lane/hello --yes' | quiet | tail -8
+run 'bedrock deploy /srv/lane/hello --yes' | quiet | tail -8
 first=$(fetch https://hello.lane.begam.in/)
 echo "-- from the outside: $first"
 case "$first" in *"secret alpha"*) ;; *) echo "M4 NOT proven: the secret didn't reach the app" >&2; exit 1 ;; esac
 
 echo "== a new secret version, a new revision, then a rollback restores the old secret"
-run 'printf beta | quark secret set hello SECRET_WORD >/dev/null && quark deploy /srv/lane/hello --yes' | quiet | tail -3
+run 'printf beta | bedrock secret set hello SECRET_WORD >/dev/null && bedrock deploy /srv/lane/hello --yes' | quiet | tail -3
 second=$(fetch https://hello.lane.begam.in/)
 echo "-- from the outside: $second"
 case "$second" in *"secret beta"*) ;; *) echo "M4 NOT proven: the new secret didn't reach the app" >&2; exit 1 ;; esac
-run 'quark rollback hello --yes' | quiet | tail -3
+run 'bedrock rollback hello --yes' | quiet | tail -3
 third=$(fetch https://hello.lane.begam.in/)
 echo "-- from the outside: $third"
 case "$third" in *"secret alpha"*) ;; *) echo "M4 NOT proven: the rollback didn't restore the secrets version" >&2; exit 1 ;; esac
 
 echo "== begamin from its archive"
-run "cat > /srv/lane/begamin/quark.yaml <<'EOF'
+run "cat > /srv/lane/begamin/bedrock.yaml <<'EOF'
 app: begamin
 description: Kyle's private API
 owner: personal
@@ -87,12 +87,12 @@ data:
 checks:
   - url: https://api.lane.begam.in/healthz
 EOF"
-run 'head -c 32 /dev/urandom | base64 | quark secret set begamin IP_HASH_SALT >/dev/null'
-run 'quark deploy /srv/lane/begamin --yes --restore-volume data=/srv/lane/archives/begamin-data.tar.gz' | quiet | tail -14
+run 'head -c 32 /dev/urandom | base64 | bedrock secret set begamin IP_HASH_SALT >/dev/null'
+run 'bedrock deploy /srv/lane/begamin --yes --restore-volume data=/srv/lane/archives/begamin-data.tar.gz' | quiet | tail -14
 echo "-- from the outside: $(fetch -o /dev/null -w '%{http_code}' https://api.lane.begam.in/healthz) at https://api.lane.begam.in/healthz"
 
 echo "== Dragon Writer from the July 5 backup"
-run "cat > /srv/lane/dragon-writer/quark.yaml <<'EOF'
+run "cat > /srv/lane/dragon-writer/bedrock.yaml <<'EOF'
 app: dragon-writer
 description: Olive's writing app
 owner: personal
@@ -128,26 +128,26 @@ data:
     uploads:
       description: Her drawings
 EOF"
-run 'quark deploy /srv/lane/dragon-writer --yes --restore-postgres /srv/lane/archives/dragon_writer_20260705_175914.dump --restore-volume uploads=/srv/lane/archives/uploads_20260705_175914.tar.gz' | quiet | grep -v '^       | \(#\|=>\|npm\|added\|found\|>\|▲\|  \)' | tail -20
+run 'bedrock deploy /srv/lane/dragon-writer --yes --restore-postgres /srv/lane/archives/dragon_writer_20260705_175914.dump --restore-volume uploads=/srv/lane/archives/uploads_20260705_175914.tar.gz' | quiet | grep -v '^       | \(#\|=>\|npm\|added\|found\|>\|▲\|  \)' | tail -20
 echo "-- from the outside: $(fetch -o /dev/null -w '%{http_code}' https://dragonwriter.lane.begam.in/) at https://dragonwriter.lane.begam.in/"
 echo "-- her drawing: $(fetch -o /dev/null -w '%{http_code} %{content_type} %{size_download} bytes' https://dragonwriter.lane.begam.in/uploads/gallery/1782661846889-483c8db3d7a952ab.png)"
 
 echo "== Olive's data, counted in the restored database"
-run "quark psql dragon-writer -- -tAc \"select (select count(*) from story_chapters where archived_at is null) || ' chapters, ' || (select count(*) from stories) || ' stories, ' || (select count(*) from oc_characters) || ' characters, ' || (select display_name from users where display_name <> 'Kyle' limit 1) || ' is here'\""
-chapters=$(run "quark psql dragon-writer -- -tAc 'select count(*) from story_chapters'")
+run "bedrock psql dragon-writer -- -tAc \"select (select count(*) from story_chapters where archived_at is null) || ' chapters, ' || (select count(*) from stories) || ' stories, ' || (select count(*) from oc_characters) || ' characters, ' || (select display_name from users where display_name <> 'Kyle' limit 1) || ' is here'\""
+chapters=$(run "bedrock psql dragon-writer -- -tAc 'select count(*) from story_chapters'")
 [[ "$chapters" == "36" ]] || { echo "M4 NOT proven: expected 36 chapters, got $chapters" >&2; exit 1; }
 
 echo "== a one-off command in the app's environment, with its database and secrets"
-run "quark run dragon-writer web -- sh -c 'psql \"\$DATABASE_URL\" -tAc \"select count(*) from stories\" | sed s/\$/\ stories\ reachable\ from\ a\ one-off\ command/'" | quiet | tail -4
+run "bedrock run dragon-writer web -- sh -c 'psql \"\$DATABASE_URL\" -tAc \"select count(*) from stories\" | sed s/\$/\ stories\ reachable\ from\ a\ one-off\ command/'" | quiet | tail -4
 echo "-- and the app's own migration check, whose verdict is the app's (the July database was migrated with drizzle-kit push, so its journal is short):"
-run 'quark run dragon-writer web -- npm run db:migrate:check' 2>&1 | quiet | grep -E "baseline|Pending|exited" || true
-run 'quark jobs dragon-writer web --limit 2'
+run 'bedrock run dragon-writer web -- npm run db:migrate:check' 2>&1 | quiet | grep -E "baseline|Pending|exited" || true
+run 'bedrock jobs dragon-writer web --limit 2'
 
 echo "== the cron workload ran"
 sleep 75
-run 'quark jobs hello tick --limit 3'
-run 'quark jobs hello tick --limit 1 --json' | python3 -c 'import json,sys; runs=json.load(sys.stdin); assert runs and runs[0]["exit_code"]==0, runs; print("last tick:", runs[0]["output"].strip())'
+run 'bedrock jobs hello tick --limit 3'
+run 'bedrock jobs hello tick --limit 1 --json' | python3 -c 'import json,sys; runs=json.load(sys.stdin); assert runs and runs[0]["exit_code"]==0, runs; print("last tick:", runs[0]["output"].strip())'
 
 echo "== ps"
-run 'quark ps'
+run 'bedrock ps'
 echo "M4 proven: secrets pinned to revisions, a cron job, a one-off command, begamin and Dragon Writer restored from their archives"

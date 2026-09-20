@@ -11,9 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/kylebegeman/quark/internal/api"
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/ui"
+	"github.com/kylebegeman/bedrock/internal/api"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/ui"
 )
 
 // operate is what every mutating command does: show the plan, stop there
@@ -59,7 +59,7 @@ func (a *app) operate(ctx context.Context, kind string, input any, planOnly bool
 	})
 	if errors.Is(err, api.ErrDisconnected) {
 		if lastID != "" {
-			return fmt.Errorf("%w; the daemon finishes or undoes %s on its own: quark history %s", err, lastID, lastID)
+			return fmt.Errorf("%w; the daemon finishes or undoes %s on its own: bedrock history %s", err, lastID, lastID)
 		}
 		return err
 	}

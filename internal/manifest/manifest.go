@@ -1,5 +1,5 @@
 // Package manifest is the one file an app needs: what it runs, where it is
-// reached, how it is checked, and what it may use. quark.yaml lives in the
+// reached, how it is checked, and what it may use. bedrock.yaml lives in the
 // app's repository.
 package manifest
 
@@ -18,7 +18,7 @@ import (
 )
 
 // FileName is the manifest's name in an app's repository.
-const FileName = "quark.yaml"
+const FileName = "bedrock.yaml"
 
 // Manifest describes one app.
 type Manifest struct {
@@ -39,13 +39,13 @@ type Manifest struct {
 	// Backup says when the data is backed up and drilled. An app with data
 	// is backed up nightly and drilled weekly unless this says otherwise.
 	Backup *Backup `yaml:"backup,omitempty" json:"backup,omitempty"`
-	// Secrets are the ones quark makes for the app, so nobody has to type
+	// Secrets are the ones bedrock makes for the app, so nobody has to type
 	// them in: generated once and kept, or derived from others at every
 	// deploy.
 	Secrets *Secrets `yaml:"secrets,omitempty" json:"secrets,omitempty"`
 }
 
-// Secrets quark makes for an app.
+// Secrets bedrock makes for an app.
 type Secrets struct {
 	// Generate makes each named secret once, when it doesn't exist yet,
 	// in a format: hex:N or base64:N or base64url:N for N random bytes,
@@ -99,10 +99,10 @@ var DefaultKeep = Keep{Daily: 7, Weekly: 4, Monthly: 6}
 
 // ReservedApp is the name the machine's own things use, such as the
 // integration credentials. No app may take it.
-const ReservedApp = "quark"
+const ReservedApp = "bedrock"
 
 // reservedApps are names whose containers, networks or volumes would
-// collide with quark's own: quark-edge, quark-registry, quark-restic-cache.
+// collide with bedrock's own: bedrock-edge, bedrock-registry, bedrock-restic-cache.
 var reservedApps = map[string]bool{ReservedApp: true, "edge": true, "registry": true, "restic": true}
 
 // DatabaseVolume and ObjectsVolume are the volumes that hold an app's
@@ -121,13 +121,13 @@ type Data struct {
 	Volumes map[string]Volume `yaml:"volumes,omitempty" json:"volumes,omitempty"`
 	// Objects gives the app its own S3-compatible object store (MinIO),
 	// reachable at {objects}:9000 with the MINIO_ROOT_USER and
-	// MINIO_ROOT_PASSWORD secrets quark makes.
+	// MINIO_ROOT_PASSWORD secrets bedrock makes.
 	Objects *Objects `yaml:"objects,omitempty" json:"objects,omitempty"`
 }
 
 // Objects configures the app's object store.
 type Objects struct {
-	// Image replaces quark's pinned MinIO image.
+	// Image replaces bedrock's pinned MinIO image.
 	Image string `yaml:"image,omitempty" json:"image,omitempty"`
 }
 
@@ -148,7 +148,7 @@ type Postgres struct {
 	// Env and Secrets reach the database container, for init scripts.
 	Env     map[string]string `yaml:"env,omitempty" json:"env,omitempty"`
 	Secrets []string          `yaml:"secrets,omitempty" json:"secrets,omitempty"`
-	// DatabaseURL false keeps quark from giving every workload
+	// DatabaseURL false keeps bedrock from giving every workload
 	// DATABASE_URL, the superuser's address: for an app whose workloads
 	// each get a role of their own through derived secrets.
 	DatabaseURL *bool `yaml:"database_url,omitempty" json:"database_url,omitempty"`
@@ -202,7 +202,7 @@ type Workload struct {
 	Secrets []string `yaml:"secrets,omitempty" json:"secrets,omitempty"`
 	// Command replaces the image's command.
 	Command []string `yaml:"command,omitempty" json:"command,omitempty"`
-	// Health is how quark knows the workload is ready.
+	// Health is how bedrock knows the workload is ready.
 	Health *Health `yaml:"health,omitempty" json:"health,omitempty"`
 	// Resources bound what the workload may use.
 	Resources Resources `yaml:"resources,omitempty" json:"resources,omitempty"`
@@ -266,7 +266,7 @@ type Route struct {
 	// Port sends the route to another port of the workload than its own,
 	// for a workload that listens on two.
 	Port int `yaml:"port,omitempty" json:"port,omitempty"`
-	// DNS says whether quark keeps the host's record in Cloudflare:
+	// DNS says whether bedrock keeps the host's record in Cloudflare:
 	// "direct" makes a record that names this machine, "proxied" one
 	// behind Cloudflare's proxy. Empty leaves the record alone and only
 	// checks that it points here.
@@ -285,7 +285,7 @@ const (
 	DNSProxied DNSMode = "proxied"
 )
 
-// Managed reports whether quark keeps the record.
+// Managed reports whether bedrock keeps the record.
 func (m DNSMode) Managed() bool { return m == DNSDirect || m == DNSProxied }
 
 // Health is how a workload says it is ready.
@@ -345,7 +345,7 @@ func Parse(data []byte) (*Manifest, error) {
 	return &m, nil
 }
 
-// Load reads dir/quark.yaml.
+// Load reads dir/bedrock.yaml.
 func Load(dir string) (*Manifest, error) {
 	return LoadFile(dir, FileName)
 }
@@ -378,7 +378,7 @@ func LoadFile(dir, name string) (*Manifest, error) {
 func CheckFileName(name string) error {
 	if name == "" || name != filepath.Base(name) || strings.HasPrefix(name, ".") ||
 		!(strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml")) {
-		return fmt.Errorf("%q must name a .yaml file at the source's root, such as quark.worker.yaml", name)
+		return fmt.Errorf("%q must name a .yaml file at the source's root, such as bedrock.worker.yaml", name)
 	}
 	return nil
 }
@@ -391,7 +391,7 @@ func (m *Manifest) Validate() error {
 	if !namePattern.MatchString(m.App) {
 		fail("app: %q must be lowercase letters, digits and hyphens, up to 40 characters", m.App)
 	} else if reservedApps[m.App] {
-		fail("app: %q is a name quark uses for itself", m.App)
+		fail("app: %q is a name bedrock uses for itself", m.App)
 	}
 	if len(m.Workloads) == 0 {
 		fail("workloads: an app needs at least one")
@@ -601,7 +601,7 @@ func (m *Manifest) Validate() error {
 				fail("data.volumes: %q must be lowercase letters, digits and hyphens", name)
 			}
 			if name == DatabaseVolume || name == ObjectsVolume {
-				fail("data.volumes: %q is quark's own volume for the %s; pick another name", name, map[string]string{DatabaseVolume: "database", ObjectsVolume: "object store"}[name])
+				fail("data.volumes: %q is bedrock's own volume for the %s; pick another name", name, map[string]string{DatabaseVolume: "database", ObjectsVolume: "object store"}[name])
 			}
 		}
 		if pg := m.Data.Postgres; pg != nil {
@@ -911,7 +911,7 @@ func (m *Manifest) VerifyQuery() (string, int) {
 	return m.Backup.Verify.SQL, atLeast
 }
 
-// ManagedHosts returns the hosts whose records quark keeps, with their
+// ManagedHosts returns the hosts whose records bedrock keeps, with their
 // mode, in host order. A host routed twice with different modes is an
 // error at validation time, so the first wins here.
 func (m *Manifest) ManagedHosts() map[string]DNSMode {

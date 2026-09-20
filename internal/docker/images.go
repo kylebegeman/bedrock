@@ -11,7 +11,7 @@ import (
 	"github.com/moby/moby/client"
 )
 
-// Image is an image quark built.
+// Image is an image bedrock built.
 type Image struct {
 	ID     string
 	Tags   []string
@@ -27,7 +27,7 @@ func (i Image) Describe() string {
 	return strings.TrimPrefix(i.ID, "sha256:")[:12]
 }
 
-// OwnedImages lists the images quark built.
+// OwnedImages lists the images bedrock built.
 func (e *Engine) OwnedImages(ctx context.Context) ([]Image, error) {
 	res, err := e.cli.ImageList(ctx, client.ImageListOptions{})
 	if err != nil {

@@ -17,9 +17,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/state"
-	"github.com/kylebegeman/quark/internal/version"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/bedrock/internal/version"
 )
 
 // Summary is one operation as history lists it.
@@ -183,7 +183,7 @@ func Listen(socket string) (net.Listener, error) {
 		l.Close()
 		return nil, err
 	}
-	// The quark user, who receives pushes, asks the daemon to deploy them
+	// The bedrock user, who receives pushes, asks the daemon to deploy them
 	// through the socket: its group may use it.
 	if g, err := user.LookupGroup(SocketGroup); err == nil {
 		if gid, err := strconv.Atoi(g.Gid); err == nil {
@@ -196,7 +196,7 @@ func Listen(socket string) (net.Listener, error) {
 }
 
 // SocketGroup may use the daemon's socket.
-const SocketGroup = "quark"
+const SocketGroup = "bedrock"
 
 // Local serves the Runner contract from an in-process kernel.
 type Local struct {

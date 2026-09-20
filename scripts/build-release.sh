@@ -14,8 +14,8 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
   os=${target%/*}
   arch=${target#*/}
   CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -buildvcs=true \
-    -ldflags "-s -w -X github.com/kylebegeman/quark/internal/version.number=$version" \
-    -o "$out/quark_${version}_${os}_${arch}" ./cmd/quark
+    -ldflags "-s -w -X github.com/kylebegeman/bedrock/internal/version.number=$version" \
+    -o "$out/bedrock_${version}_${os}_${arch}" ./cmd/bedrock
 done
-(cd "$out" && shasum -a 256 quark_* > SHA256SUMS)
+(cd "$out" && shasum -a 256 bedrock_* > SHA256SUMS)
 printf 'Built %s at %s into %s\n' "$version" "$(git rev-parse HEAD)" "$out"

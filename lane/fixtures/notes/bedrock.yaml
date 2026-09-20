@@ -39,7 +39,7 @@ workloads:
     order: 2
     image: postgres:17-alpine
     command: [psql, -v, ON_ERROR_STOP=1, -c, "create table if not exists notes (id serial primary key, body text not null); grant select, insert on notes to notes_app; grant usage on sequence notes_id_seq to notes_app; insert into notes (body) values ('deployed')"]
-    env: {PGHOST: quark-notes-postgres, PGUSER: notes_owner, PGDATABASE: notes}
+    env: {PGHOST: bedrock-notes-postgres, PGUSER: notes_owner, PGDATABASE: notes}
     secrets: [PGPASSWORD]
     timeout: 2m
 data:

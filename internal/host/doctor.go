@@ -31,7 +31,7 @@ var supportedSystems = map[string][]string{
 	"debian": {"12", "13"},
 }
 
-// Supported reports whether quark runs on this OS and architecture.
+// Supported reports whether bedrock runs on this OS and architecture.
 func Supported(f Facts) bool {
 	if f.Arch != "x86_64" && f.Arch != "aarch64" {
 		return false
@@ -51,15 +51,15 @@ func Diagnose(f Facts) []Result {
 	add := func(name string, v Verdict, detail, fix string) {
 		out = append(out, Result{Name: name, Verdict: v, Detail: detail, Fix: fix})
 	}
-	const setup = "run quark host setup"
+	const setup = "run bedrock host setup"
 
 	if Supported(f) {
 		add("system", Pass, fmt.Sprintf("%s on %s", f.OSName, f.Arch), "")
 	} else {
-		add("system", Fail, fmt.Sprintf("%s on %s", orUnknown(f.OSName), orUnknown(f.Arch)), "quark needs Ubuntu 22.04 or 24.04, or Debian 12 or 13, on x86_64 or aarch64")
+		add("system", Fail, fmt.Sprintf("%s on %s", orUnknown(f.OSName), orUnknown(f.Arch)), "bedrock needs Ubuntu 22.04 or 24.04, or Debian 12 or 13, on x86_64 or aarch64")
 	}
 	if !f.Systemd {
-		add("systemd", Fail, "not running", "quark's daemon needs systemd")
+		add("systemd", Fail, "not running", "bedrock's daemon needs systemd")
 	} else {
 		add("systemd", Pass, "running", "")
 	}
@@ -71,7 +71,7 @@ func Diagnose(f Facts) []Result {
 
 	switch {
 	case f.CPUs < 2:
-		add("cpu", Fail, fmt.Sprintf("%d cpu", f.CPUs), "quark needs at least 2")
+		add("cpu", Fail, fmt.Sprintf("%d cpu", f.CPUs), "bedrock needs at least 2")
 	case f.CPUs < 4:
 		add("cpu", Warn, fmt.Sprintf("%d cpus", f.CPUs), "builds are slow below 4")
 	default:
@@ -79,7 +79,7 @@ func Diagnose(f Facts) []Result {
 	}
 	switch {
 	case f.MemoryBytes < 2*gib:
-		add("memory", Fail, gigs(f.MemoryBytes), "quark needs at least 2 GiB")
+		add("memory", Fail, gigs(f.MemoryBytes), "bedrock needs at least 2 GiB")
 	case f.MemoryBytes < 8*gib:
 		add("memory", Warn, gigs(f.MemoryBytes), "apps and builds share memory; 8 GiB or more is comfortable")
 	default:
@@ -87,7 +87,7 @@ func Diagnose(f Facts) []Result {
 	}
 	switch {
 	case f.DiskFreeBytes < 5*gb:
-		add("disk", Fail, gigs(f.DiskFreeBytes)+" free", "less than 5 GB free; free space or run quark gc")
+		add("disk", Fail, gigs(f.DiskFreeBytes)+" free", "less than 5 GB free; free space or run bedrock gc")
 	case f.DiskFreeBytes < 20*gb:
 		add("disk", Warn, gigs(f.DiskFreeBytes)+" free", "less than 20 GB free; images and backups need room")
 	default:
@@ -156,9 +156,9 @@ func Diagnose(f Facts) []Result {
 
 	switch {
 	case f.RebootRequired:
-		add("updates", Warn, "a reboot is pending", "quark host maintain")
+		add("updates", Warn, "a reboot is pending", "bedrock host maintain")
 	case f.UpdatesPending > 0:
-		add("updates", Warn, fmt.Sprintf("%d package(s) can be upgraded", f.UpdatesPending), "quark host maintain")
+		add("updates", Warn, fmt.Sprintf("%d package(s) can be upgraded", f.UpdatesPending), "bedrock host maintain")
 	case f.UpdatesPending < 0:
 		add("updates", Warn, "unknown", "apt-get didn't answer")
 	default:
@@ -181,7 +181,7 @@ func Diagnose(f Facts) []Result {
 	}
 	if f.Systemd {
 		if !f.DaemonAnswers {
-			add("daemon", Fail, "not answering", "quark daemon install")
+			add("daemon", Fail, "not answering", "bedrock daemon install")
 		} else {
 			add("daemon", Pass, "answering", "")
 		}

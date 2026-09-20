@@ -1,4 +1,4 @@
-// Package cli builds the quark command tree.
+// Package cli builds the bedrock command tree.
 package cli
 
 import (
@@ -14,12 +14,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/kylebegeman/quark/internal/api"
-	"github.com/kylebegeman/quark/internal/daemon"
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/state"
-	"github.com/kylebegeman/quark/internal/ui"
-	"github.com/kylebegeman/quark/internal/version"
+	"github.com/kylebegeman/bedrock/internal/api"
+	"github.com/kylebegeman/bedrock/internal/daemon"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/bedrock/internal/ui"
+	"github.com/kylebegeman/bedrock/internal/version"
 )
 
 // Main runs the command line with the given arguments and returns the
@@ -34,7 +34,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		if errors.As(err, &quiet) {
 			return quiet.code
 		}
-		fmt.Fprintln(stderr, "quark:", err)
+		fmt.Fprintln(stderr, "bedrock:", err)
 		return 1
 	}
 	return 0
@@ -75,15 +75,15 @@ func newRoot(stdout, stderr io.Writer) *cobra.Command {
 		a.tty = ui.IsTerminal(f)
 	}
 	root := &cobra.Command{
-		Use:           "quark",
+		Use:           "bedrock",
 		Short:         "One small program that runs your machines.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	root.PersistentFlags().StringVar(&a.stateDir, "state-dir", envOr("QUARK_STATE_DIR", defaultStateDir()), "where quark keeps its state")
-	root.PersistentFlags().StringVar(&a.socket, "socket", envOr("QUARK_SOCKET", daemon.DefaultSocket), "the daemon's socket; the local kernel is used when nothing answers")
+	root.PersistentFlags().StringVar(&a.stateDir, "state-dir", envOr("BEDROCK_STATE_DIR", defaultStateDir()), "where bedrock keeps its state")
+	root.PersistentFlags().StringVar(&a.socket, "socket", envOr("BEDROCK_SOCKET", daemon.DefaultSocket), "the daemon's socket; the local kernel is used when nothing answers")
 	root.PersistentFlags().BoolVar(&a.json, "json", false, "print JSON, one object per line")
 	root.AddCommand(newVersion(a), newDoctor(a), newHost(a), newUpgrade(a), newDeploy(a), newRollback(a), newLs(a), newStatus(a), newExposure(a), newDNS(a), newPs(a), newLogs(a), newExec(a), newGC(a), newSecret(a), newIntegration(a), newRun(a), newJobs(a), newPsql(a), newBackup(a), newBackups(a), newDrill(a), newRestore(a), newAlerts(a), newWatch(a), newRemove(a), newGit(a), newReceive(a), newHistory(a), newKernel(a), newDaemon(a))
 	return root
@@ -96,17 +96,17 @@ func envOr(name, fallback string) string {
 	return fallback
 }
 
-// defaultStateDir is /var/lib/quark for root on Linux (the machines) and
-// ~/.quark anywhere else (the Mac).
+// defaultStateDir is /var/lib/bedrock for root on Linux (the machines) and
+// ~/.bedrock anywhere else (the Mac).
 func defaultStateDir() string {
 	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
 		return daemon.DefaultStateDir
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ".quark"
+		return ".bedrock"
 	}
-	return filepath.Join(home, ".quark")
+	return filepath.Join(home, ".bedrock")
 }
 
 func newVersion(a *app) *cobra.Command {

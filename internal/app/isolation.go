@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/kylebegeman/quark/internal/docker"
-	"github.com/kylebegeman/quark/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/manifest"
 )
 
 // DefaultMemory bounds a workload that doesn't say how much memory it may

@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	apps "github.com/kylebegeman/quark/internal/app"
+	apps "github.com/kylebegeman/bedrock/internal/app"
 )
 
 func newGC(a *app) *cobra.Command {

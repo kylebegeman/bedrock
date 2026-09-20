@@ -11,7 +11,7 @@ Linux VM on the Mac.
   with an API token in `~/.hostinger.yaml` (`api_token: ...`, mode 600).
   Create the token in hPanel under Profile, then API.
 - The deploy key that Hostinger has on file for the machine. `hostinger.env`
-  expects it at `~/.ssh/bagel-box-deploy`; set `QUARK_LANE_KEY` to use another.
+  expects it at `~/.ssh/bagel-box-deploy`; set `BEDROCK_LANE_KEY` to use another.
 
 ## Commands
 
@@ -23,14 +23,14 @@ lane/reset.sh            # wipe it, wait, print "ready"
 `reset.sh` reinstalls Ubuntu 24.04 through Hostinger's API, waits for the
 recreate action to succeed, asks Hostinger to install the deploy key on the
 fresh OS, waits for SSH, and pins the new host key in `lane/known_hosts`
-(ignored by git). Everything after that is quark's job.
+(ignored by git). Everything after that is bedrock's job.
 
 Recreating the machine deletes everything on it, including snapshots. The
 script never asks; the caller decides.
 
 ## Proofs
 
-Each milestone has a script that runs quark on the machine and checks the
+Each milestone has a script that runs bedrock on the machine and checks the
 result from the outside. They build the binary, install it, and print what
 they see; a failure says `NOT proven` and stops.
 
@@ -45,7 +45,7 @@ lane/prove-m7.sh              # a Core-shaped app: made secrets, releases, singl
 ```
 
 `prove-m5.sh` needs the apps `prove-m4.sh` leaves behind. It runs two
-fixtures on the box that quark doesn't manage: a mail sink (mailpit on
+fixtures on the box that bedrock doesn't manage: a mail sink (mailpit on
 127.0.0.1:1025 and :8025) and an S3 store (MinIO on 127.0.0.1:9000), so the
 email and storage integrations have something to talk to without any real
 credential leaving the machine. On the real machines the same integrations

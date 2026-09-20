@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/app"
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/secrets"
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/app"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 func sign(secret string, body []byte) string {
@@ -46,12 +46,12 @@ func TestAWebhookFetchesTheBranchAndDeploysIt(t *testing.T) {
 	if err := store.Activate(ctx, "hello", "r1", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	bare, commit := repoWith(t, map[string]string{"quark.yaml": helloYAML, "main.go": "package main"})
+	bare, commit := repoWith(t, map[string]string{"bedrock.yaml": helloYAML, "main.go": "package main"})
 	hook, err := Configure(ctx, store, sec, "hello", "file://"+bare, "main", "hello.example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hook.URL != "https://hello.example.com/_quark/hook" || len(hook.Secret) != 64 || hook.DeployKey != "" {
+	if hook.URL != "https://hello.example.com/_bedrock/hook" || len(hook.Secret) != 64 || hook.DeployKey != "" {
 		t.Fatalf("%+v", hook)
 	}
 	var mu sync.Mutex
@@ -67,7 +67,7 @@ func TestAWebhookFetchesTheBranchAndDeploysIt(t *testing.T) {
 		},
 	}
 	post := func(event string, body []byte, signature string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, "https://hello.example.com/_quark/hook", strings.NewReader(string(body)))
+		req := httptest.NewRequest(http.MethodPost, "https://hello.example.com/_bedrock/hook", strings.NewReader(string(body)))
 		req.Host = "hello.example.com"
 		req.Header.Set("X-GitHub-Event", event)
 		req.Header.Set("X-Hub-Signature-256", signature)
@@ -106,7 +106,7 @@ func TestAWebhookFetchesTheBranchAndDeploysIt(t *testing.T) {
 		t.Fatalf("%+v", hooks)
 	}
 	// Another app's host, or no webhook at all, is not found.
-	req := httptest.NewRequest(http.MethodPost, "https://other.example.com/_quark/hook", strings.NewReader("{}"))
+	req := httptest.NewRequest(http.MethodPost, "https://other.example.com/_bedrock/hook", strings.NewReader("{}"))
 	req.Host = "other.example.com"
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

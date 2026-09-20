@@ -57,9 +57,9 @@ func TestIsolationAndDNSAreValidated(t *testing.T) {
 		{strings.Replace(isolated, "cap_chown", "chown everything", 1), "isn't a capability name"},
 		{strings.Replace(isolated, "privileged: true", "privileged: true\n    capabilities: [SYS_ADMIN]", 1), "keeps every capability already"},
 		{strings.Replace(isolated, "tmpfs: [/app/.cache]", "tmpfs: [app/.cache]", 1), "absolute path"},
-		{strings.Replace(isolated, "app: loom", "app: edge", 1), "a name quark uses for itself"},
-		{strings.Replace(isolated, "app: loom", "app: registry", 1), "a name quark uses for itself"},
-		{isolated + "data:\n  volumes:\n    postgres: {}\n", "quark's own volume for the database"},
+		{strings.Replace(isolated, "app: loom", "app: edge", 1), "a name bedrock uses for itself"},
+		{strings.Replace(isolated, "app: loom", "app: registry", 1), "a name bedrock uses for itself"},
+		{isolated + "data:\n  volumes:\n    postgres: {}\n", "bedrock's own volume for the database"},
 	}
 	for _, c := range cases {
 		_, err := Parse([]byte(c.yaml))

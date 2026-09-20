@@ -8,44 +8,44 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/docker"
 )
 
 // The edge's container, image and the places it shares with this machine.
 const (
-	Container = "quark-edge"
+	Container = "bedrock-edge"
 	Image     = "caddy:2-alpine"
 	// ConfigDir holds what the edge shares with the machine.
-	ConfigDir = "/var/lib/quark/edge"
-	// RunDir holds the sockets: Caddy's admin API, and quark's hooks
-	// endpoint the edge proxies to. The edge sees it as /run/quark.
+	ConfigDir = "/var/lib/bedrock/edge"
+	// RunDir holds the sockets: Caddy's admin API, and bedrock's hooks
+	// endpoint the edge proxies to. The edge sees it as /run/bedrock.
 	RunDir = ConfigDir + "/run"
 	// BootDir holds the configuration the edge starts with; the edge sees
-	// it read-only as /etc/caddy/quark.
+	// it read-only as /etc/caddy/bedrock.
 	BootDir = ConfigDir + "/boot"
 	// AdminSocket is the admin API's socket, as this machine sees it.
 	AdminSocket = RunDir + "/caddy.sock"
-	// HooksSocket is where quark answers hooks, as this machine sees it.
+	// HooksSocket is where bedrock answers hooks, as this machine sees it.
 	HooksSocket = RunDir + "/hooks.sock"
 	// BootFile is the configuration the edge starts with.
 	BootFile = BootDir + "/caddy.json"
 
 	// Inside the edge.
-	runDirInside  = "/run/quark"
-	bootDirInside = "/etc/caddy/quark"
+	runDirInside  = "/run/bedrock"
+	bootDirInside = "/etc/caddy/bedrock"
 	adminListen   = "unix/" + runDirInside + "/caddy.sock"
-	// HooksDial is how the edge reaches quark's hooks endpoint.
+	// HooksDial is how the edge reaches bedrock's hooks endpoint.
 	HooksDial = "unix/" + runDirInside + "/hooks.sock"
 
 	// LayoutLabel marks how the edge's container is made. A container
 	// with another layout is replaced by Ensure.
-	LayoutLabel = "quark.edge.layout"
+	LayoutLabel = "bedrock.edge.layout"
 	Layout      = "2"
 
 	// AppNetworkPrefix starts the name of each app's edge network. The
 	// dots keep it from colliding with any app's own network, which is
-	// quark-<app> with hyphens only.
-	AppNetworkPrefix = "quark.edge."
+	// bedrock-<app> with hyphens only.
+	AppNetworkPrefix = "bedrock.edge."
 )
 
 // AppNetwork names the network an app's serving workloads share with the
@@ -71,7 +71,7 @@ func Leave(ctx context.Context, engine *docker.Engine, app string) error {
 // Ensure runs the edge on ports 80 and 443 and waits until its admin API
 // answers. It starts with boot, the whole configuration for the apps this
 // machine runs, when it has to make the container; an edge made by an
-// older quark is replaced that way, which takes a few seconds. Safe to
+// older bedrock is replaced that way, which takes a few seconds. Safe to
 // call any time.
 func Ensure(ctx context.Context, engine *docker.Engine, boot []byte, out io.Writer) error {
 	if err := engine.EnsureNetwork(ctx, docker.EdgeNetwork); err != nil {
@@ -88,7 +88,7 @@ func Ensure(ctx context.Context, engine *docker.Engine, boot []byte, out io.Writ
 	info, err := engine.Inspect(ctx, Container)
 	switch {
 	case err == nil && info.Labels[LayoutLabel] != Layout:
-		// Made by an older quark, whose admin API listened on the network.
+		// Made by an older bedrock, whose admin API listened on the network.
 		if err := WriteBoot(BootFile, boot); err != nil {
 			return err
 		}
@@ -120,7 +120,7 @@ func Ensure(ctx context.Context, engine *docker.Engine, boot []byte, out io.Writ
 		Networks: []string{docker.EdgeNetwork},
 		Publish:  []string{"80:80/tcp", "443:443/tcp", "443:443/udp"},
 		Mounts: []string{
-			"quark-edge-data:/data", "quark-edge-config:/config",
+			"bedrock-edge-data:/data", "bedrock-edge-config:/config",
 			RunDir + ":" + runDirInside, BootDir + ":" + bootDirInside + ":ro",
 		},
 		Restart: true,

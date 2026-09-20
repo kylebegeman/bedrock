@@ -1,6 +1,6 @@
-// Package integration keeps the credentials quark itself uses, such as
+// Package integration keeps the credentials bedrock itself uses, such as
 // the object storage backups go to and the mail server alerts go through,
-// in the machine's secrets store under quark's own name. Each integration
+// in the machine's secrets store under bedrock's own name. Each integration
 // is a named set of fields; values are typed in once and never shown.
 package integration
 
@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/manifest"
-	"github.com/kylebegeman/quark/internal/secrets"
+	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/secrets"
 )
 
 // App is the reserved app whose secrets hold the integrations.
@@ -38,7 +38,7 @@ type Field struct {
 	Choices []string
 }
 
-// Definition is one integration quark knows how to use.
+// Definition is one integration bedrock knows how to use.
 type Definition struct {
 	Name    string
 	Purpose string
@@ -116,7 +116,7 @@ var ErrNotSet = errors.New("not set up")
 
 var bucketPrefixPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,19}$`)
 
-// Set stores an integration's values in one new version of quark's
+// Set stores an integration's values in one new version of bedrock's
 // secrets and returns values it made up, such as a generated password,
 // so the caller can show them exactly once.
 func Set(store *secrets.Store, name string, values map[string]string) (version int, generated map[string]string, err error) {
@@ -240,7 +240,7 @@ func Get(store *secrets.Store, name string) (map[string]string, error) {
 		}
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("%s: %w; run quark integration set %s", name, ErrNotSet, name)
+		return nil, fmt.Errorf("%s: %w; run bedrock integration set %s", name, ErrNotSet, name)
 	}
 	return out, nil
 }

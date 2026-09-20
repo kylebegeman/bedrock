@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kylebegeman/quark/internal/docker"
-	"github.com/kylebegeman/quark/internal/kernel"
-	"github.com/kylebegeman/quark/internal/manifest"
-	"github.com/kylebegeman/quark/internal/secrets"
-	"github.com/kylebegeman/quark/internal/state"
+	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 // RunKind runs a one-off command in a workload's environment.
@@ -96,7 +96,7 @@ func (j *Jobs) RunWith(ctx context.Context, rev *state.Revision, workload string
 		}
 		spec.Env = append(spec.Env, name+"="+v)
 	}
-	spec.Name = fmt.Sprintf("quark-%s-%s-job-%d", rev.App, workload, time.Now().UnixMilli())
+	spec.Name = fmt.Sprintf("bedrock-%s-%s-job-%d", rev.App, workload, time.Now().UnixMilli())
 	spec.Restart = false
 	// A job never takes traffic: it stays on the app's own network, and
 	// answers to none of the workload's names, which belong to the
