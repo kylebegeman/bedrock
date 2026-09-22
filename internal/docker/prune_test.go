@@ -11,6 +11,8 @@ func TestParseReclaimed(t *testing.T) {
 		line string
 		want int64
 	}{
+		{"Total:\t0B", 0},
+		{"Total:\t49.25GB", 49_250_000_000},
 		{"Total reclaimed space: 0B", 0},
 		{"Total reclaimed space: 512KB", 512_000},
 		{"Total reclaimed space: 1.5MB", 1_500_000},

@@ -68,7 +68,7 @@ func PruneBuildCache(ctx context.Context, age time.Duration, keep int64) (int64,
 			return fmt.Errorf("builder prune: %v: %s", err, text)
 		}
 		for _, line := range strings.Split(text, "\n") {
-			if strings.HasPrefix(line, "Total reclaimed space") {
+			if strings.HasPrefix(line, "Total:") || strings.HasPrefix(line, "Total reclaimed space") {
 				reclaimed += parseReclaimed(line)
 			}
 		}
@@ -78,8 +78,12 @@ func PruneBuildCache(ctx context.Context, age time.Duration, keep int64) (int64,
 		return reclaimed, err
 	}
 	if keep > 0 {
-		if err := prune("--keep-storage", fmt.Sprintf("%d", keep)); err != nil {
-			return reclaimed, err
+		// Docker renamed --keep-storage to --reserved-space; a daemon old
+		// enough to reject the new name still answers to the old one.
+		if err := prune("--reserved-space", fmt.Sprintf("%d", keep)); err != nil {
+			if err2 := prune("--keep-storage", fmt.Sprintf("%d", keep)); err2 != nil {
+				return reclaimed, err
+			}
 		}
 	}
 	return reclaimed, nil
