@@ -952,6 +952,10 @@ func (m *Manifest) ManagedHosts() map[string]DNSMode {
 	return out
 }
 
+// ValidHost reports whether a string is a hostname a route can use, by the
+// same rule a manifest is validated against.
+func ValidHost(host string) bool { return hostPattern.MatchString(host) }
+
 // GuardedRoutes lists the host and path prefix of every route that asks
 // for a sign-in, in the order the workloads are named.
 func (m *Manifest) GuardedRoutes() []string {
