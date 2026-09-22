@@ -38,7 +38,10 @@ func (a *app) operate(ctx context.Context, kind string, input any, planOnly bool
 		r.Plan(view)
 		return nil
 	}
-	if !a.yes {
+	// Naming the exact plan is the approval: an agent reads a plan, shows it,
+	// and applies that one. Asking again for a yes would be asking about a
+	// plan the person has already seen and named.
+	if !a.yes && a.digest == "" {
 		if !a.tty {
 			r.Plan(view)
 			return errors.New("this would change the machine; add --yes to apply it without a prompt, or --plan to only look")
@@ -51,7 +54,7 @@ func (a *app) operate(ctx context.Context, kind string, input any, planOnly bool
 		}
 	}
 	var lastID string
-	receipt, err := runner.Run(ctx, kind, raw, func(ev kernel.Event) {
+	receipt, err := runner.RunExpecting(ctx, kind, raw, a.digest, func(ev kernel.Event) {
 		if ev.Operation != "" {
 			lastID = ev.Operation
 		}
@@ -72,10 +75,12 @@ func (a *app) operate(ctx context.Context, kind string, input any, planOnly bool
 	return nil
 }
 
-// mutatingFlags adds --plan and --yes to a command that changes the machine.
+// mutatingFlags adds --plan, --yes and --digest to a command that changes
+// the machine.
 func (a *app) mutatingFlags(cmd *cobra.Command, planOnly *bool) {
 	cmd.Flags().BoolVar(planOnly, "plan", false, "show the plan and change nothing")
 	cmd.Flags().BoolVar(&a.yes, "yes", false, "apply without asking")
+	cmd.Flags().StringVar(&a.digest, "digest", "", "apply only if the plan is still the one with this digest; implies --yes")
 }
 
 func newHistory(a *app) *cobra.Command {

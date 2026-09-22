@@ -94,8 +94,13 @@ func (c *Client) Plan(ctx context.Context, kind string, input json.RawMessage) (
 // When the daemon disappears mid-way the error is ErrDisconnected and the
 // operation's ID is in the events already seen.
 func (c *Client) Run(ctx context.Context, kind string, input json.RawMessage, emit func(kernel.Event)) (*kernel.Receipt, error) {
+	return c.RunExpecting(ctx, kind, input, "", emit)
+}
+
+// RunExpecting implements Runner.
+func (c *Client) RunExpecting(ctx context.Context, kind string, input json.RawMessage, expect string, emit func(kernel.Event)) (*kernel.Receipt, error) {
 	var receipt *kernel.Receipt
-	err := c.stream(ctx, RunRequest{Kind: kind, Input: input}, func(ev kernel.Event) {
+	err := c.stream(ctx, RunRequest{Kind: kind, Input: input, Expect: expect}, func(ev kernel.Event) {
 		if ev.Type == kernel.EventFinished {
 			receipt = ev.Receipt
 		}

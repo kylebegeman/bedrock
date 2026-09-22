@@ -43,6 +43,7 @@ type Runner interface {
 	Version(ctx context.Context) (version.Info, error)
 	Plan(ctx context.Context, kind string, input json.RawMessage) (*kernel.PlanView, error)
 	Run(ctx context.Context, kind string, input json.RawMessage, emit func(kernel.Event)) (*kernel.Receipt, error)
+	RunExpecting(ctx context.Context, kind string, input json.RawMessage, expect string, emit func(kernel.Event)) (*kernel.Receipt, error)
 	List(ctx context.Context, limit int) ([]Summary, error)
 	Receipt(ctx context.Context, id string) (*kernel.Receipt, error)
 	Close() error
@@ -53,6 +54,9 @@ type RunRequest struct {
 	Kind     string          `json:"kind"`
 	Input    json.RawMessage `json:"input"`
 	PlanOnly bool            `json:"plan_only,omitempty"`
+	// Expect is the digest of the plan the caller means to apply. When it
+	// is set and the plan built now differs, nothing runs.
+	Expect string `json:"expect,omitempty"`
 }
 
 // Server serves the API for one engine. Operations run one at a time: the
@@ -146,7 +150,7 @@ func (s *Server) runOperation(w http.ResponseWriter, r *http.Request) {
 	// and finishes on the daemon's own clock.
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.Engine.Run(context.WithoutCancel(r.Context()), req.Kind, req.Input, emit); err != nil {
+	if _, err := s.Engine.RunExpecting(context.WithoutCancel(r.Context()), req.Kind, req.Input, req.Expect, emit); err != nil {
 		emit(kernel.Event{Type: kernel.EventError, At: time.Now().UTC(), Message: err.Error()})
 	}
 }
@@ -215,6 +219,11 @@ func (l *Local) Plan(ctx context.Context, kind string, input json.RawMessage) (*
 // Run implements Runner.
 func (l *Local) Run(ctx context.Context, kind string, input json.RawMessage, emit func(kernel.Event)) (*kernel.Receipt, error) {
 	return l.Engine.Run(ctx, kind, input, emit)
+}
+
+// RunExpecting implements Runner.
+func (l *Local) RunExpecting(ctx context.Context, kind string, input json.RawMessage, expect string, emit func(kernel.Event)) (*kernel.Receipt, error) {
+	return l.Engine.RunExpecting(ctx, kind, input, expect, emit)
 }
 
 // List implements Runner.

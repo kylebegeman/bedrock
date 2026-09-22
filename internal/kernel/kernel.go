@@ -229,9 +229,28 @@ func (e *Engine) plan(ctx context.Context, kind string, input json.RawMessage) (
 // goes, and returns the receipt. The receipt's Status says how it ended;
 // the error is set only when the operation didn't reach a final status.
 func (e *Engine) Run(ctx context.Context, kind string, input json.RawMessage, emit func(Event)) (*Receipt, error) {
+	return e.RunExpecting(ctx, kind, input, "", emit)
+}
+
+// ErrPlanChanged is returned when a caller named the plan it meant to apply
+// and the plan built now is a different one.
+var ErrPlanChanged = errors.New("the plan changed since it was read")
+
+// RunExpecting is Run, refusing unless the plan it builds has the digest the
+// caller names. An empty digest applies whatever the plan turns out to be.
+//
+// This is what makes it safe to read a plan, show it to someone, and apply
+// it as a separate act: between those two moments the manifest, the machine
+// or another operation can move, and the plan that would run is then not the
+// plan that was approved. The digest is checked here rather than in the
+// caller so that it holds for the daemon's API too, not only the CLI.
+func (e *Engine) RunExpecting(ctx context.Context, kind string, input json.RawMessage, expect string, emit func(Event)) (*Receipt, error) {
 	plan, view, err := e.plan(ctx, kind, input)
 	if err != nil {
 		return nil, err
+	}
+	if expect != "" && view.Digest != expect {
+		return nil, fmt.Errorf("%w: it is now %s, not %s; read it again", ErrPlanChanged, view.Digest, expect)
 	}
 	planJSON, err := json.Marshal(view)
 	if err != nil {

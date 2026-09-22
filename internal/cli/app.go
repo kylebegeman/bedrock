@@ -86,6 +86,7 @@ func newRun(a *app) *cobra.Command {
 		secretNames []string
 		stdin       bool
 	)
+	var planOnly bool
 	cmd := &cobra.Command{
 		Use:   "run <app> [workload] -- <command...>",
 		Short: "Run a one-off command with a workload's image, environment, secrets and volumes.",
@@ -104,14 +105,21 @@ command's own exit code.`,
 			}
 			in := apps.RunInput{App: args[0], Workload: optional(args[:dash], 1), Command: args[dash:], Secrets: secretNames}
 			if stdin {
+				if planOnly {
+					return fmt.Errorf("--stdin runs the command here; there is no plan to show")
+				}
 				return a.runHere(cmd.Context(), in)
 			}
+			// The command to run is spelled out in the arguments, so the
+			// arguments are the approval and there is nothing a digest could
+			// pin that they do not. --plan still shows it first.
 			a.yes = true
-			return a.operate(cmd.Context(), apps.RunKind, in, false)
+			return a.operate(cmd.Context(), apps.RunKind, in, planOnly)
 		},
 	}
 	cmd.Flags().StringArrayVar(&secretNames, "secret", nil, "give the command this secret of the app too (repeatable)")
 	cmd.Flags().BoolVar(&stdin, "stdin", false, "pass standard input to the command; it runs in this process")
+	cmd.Flags().BoolVar(&planOnly, "plan", false, "show what would run and change nothing")
 	return cmd
 }
 

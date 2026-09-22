@@ -48,6 +48,7 @@ type app struct {
 	json           bool
 	tty            bool
 	yes            bool
+	digest         string
 }
 
 func (a *app) renderer() *ui.Renderer { return ui.New(a.stdout, a.tty, a.json) }
