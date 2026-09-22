@@ -1395,7 +1395,10 @@ func loomGuard(sec *secrets.Store) (*edge.Guard, error) {
 	if err != nil {
 		return nil, fmt.Errorf("the loom integration's verify_url: %w", err)
 	}
-	g := &edge.Guard{Dial: v.Dial, Path: v.Path, TLS: v.TLS}
+	g := &edge.Guard{
+		Dial: v.Dial, Path: v.Path, TLS: v.TLS,
+		HeaderName: integration.LoomVerifiedHeader, HeaderValue: integration.LoomVerifiedValue,
+	}
 	if v.TLS {
 		g.ServerName = v.Host
 	}

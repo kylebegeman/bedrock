@@ -22,11 +22,16 @@ const maxAppName = 40
 // deployed, backed up against and removed by the same code as anything
 // else. What makes it a preview is what this function changes.
 //
-// Every route is put behind a sign-in. A preview's database is seeded from
-// the parent's latest backup, which means real data sitting at a hostname
-// anyone can work out from a branch name. Guarding it is not a precaution
-// here, it is the only thing that makes seeding from production defensible,
-// so it is not optional and there is no flag to turn it off.
+// Every route is put behind a sign-in, and there is no flag to turn it off.
+// A preview is unreleased work at a hostname anyone can work out from a
+// branch name, it runs with the parent's hand-set secrets so it can start
+// at all, and it can be seeded from the parent's data. Any one of those is
+// reason enough; together they make an open preview indefensible.
+//
+// Its database starts empty and is built by whatever the app runs to
+// migrate itself, rather than copied from production by default. A preview
+// is for seeing a branch work, and most branches need a schema rather than
+// somebody's real rows.
 //
 // Checks are dropped. A deploy runs them twice, once against the containers
 // and once through the edge, with the same expected status both times. The

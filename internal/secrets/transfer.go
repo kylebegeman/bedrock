@@ -228,3 +228,47 @@ func (s *Store) ImportBundle(app string, input io.Reader) ([]string, error) {
 	}
 	return stored, nil
 }
+
+// CopyAll copies every secret an app holds to another app on this machine,
+// and returns the names it wrote.
+//
+// This is for a preview, which runs the parent app's code and so needs the
+// hand-set values that code expects. Anything the target already holds with
+// the same value is left alone, so running it again writes no new version.
+//
+// It stays on one machine and never touches bedrock's own integration
+// credentials, which belong to the machine rather than to any app.
+func (s *Store) CopyAll(from, to string) ([]string, error) {
+	if !transferApp.MatchString(from) || !transferApp.MatchString(to) || from == "bedrock" || to == "bedrock" {
+		return nil, errors.New("integration credentials cannot be copied")
+	}
+	if from == to {
+		return nil, errors.New("an app already has its own secrets")
+	}
+	values, _, err := s.LoadCurrent(from)
+	if err != nil {
+		return nil, err
+	}
+	current, _, err := s.LoadCurrent(to)
+	if err != nil {
+		return nil, err
+	}
+	changes := map[string]*string{}
+	names := make([]string, 0, len(values))
+	for name, value := range values {
+		if !ValidName(name) || current[name] == value {
+			continue
+		}
+		v := value
+		changes[name] = &v
+		names = append(names, name)
+	}
+	if len(changes) == 0 {
+		return nil, nil
+	}
+	sort.Strings(names)
+	if _, err := s.SetAll(to, changes); err != nil {
+		return nil, err
+	}
+	return names, nil
+}

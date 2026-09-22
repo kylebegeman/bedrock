@@ -4,6 +4,7 @@ package edge
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -40,6 +41,18 @@ type Guard struct {
 	// ServerName is the name to present and verify when TLS is on, for an
 	// endpoint dialled by address rather than by name.
 	ServerName string
+	// HeaderName and HeaderValue are a header the answer must carry before
+	// a 2xx counts as a yes.
+	//
+	// A status code on its own is not enough. An application that serves a
+	// single-page app answers 200 with its index for any path it does not
+	// recognise, so a guard pointed at a host that has no verify endpoint
+	// at all, or one that has been rolled back to before it existed, would
+	// read that 200 as permission and let everybody through. The header is
+	// something only the endpoint itself sets, so a fallback cannot say
+	// yes by accident.
+	HeaderName  string
+	HeaderValue string
 }
 
 // Config is Caddy's JSON, built from routes. Every host gets automatic
@@ -64,6 +77,14 @@ func Config(routes []Route) ([]byte, error) {
 		for _, r := range rs {
 			handle := []map[string]any{{"handler": "reverse_proxy", "upstreams": []map[string]any{{"dial": r.Dial}}}}
 			if r.Guard != nil {
+				// A guard that decides on the status alone can be talked
+				// into a yes by any server that answers 200 for a path it
+				// does not know, which is what a single-page app does. There
+				// is no configuration in which that is wanted, so it is not
+				// one that can be built.
+				if r.Guard.HeaderName == "" {
+					return nil, fmt.Errorf("the guard on %s%s names no header to require; a status alone can be answered by anything", r.Host, r.Path)
+				}
 				handle = []map[string]any{guardHandler(r.Guard, handle)}
 			}
 			if r.Path == "/" {
@@ -131,6 +152,10 @@ func Initial() []byte {
 // sign-in page reaches the person rather than the app.
 func guardHandler(g *Guard, allowed []map[string]any) map[string]any {
 	upstream := map[string]any{"dial": g.Dial}
+	allow := map[string]any{"status_code": []int{2}}
+	if g.HeaderName != "" {
+		allow["headers"] = map[string]any{g.HeaderName: []string{g.HeaderValue}}
+	}
 	proxy := map[string]any{
 		"handler":   "reverse_proxy",
 		"upstreams": []map[string]any{upstream},
@@ -144,7 +169,7 @@ func guardHandler(g *Guard, allowed []map[string]any) map[string]any {
 			"X-Forwarded-Host":   []string{"{http.request.host}"},
 		}}},
 		"handle_response": []map[string]any{{
-			"match":  map[string]any{"status_code": []int{2}},
+			"match":  allow,
 			"routes": []map[string]any{{"handle": allowed}},
 		}},
 	}

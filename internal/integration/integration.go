@@ -356,6 +356,20 @@ type Storage struct {
 	Password     string
 }
 
+// LoomVerifiedHeader and LoomVerifiedValue are what a Core's verify
+// endpoint says about itself, and what the edge insists on seeing before it
+// treats an answer as a yes.
+//
+// The Core serves a single-page app, so an unknown path answers 200 with
+// that app's HTML rather than a 404. Without this, a guard pointed at a
+// Core too old to have the endpoint would read that 200 as permission and
+// let everyone through: open, and looking guarded. With it, such a Core
+// denies everything instead, which is visible the first time anyone looks.
+const (
+	LoomVerifiedHeader = "X-Loom-Verified"
+	LoomVerifiedValue  = "1"
+)
+
 // Loom is where the edge asks whether a request is signed in.
 type Loom struct {
 	// VerifyURL answers 2xx for a signed-in request and anything else for
