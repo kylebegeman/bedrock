@@ -355,6 +355,19 @@ cannot be exported.
 
 Run `bedrock <command> --help` for any of them.
 
+Everything that changes the machine takes `--plan` to see it first and
+`--digest` to apply only what was seen. Between reading a plan and applying
+it the manifest or the machine can move, so the digest is how an agent, or a
+person, applies the plan they actually approved:
+
+```sh
+bedrock deploy ./app --plan --json | jq -r .digest
+bedrock deploy ./app --digest <hex>
+```
+
+A plan that has changed runs nothing and records nothing. `--digest` implies
+`--yes`, because naming the plan is the approval.
+
 ## Build
 
 ```sh
@@ -390,6 +403,16 @@ tag, and stays there.
 
 Bedrock stays on 0.7.x. There is no 0.8 or 0.9: a finished feature is a patch
 release, cut when that feature is done rather than when a group of them is.
+
+A machine already running bedrock upgrades itself, checking the download
+against the checksums published beside it:
+
+```sh
+bedrock upgrade --version 0.7.5
+```
+
+`scripts/install-release.sh 0.7.5 <host>...` is the bootstrap, for a machine
+that has no bedrock on it yet.
 
 | Document | What it covers |
 |---|---|
