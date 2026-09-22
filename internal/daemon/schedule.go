@@ -18,6 +18,11 @@ import (
 // MachineBackupSchedule is when the machine's own state is backed up.
 const MachineBackupSchedule = "30 3 * * *"
 
+// MachineGCSchedule is when the machine reclaims what it no longer needs.
+// It runs after the machine backup so a night's work is captured before
+// anything is thrown away.
+const MachineGCSchedule = "0 4 * * *"
+
 // Scheduler starts backups and drills when they are due, one at a time,
 // as operations with receipts like any other.
 type Scheduler struct {
@@ -55,6 +60,14 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) {
 		s.Log("schedule: %v", err)
 		return
 	}
+	// Reclaiming disk has nothing to do with backups, and the gate below
+	// returns when storage is unset. Build cache in particular grows with
+	// every deploy and is bounded by nothing else, so a machine that never
+	// ran gc by hand would fill its disk.
+	if s.dueOp(ctx, app.GCKind, MachineGCSchedule, s.Started, now) {
+		s.run(ctx, app.GCKind, app.GCInput{}, "garbage collection")
+	}
+
 	if _, err := integration.LoadStorage(s.Secrets); err != nil {
 		// Nothing can be backed up until storage is set; say so once an
 		// hour, only when there is something that wants backing up.
@@ -81,6 +94,22 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) {
 	if s.due(ctx, manifest.ReservedApp, state.BackupRunBackup, MachineBackupSchedule, s.Started, now) {
 		s.run(ctx, app.BackupKind, app.BackupInput{App: manifest.ReservedApp}, "backup of the machine")
 	}
+}
+
+// dueOp is due for work that keeps no record of its own: the last
+// operation of the kind stands in for a run log.
+func (s *Scheduler) dueOp(ctx context.Context, kind, schedule string, since, now time.Time) bool {
+	sched, err := manifest.ParseSchedule(schedule)
+	if err != nil {
+		return false
+	}
+	if last, err := s.Store.LastOfKind(ctx, kind); err == nil && last != nil && last.CreatedAt.After(since) {
+		since = last.CreatedAt
+	}
+	if since.IsZero() {
+		return false
+	}
+	return !sched.Next(since).After(now)
 }
 
 // due says whether a schedule has come round since the last run of a

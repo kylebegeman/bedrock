@@ -344,6 +344,21 @@ func (s *Store) List(ctx context.Context, limit int) ([]Operation, error) {
 	return ops, rows.Err()
 }
 
+// LastOfKind returns the most recent operation of a kind, or nil when the
+// machine has never run one. It is how a schedule knows whether work that
+// keeps no records of its own is due.
+func (s *Store) LastOfKind(ctx context.Context, kind string) (*Operation, error) {
+	rows, err := s.db.QueryContext(ctx, selectOperation+` WHERE kind = ? ORDER BY created_at DESC, id DESC LIMIT 1`, kind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, rows.Err()
+	}
+	return scanOperation(rows)
+}
+
 // Orphaned returns operations that were applying under a lease that has
 // expired: the owner died or lost the lease. Oldest first.
 func (s *Store) Orphaned(ctx context.Context, now time.Time) ([]Operation, error) {

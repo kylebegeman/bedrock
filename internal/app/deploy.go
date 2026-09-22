@@ -787,7 +787,16 @@ func containerSpec(m *manifest.Manifest, name string, w manifest.Workload, revis
 	return spec, nil
 }
 
+// ParseSize reads a size written the way a manifest writes one: 512k, 256m,
+// 8g. Exported so the CLI parses sizes exactly as the manifest does.
+func ParseSize(s string) (int64, error) {
+	return parseSize(s)
+}
+
 func parseSize(s string) (int64, error) {
+	if s == "" {
+		return 0, fmt.Errorf("size %q", s)
+	}
 	n, err := strconv.ParseInt(s[:len(s)-1], 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("size %q", s)
