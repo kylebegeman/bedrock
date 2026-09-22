@@ -132,7 +132,9 @@
           <tr><td class="k">Housekeeping</td><td>Done</td><td>Nightly at 04:00. Old revisions, unused images, dangling volumes, and build cache trimmed by age and then to an 8&nbsp;GiB ceiling.</td></tr>
           <tr><td class="k">Machine setup</td><td>Done</td><td>One command on a fresh Ubuntu 22.04 or 24.04, or Debian 12 or 13, on x86_64 or aarch64. Docker, firewall, key-only SSH, updates, swap and a local registry.</td></tr>
           <tr><td class="k">Getting Bedrock onto a machine</td><td>Done</td><td><code>bedrock upgrade --version</code> as of 0.7.4: the machine fetches its own build and checksums it. <code>scripts/install-release.sh</code> remains the bootstrap for a machine with no bedrock yet.</td></tr>
-          <tr><td class="k">Starting a new app</td><td>Done</td><td><code>bedrock init</code> as of 0.7.3. Writes a commented manifest for a web, static, worker or cron app, with a database on request.</td></tr>
+          <tr><td class="k">Starting a new app</td><td>Done</td><td><code>bedrock init</code> as of 0.7.3 writes a commented manifest; <code>bedrock launch &lt;repo&gt;</code> as of 0.7.6 goes from a repository to running in one command.</td></tr>
+          <tr><td class="k">Moving an app to its own machine</td><td>Partial</td><td><code>bedrock move</code> as of 0.7.6: two commands, one per machine, over the shared bucket. Needs both machines reading the same storage, which these two do not.</td></tr>
+          <tr><td class="k">Putting a sign-in on a route</td><td>Done</td><td><code>auth: loom</code> as of 0.7.6, through the edge, with no auth code in the app.</td></tr>
           <tr><td class="k">Setting up machine number two</td><td>Partial</td><td>Every integration is sealed per machine and typed in again on each new one. Nothing carries over.</td></tr>
           <tr><td class="k">The test bed</td><td>Broken</td><td>The lane has no machine: its target became production. Proofs cannot run until it points somewhere disposable.</td></tr>
         </tbody>

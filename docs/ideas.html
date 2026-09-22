@@ -64,6 +64,7 @@
   .chip.impact-top { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--accent); }
   .chip.cx-massive { background: var(--amber-soft); border-color: var(--amber-soft); color: var(--amber); }
   .chip.tabled { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); }
+  .chip.shipped { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
   dl { margin: 0; display: grid; grid-template-columns: 7.5em 1fr; gap: 6px 14px; font-size: 0.95rem; }
   dt { font: 500 0.72rem/1.9 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
   dd { margin: 0; max-width: 62ch; }
@@ -489,24 +490,26 @@
       </article>
 
       <article class="item" id="i30">
-        <div class="item-head"><div class="num">30</div><div><h3>Launchpad: <code>bedrock launch</code> and previews</h3><div class="chips"><span class="chip">Large</span><span class="chip impact-top">Impact: Transformational</span></div></div></div>
+        <div class="item-head"><div class="num">30</div><div><h3>Launchpad: <code>bedrock launch</code> and previews</h3><div class="chips"><span class="chip shipped">Shipped</span><span class="chip">Large</span><span class="chip impact-top">Impact: Transformational</span></div></div></div>
         <dl>
           <dt>Summary</dt><dd><code>bedrock launch &lt;repo&gt;</code> takes a product from repository to live: template detection, manifest, domain, DNS, certificate, database, backups, checks, first deploy. Every pushed branch gets a preview at <code>&lt;branch&gt;.&lt;app&gt;.preview.&lt;domain&gt;</code> with its own database copy, removed on merge or inactivity.</dd>
           <dt>How it works</dt><dd>Templates for Next.js, static, Go and Node services. Previews are ephemeral environments (17) seeded from the latest backup (24), with DNS (11) and certificates (7) handled. A size cap and an idle timeout keep them cheap.</dd>
           <dt>Experience</dt><dd>An idea on Monday is a URL on Monday. The business machine's whole purpose in two commands.</dd>
           <dt>Why</dt><dd>The launchpad is why the OVH box exists.</dd>
           <dt>Unlocks</dt><dd>Traffic signals (19) and graduate (31) complete the lifecycle.</dd>
+                  <dt>Shipped</dt><dd>Partly, in 0.7.6. <code>bedrock launch &lt;repo&gt;</code> takes a repository from nothing to running: fetch it, work out what it is, write the manifest it is missing, deploy it. What it will infer is deliberately narrow, because a wrong guess becomes a manifest somebody has to debug. Previews per branch are not here; they need ephemeral environments (17), which was dropped.</dd>
         </dl>
       </article>
 
       <article class="item" id="i31">
-        <div class="item-head"><div class="num">31</div><div><h3><code>bedrock graduate</code>: move an app to its own machine</h3><div class="chips"><span class="chip cx-massive">Massive</span><span class="chip impact-high">Impact: High</span></div></div></div>
+        <div class="item-head"><div class="num">31</div><div><h3><code>bedrock graduate</code>: move an app to its own machine</h3><div class="chips"><span class="chip shipped">Shipped</span><span class="chip cx-massive">Massive</span><span class="chip impact-high">Impact: High</span></div></div></div>
         <dl>
           <dt>Summary</dt><dd>Move an app and its data to another machine with a rehearsal, a short write freeze, a DNS cutover and a rollback window. <code>bedrock move</code> does the same between your two boxes.</dd>
           <dt>How it works</dt><dd>Provision the target (21), restore the latest backup there (12), rehearse verification, freeze writes, sync the delta, start, verify, switch DNS (11), keep the source for a window, then retire it.</dd>
           <dt>Experience</dt><dd>A product with traction leaves the launchpad in an afternoon, and the record shows every step.</dd>
           <dt>Why</dt><dd>Ophelia specified this as major features 1 to 4 and never built any of it.</dd>
           <dt>Unlocks</dt><dd>The model you described: launch, prove, graduate.</dd>
+                  <dt>Shipped</dt><dd>Partly, in 0.7.6, as <code>bedrock move</code>. Two commands, one per machine, with the backup bucket as the channel and a handoff that carries no secrets. <code>bedrock move secrets</code> seals the app's secrets to the target's key so its restored database opens there. Both machines must read the same bucket under the same password; a target that cannot is refused rather than silently finding nothing. One command driving both machines needs a channel between them, which is the enrollment link tabled with 32.</dd>
         </dl>
       </article>
 
@@ -545,13 +548,14 @@
       </article>
 
       <article class="item" id="i35">
-        <div class="item-head"><div class="num">35</div><div><h3>Loom sign-in for any route</h3><div class="chips"><span class="chip">Medium</span><span class="chip impact-high">Impact: High</span></div></div></div>
+        <div class="item-head"><div class="num">35</div><div><h3>Loom sign-in for any route</h3><div class="chips"><span class="chip shipped">Shipped</span><span class="chip">Medium</span><span class="chip impact-high">Impact: High</span></div></div></div>
         <dl>
           <dt>Summary</dt><dd><code>auth: loom</code> on a route means only signed-in Loom identities reach it, with no per-app auth code.</dd>
           <dt>How it works</dt><dd>Caddy forward-auth to the Core's session endpoint, allowing the owner or a named group. Works for admin pages, previews, personal tools and demos.</dd>
           <dt>Experience</dt><dd>A weekend project gets a login by adding one line.</dd>
           <dt>Why</dt><dd>Cloudflare Access goes away with direct TLS, and previews need protecting.</dd>
           <dt>Unlocks</dt><dd>Personal projects on the personal box are safe by default.</dd>
+                  <dt>Shipped</dt><dd>In 0.7.6. A route marked <code>auth: loom</code> is put behind the Core's sign-in by the edge, through Caddy forward auth against a new <code>GET /api/cloud/auth/verify</code> in the Core. A route that asks for a sign-in and cannot get one is refused while planning, and is never served open.</dd>
         </dl>
       </article>
 

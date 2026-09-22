@@ -348,7 +348,7 @@ cannot be exported.
 | | |
 |---|---|
 | **Machine** | `host` · `daemon` · `doctor` · `upgrade` · `status` · `alerts` · `watch` |
-| **Apps** | `init` · `deploy` · `rollback` · `remove` · `ls` · `ps` · `logs` · `history` · `gc` |
+| **Apps** | `init` · `launch` · `deploy` · `rollback` · `remove` · `move` · `ls` · `ps` · `logs` · `history` · `gc` |
 | **Data** | `backup` · `backups` · `restore` · `drill` · `psql` |
 | **Access** | `secret` · `integration` · `git` · `exec` · `run` · `jobs` |
 | **Network** | `dns` · `exposure` |
