@@ -94,6 +94,19 @@ func (d Deploy) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 			return nil, errNoCloudflare(m.App, err)
 		}
 	}
+	// A route that asks for a sign-in and cannot get one would be served
+	// open. Refuse here rather than part way through, once containers are
+	// already running and the edge is about to be pointed at them.
+	if guarded := m.GuardedRoutes(); len(guarded) > 0 {
+		g, err := loomGuard(d.Secrets)
+		if err != nil {
+			return nil, err
+		}
+		if g == nil {
+			return nil, fmt.Errorf("%s puts a sign-in on %s, and this machine has no loom integration to ask: bedrock integration set loom",
+				m.App, strings.Join(guarded, ", "))
+		}
+	}
 	commit := in.Commit
 	if commit == "" {
 		commit = sourceCommit(ctx, in.Source)
@@ -213,7 +226,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 			if err != nil {
 				return err
 			}
-			boot, err := EdgeConfig(ctx, store)
+			boot, err := EdgeConfig(ctx, store, d.Secrets)
 			if err != nil {
 				return err
 			}
@@ -472,7 +485,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 			if err := store.Activate(ctx, m.App, revision, time.Now().UTC()); err != nil {
 				return err
 			}
-			cfg, err := edgeConfig(ctx, store)
+			cfg, err := edgeConfig(ctx, store, d.Secrets)
 			if err != nil {
 				return err
 			}
@@ -508,7 +521,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 				for _, c := range m.Checks {
 					if err := runCheck(ctx, c); err != nil {
 						cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-						revert, revertErr := revertSwitch(cleanup, store, connect, m.App, revision, containers)
+						revert, revertErr := revertSwitch(cleanup, store, d.Secrets, connect, m.App, revision, containers)
 						cancel()
 						if revertErr != nil {
 							return fmt.Errorf("%w; and putting the previous revision back failed too: %v", err, revertErr)
@@ -569,7 +582,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 					}
 					return err
 				}
-				message, recoveryErr := revertSwitch(cleanup, store, connect, m.App, revision, containers)
+				message, recoveryErr := revertSwitch(cleanup, store, d.Secrets, connect, m.App, revision, containers)
 				if recoveryErr != nil {
 					return fmt.Errorf("%w; recovery failed: %v", err, recoveryErr)
 				}
@@ -922,12 +935,12 @@ func servePort(w manifest.Workload, r *manifest.Route) int {
 // ReloadEdge gives the edge the configuration the active revisions call
 // for, when it is up. The daemon does this at start, so a bedrock that
 // changed how it configures the edge takes effect without a deploy.
-func ReloadEdge(ctx context.Context, store *state.Store) error {
+func ReloadEdge(ctx context.Context, store *state.Store, sec *secrets.Store) error {
 	admin := edge.NewAdmin()
 	if !admin.Answers(ctx) {
 		return nil
 	}
-	cfg, err := EdgeConfig(ctx, store)
+	cfg, err := EdgeConfig(ctx, store, sec)
 	if err != nil {
 		return err
 	}
@@ -937,7 +950,7 @@ func ReloadEdge(ctx context.Context, store *state.Store) error {
 // UpgradeEdge replaces an edge an older bedrock made, keeping its routes,
 // and then gives it the current configuration. A machine without an edge
 // yet is left for host setup.
-func UpgradeEdge(ctx context.Context, store *state.Store, out io.Writer) error {
+func UpgradeEdge(ctx context.Context, store *state.Store, sec *secrets.Store, out io.Writer) error {
 	e, err := docker.Connect(ctx)
 	if err != nil {
 		return err
@@ -948,7 +961,7 @@ func UpgradeEdge(ctx context.Context, store *state.Store, out io.Writer) error {
 		return nil
 	}
 	if info.Labels[edge.LayoutLabel] != edge.Layout {
-		boot, err := EdgeConfig(ctx, store)
+		boot, err := EdgeConfig(ctx, store, sec)
 		if err != nil {
 			return err
 		}
@@ -956,7 +969,7 @@ func UpgradeEdge(ctx context.Context, store *state.Store, out io.Writer) error {
 			return err
 		}
 	}
-	return ReloadEdge(ctx, store)
+	return ReloadEdge(ctx, store, sec)
 }
 
 // servesAny reports whether any of an app's workloads takes traffic from
@@ -983,8 +996,8 @@ func isolationWord(w manifest.Workload) string {
 }
 
 // EdgeConfig builds the edge's whole configuration from every active revision.
-func EdgeConfig(ctx context.Context, store *state.Store) ([]byte, error) {
-	return edgeConfig(ctx, store)
+func EdgeConfig(ctx context.Context, store *state.Store, sec *secrets.Store) ([]byte, error) {
+	return edgeConfig(ctx, store, sec)
 }
 
 // HookRoute is the path webhooks arrive on, as the edge routes it.
@@ -1027,7 +1040,7 @@ func showLastLines(ctx context.Context, e *docker.Engine, container, name string
 }
 
 // edgeConfig builds the edge's whole configuration from every active revision.
-func edgeConfig(ctx context.Context, store *state.Store) ([]byte, error) {
+func edgeConfig(ctx context.Context, store *state.Store, sec *secrets.Store) ([]byte, error) {
 	active, err := store.ActiveRevisions(ctx)
 	if err != nil {
 		return nil, err
@@ -1039,6 +1052,10 @@ func edgeConfig(ctx context.Context, store *state.Store) ([]byte, error) {
 	hooked := map[string]bool{}
 	for _, h := range hooks {
 		hooked[h.App] = true
+	}
+	guard, err := loomGuard(sec)
+	if err != nil {
+		return nil, err
 	}
 	var routes []edge.Route
 	for _, rev := range active {
@@ -1054,7 +1071,17 @@ func edgeConfig(ctx context.Context, store *state.Store) ([]byte, error) {
 		for _, name := range m.WorkloadNames() {
 			w := m.Workloads[name]
 			for _, r := range w.Routes {
-				routes = append(routes, edge.Route{Host: r.Host, Path: r.NormalizedPath(), Dial: fmt.Sprintf("%s:%d", rev.Containers[name], servePort(w, &r))})
+				route := edge.Route{Host: r.Host, Path: r.NormalizedPath(), Dial: fmt.Sprintf("%s:%d", rev.Containers[name], servePort(w, &r))}
+				if r.Auth.Guarded() {
+					// Serving a route that asked for a sign-in without one
+					// would put the app on the open internet, so the whole
+					// configuration is refused instead.
+					if guard == nil {
+						return nil, fmt.Errorf("%s routes %s with auth: %s, and this machine has no loom integration: bedrock integration set loom", rev.App, r.Host, r.Auth)
+					}
+					route.Guard = guard
+				}
+				routes = append(routes, route)
 			}
 		}
 	}
@@ -1151,7 +1178,7 @@ func containerIP(info *docker.Info) string {
 // revertSwitch puts the previous revision back on the edge after a live
 // verification failed, or routes nothing to the app when there is none,
 // and takes the failed revision's containers down.
-func revertSwitch(ctx context.Context, store *state.Store, connect func(context.Context) (*docker.Engine, error), app, failed string, containers map[string]string) (string, error) {
+func revertSwitch(ctx context.Context, store *state.Store, sec *secrets.Store, connect func(context.Context) (*docker.Engine, error), app, failed string, containers map[string]string) (string, error) {
 	prev, err := store.RevisionWithStatus(ctx, app, state.RevisionPrevious)
 	if err != nil {
 		return "", err
@@ -1164,7 +1191,7 @@ func revertSwitch(ctx context.Context, store *state.Store, connect func(context.
 	if err := store.SetRevisionStatus(ctx, app, failed, state.RevisionFailed); err != nil {
 		return "", err
 	}
-	cfg, err := edgeConfig(ctx, store)
+	cfg, err := edgeConfig(ctx, store, sec)
 	if err != nil {
 		return "", err
 	}
@@ -1351,4 +1378,26 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// loomGuard turns the loom integration into the endpoint the edge asks. A
+// machine with no such integration gets nil, which is not an error: most
+// machines run no Core and have no guarded routes.
+func loomGuard(sec *secrets.Store) (*edge.Guard, error) {
+	if sec == nil {
+		return nil, nil
+	}
+	l, err := integration.LoadLoom(sec)
+	if err != nil || l == nil {
+		return nil, nil
+	}
+	v, err := integration.ParseVerifyURL(l.VerifyURL)
+	if err != nil {
+		return nil, fmt.Errorf("the loom integration's verify_url: %w", err)
+	}
+	g := &edge.Guard{Dial: v.Dial, Path: v.Path, TLS: v.TLS}
+	if v.TLS {
+		g.ServerName = v.Host
+	}
+	return g, nil
 }

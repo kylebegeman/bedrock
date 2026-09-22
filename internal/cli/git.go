@@ -176,7 +176,7 @@ func newGit(a *app) *cobra.Command {
 				} else if err != nil {
 					return err
 				}
-				if err := apps.ReloadEdge(ctx, store); err != nil {
+				if err := apps.ReloadEdge(ctx, store, a.secretsStore()); err != nil {
 					return err
 				}
 				fmt.Fprintf(a.stdout, "%s no longer deploys on webhooks; remove the webhook on GitHub too\n", appName)
@@ -207,7 +207,7 @@ func newGit(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := apps.ReloadEdge(ctx, store); err != nil {
+			if err := apps.ReloadEdge(ctx, store, a.secretsStore()); err != nil {
 				return err
 			}
 			fmt.Fprintf(a.stdout, "On GitHub, in the repository's Settings, add a webhook:\n  Payload URL   %s\n  Content type  application/json\n  Events        just the push event\n", w.URL)

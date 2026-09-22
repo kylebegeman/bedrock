@@ -81,7 +81,7 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 						}
 					}
 				}
-				cfg, err := edgeConfig(ctx, store)
+				cfg, err := edgeConfig(ctx, store, r.Secrets)
 				if err != nil {
 					return err
 				}

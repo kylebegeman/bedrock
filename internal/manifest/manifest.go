@@ -271,7 +271,26 @@ type Route struct {
 	// behind Cloudflare's proxy. Empty leaves the record alone and only
 	// checks that it points here.
 	DNS DNSMode `yaml:"dns,omitempty" json:"dns,omitempty"`
+	// Auth puts a sign-in in front of the route, so the app behind it never
+	// sees a request from someone who is not signed in and needs no auth
+	// code of its own. Empty leaves the route open.
+	Auth AuthMode `yaml:"auth,omitempty" json:"auth,omitempty"`
 }
+
+// AuthMode is who may reach a route.
+type AuthMode string
+
+const (
+	// AuthNone is a route anyone can reach, which is the default.
+	AuthNone AuthMode = ""
+	// AuthLoom asks a Loom Core whether the request carries a signed-in
+	// session, and passes it through only when it does. The edge asks on
+	// every request, so signing out takes effect at once.
+	AuthLoom AuthMode = "loom"
+)
+
+// Guarded reports whether a route is behind a sign-in.
+func (a AuthMode) Guarded() bool { return a == AuthLoom }
 
 // DNSMode is how a route's record is kept.
 type DNSMode string
@@ -533,6 +552,11 @@ func (m *Manifest) Validate() error {
 			case DNSManual, DNSDirect, DNSProxied:
 			default:
 				fail("%s.dns: %q isn't direct or proxied", ra, r.DNS)
+			}
+			switch r.Auth {
+			case AuthNone, AuthLoom:
+			default:
+				fail("%s.auth: %q isn't loom", ra, r.Auth)
 			}
 			if r.Port != 0 && (r.Port < 1 || r.Port > 65535) {
 				fail("%s.port: must be a port number", ra)
@@ -922,6 +946,20 @@ func (m *Manifest) ManagedHosts() map[string]DNSMode {
 				if _, seen := out[r.Host]; !seen {
 					out[r.Host] = r.DNS
 				}
+			}
+		}
+	}
+	return out
+}
+
+// GuardedRoutes lists the host and path prefix of every route that asks
+// for a sign-in, in the order the workloads are named.
+func (m *Manifest) GuardedRoutes() []string {
+	var out []string
+	for _, name := range m.WorkloadNames() {
+		for _, r := range m.Workloads[name].Routes {
+			if r.Auth.Guarded() {
+				out = append(out, r.Host+r.NormalizedPath())
 			}
 		}
 	}

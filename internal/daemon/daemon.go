@@ -68,14 +68,14 @@ func registry(store *state.Store, sec *secrets.Store, socket, stateDir string) k
 			return err
 		}
 		defer e.Close()
-		boot, err := app.EdgeConfig(ctx, store)
+		boot, err := app.EdgeConfig(ctx, store, sec)
 		if err != nil {
 			return err
 		}
 		if err := edge.Ensure(ctx, e, boot, out); err != nil {
 			return err
 		}
-		return app.ReloadEdge(ctx, store)
+		return app.ReloadEdge(ctx, store, sec)
 	}})
 	reg.Add(host.Maintain{Env: env, Socket: socket})
 	reg.Add(host.Upgrade{Env: env})
@@ -182,7 +182,7 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	// The edge gets the configuration this build of bedrock makes for the
 	// active revisions, in case the shape changed since the last deploy;
 	// an edge an older bedrock made is replaced, keeping its routes.
-	if err := app.UpgradeEdge(ctx, store, logWriter{logf}); err != nil {
+	if err := app.UpgradeEdge(ctx, store, sec, logWriter{logf}); err != nil {
 		logf("edge: %v", err)
 	}
 

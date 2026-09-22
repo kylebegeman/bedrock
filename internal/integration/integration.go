@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -50,6 +52,7 @@ const (
 	StorageName    = "storage"
 	EmailName      = "email"
 	CloudflareName = "cloudflare"
+	LoomName       = "loom"
 )
 
 // Definitions lists every integration, in the order they are shown.
@@ -84,6 +87,13 @@ var Definitions = []Definition{
 		Fields: []Field{
 			{Name: "token", Prompt: "API token with Zone read and DNS edit on the zones", Secret: true},
 			{Name: "api", Prompt: "API URL, only to test against something other than Cloudflare", Optional: true},
+		},
+	},
+	{
+		Name:    LoomName,
+		Purpose: "who may reach a route marked auth: loom",
+		Fields: []Field{
+			{Name: "verify_url", Prompt: "the Core's verify endpoint, such as https://loom.example.com/api/cloud/auth/verify"},
 		},
 	},
 }
@@ -218,6 +228,13 @@ func validate(name string, v map[string]string) error {
 		if (v["smtp_user"] == "") != (v["smtp_password"] == "") {
 			return errors.New("email: give both smtp_user and smtp_password, or neither")
 		}
+	case LoomName:
+		// The edge dials this on every request to a guarded route, so a URL
+		// it cannot resolve into a host, a port and a path is a route that
+		// answers nothing at all.
+		if _, err := ParseVerifyURL(v["verify_url"]); err != nil {
+			return fmt.Errorf("loom.verify_url: %w", err)
+		}
 	}
 	return nil
 }
@@ -339,6 +356,27 @@ type Storage struct {
 	Password     string
 }
 
+// Loom is where the edge asks whether a request is signed in.
+type Loom struct {
+	// VerifyURL answers 2xx for a signed-in request and anything else for
+	// one that is not.
+	VerifyURL string
+}
+
+// LoadLoom reads the loom integration. A machine with no loom integration
+// gets a nil Loom and no error, because most machines have no Core and
+// routes on them are open.
+func LoadLoom(store *secrets.Store) (*Loom, error) {
+	v, err := Get(store, LoomName)
+	if err != nil {
+		return nil, err
+	}
+	if v["verify_url"] == "" {
+		return nil, nil
+	}
+	return &Loom{VerifyURL: v["verify_url"]}, nil
+}
+
 // LoadStorage reads the storage integration.
 func LoadStorage(store *secrets.Store) (*Storage, error) {
 	v, err := Get(store, StorageName)
@@ -415,4 +453,40 @@ func LoadCloudflare(store *secrets.Store) (*Cloudflare, error) {
 		return nil, err
 	}
 	return &Cloudflare{Token: v["token"], API: v["api"]}, nil
+}
+
+// Verify is a verify_url broken into the parts the edge dials it by.
+type Verify struct {
+	Dial string
+	Path string
+	TLS  bool
+	Host string
+}
+
+// ParseVerifyURL splits a Core's verify endpoint into a dial address and a
+// path, filling in the port the scheme implies.
+func ParseVerifyURL(raw string) (*Verify, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return nil, fmt.Errorf("%q isn't a URL", raw)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, fmt.Errorf("%q must start with https:// or http://", raw)
+	}
+	if u.Hostname() == "" {
+		return nil, fmt.Errorf("%q names no host", raw)
+	}
+	if u.Path == "" || u.Path == "/" {
+		return nil, fmt.Errorf("%q names no path; give the verify endpoint itself", raw)
+	}
+	port := u.Port()
+	if port == "" {
+		port = map[string]string{"http": "80", "https": "443"}[u.Scheme]
+	}
+	return &Verify{
+		Dial: net.JoinHostPort(u.Hostname(), port),
+		Path: u.RequestURI(),
+		TLS:  u.Scheme == "https",
+		Host: u.Hostname(),
+	}, nil
 }
