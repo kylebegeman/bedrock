@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -11,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/kylebegeman/bedrock/internal/host"
+	"github.com/kylebegeman/bedrock/internal/release"
 )
 
 func newDoctor(a *app) *cobra.Command {
@@ -115,19 +117,61 @@ func newHost(a *app) *cobra.Command {
 }
 
 func newUpgrade(a *app) *cobra.Command {
-	var planOnly bool
+	var (
+		planOnly  bool
+		toVersion string
+		sha256Hex string
+	)
 	cmd := &cobra.Command{
-		Use:   "upgrade <path-to-new-bedrock>",
+		Use:   "upgrade [path-to-new-bedrock]",
 		Short: "Replace bedrock with a new build and restart the daemon; systemd rolls back if it can't start.",
-		Args:  cobra.ExactArgs(1),
+		Long: "Replace bedrock with a new build and restart the daemon; systemd rolls back if it can't start.\n\n" +
+			"With --version the build is downloaded from the published release and checked\n" +
+			"against the SHA256SUMS beside it. That proves the two agree and nothing more,\n" +
+			"since whoever can replace one can replace both; pass --sha256 with a checksum\n" +
+			"from reviewed source to pin it.\n\n" +
+			"  bedrock upgrade --version 0.7.4\n" +
+			"  bedrock upgrade /tmp/bedrock-new",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path, err := filepath.Abs(args[0])
-			if err != nil {
-				return err
+			switch {
+			case len(args) == 0 && toVersion == "":
+				return fmt.Errorf("say what to upgrade to: --version 0.7.4, or the path of a build already here")
+			case len(args) == 1 && toVersion != "":
+				return fmt.Errorf("give either a path or --version, not both")
+			}
+			path := ""
+			if len(args) == 1 {
+				if sha256Hex != "" {
+					return fmt.Errorf("--sha256 goes with --version; check a local file yourself")
+				}
+				abs, err := filepath.Abs(args[0])
+				if err != nil {
+					return err
+				}
+				path = abs
+			} else {
+				if err := release.CheckVersion(toVersion); err != nil {
+					return err
+				}
+				// Into bedrock's own directory, not a temporary one: the
+				// daemon restarts mid-upgrade and the plan is rebuilt when
+				// the operation resumes, which reads this path again.
+				if err := os.MkdirAll(host.LibDir, 0o755); err != nil {
+					return err
+				}
+				fmt.Fprintf(a.stderr, "fetching bedrock %s\n", toVersion)
+				got, err := release.Fetch(cmd.Context(), toVersion, host.LibDir, sha256Hex)
+				if err != nil {
+					return err
+				}
+				path = got
 			}
 			return a.operate(cmd.Context(), host.UpgradeKind, host.UpgradeInput{Path: path}, planOnly)
 		},
 	}
+	cmd.Flags().StringVar(&toVersion, "version", "", "a published release to fetch and install, such as 0.7.4")
+	cmd.Flags().StringVar(&sha256Hex, "sha256", "", "the expected checksum of that release's build for this machine")
 	a.mutatingFlags(cmd, &planOnly)
 	return cmd
 }
