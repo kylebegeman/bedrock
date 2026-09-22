@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Ophelia is pre-1.0 infrastructure software. Security fixes target the default
+Bedrock is pre-1.0 infrastructure software. Security fixes target the default
 branch first. Tagged release support will be documented once public releases are
 cut.
 
@@ -21,7 +21,7 @@ Please include:
 - reproduction steps using fixture data where possible
 - whether any secret, token, host, or production data may have been exposed
 
-Ophelia treats secret exposure, command injection, unsafe restore behavior,
+Bedrock treats secret exposure, command injection, unsafe restore behavior,
 provider mutation bypasses, receipt redaction gaps, and deploy confirmation
 bypasses as high-priority security issues.
 

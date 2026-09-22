@@ -16,7 +16,7 @@ workloads:
     resources: {memory: 2g, pids: 1024}
     routes:
       - host: core.example.com
-        path: /ophelia
+        path: /api
       - host: runner.core.example.com
         port: 4774
   processor:

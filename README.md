@@ -374,14 +374,18 @@ replacement needs a new reviewed pin; do not overwrite published assets.
 0.6 line is archived on the `ophelia-0.6` branch and the `ophelia-0.6-final`
 tag, and stays there.
 
+Bedrock stays on 0.7.x. There is no 0.8 or 0.9: a finished feature is a patch
+release, cut when that feature is done rather than when a group of them is.
+
 | Document | What it covers |
 |---|---|
-| [docs/plan.html](docs/plan.html) | the 0.7 plan, milestone by milestone |
-| [docs/ideas.html](docs/ideas.html) | the 37 ideas, with the 34 that were chosen |
-| [docs/blueprint.html](docs/blueprint.html) | why the rewrite, and what 0.7 to 1.0 are |
+| [docs/direction.html](docs/direction.html) | what Bedrock is for, where it stands, and what is next |
+| [docs/ideas.html](docs/ideas.html) | the 37 ideas, and which are tabled |
+| [docs/plan.html](docs/plan.html) | the 0.7 plan, delivered and closed |
+| [docs/blueprint.html](docs/blueprint.html) | why the rewrite happened, written under an older name |
 | [lane/README.md](lane/README.md) | the proving ground |
 
-Every milestone is proven on a real machine that is wiped and rebuilt for the
+Every feature is proven on a real machine that is wiped and rebuilt for the
 purpose.
 
 ## License

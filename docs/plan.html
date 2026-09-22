@@ -66,6 +66,9 @@
   .two ul { margin: 0; padding-left: 1.1em; display: grid; gap: 6px; font-size: 0.95rem; }
   .box { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 16px; display: grid; gap: 10px; align-content: start; }
 
+  .delivered { border: 1px solid var(--amber); background: var(--amber-soft); border-radius: 8px; padding: 14px 16px; margin: 0 0 22px; }
+  .delivered p { margin: 0 0 8px; }
+  .delivered p:last-child { margin: 0; }
   .sources { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 20px; display: grid; gap: 6px; }
   .sources ul { margin: 0; padding-left: 1.1em; display: grid; gap: 4px; }
 
@@ -78,11 +81,17 @@
 
 <main>
   <header>
-    <div class="eyebrow">Plan for execution · September 19, 2026</div>
+    <div class="eyebrow">Delivered · planned September 19, 2026 · closed September 21, 2026</div>
     <h1>Bedrock 0.7 Plan</h1>
-    <p class="lead">Thirty-four locked items, in an order where every milestone leaves the test bed running something real. 0.7 runs the personal machine. 0.8 wires Loom. 0.9 opens the launchpad. 1.0 keeps the promise.</p>
-    <p class="muted">Item numbers refer to <a href="https://claude.ai/artifact/8CkxxhsT75mKX5EB8t7z8H">Bedrock Ideas</a>. Dropped: 5, 13 and 17. Background is in the <a href="https://claude.ai/artifact/BUCyRXjPV4bqHRm2p5v6U6">blueprint</a>.</p>
+    <p class="lead">Thirty-four locked items, in an order where every milestone leaves the test bed running something real. 0.7 ran the personal machine, and it does.</p>
+    <p class="muted">Item numbers refer to <a href="ideas.html">Bedrock Ideas</a>. Dropped: 5, 13 and 17. Background is in the <a href="blueprint.html">blueprint</a>.</p>
   </header>
+
+  <div class="delivered">
+    <p><strong>This plan is finished, and the ladder it stood on is gone.</strong> 0.7 shipped: both machines run Bedrock, Loom Core is deployed and enrolled, the personal sites are live, backups and alerts are on, and OVH runs braintreelabs.io.</p>
+    <p>The releases after it were planned as 0.8 wires Loom, 0.9 opens the launchpad, 1.0 keeps the promise. That ladder was abandoned on September 21, 2026. Bedrock stays on 0.7.x and ships one feature per patch release, for the reasons in the <a href="direction.html">direction</a>. The 0.8 and 0.9 contents were not delivered and were not cancelled; they went back to <a href="ideas.html">Ideas</a> to be picked on merit rather than by their place in a sequence.</p>
+    <p>Everything below is kept as the record of how 0.7 was actually built. It is not a description of what happens next.</p>
+  </div>
 
   <section>
     <div class="eyebrow">Ground rules</div>
@@ -126,9 +135,9 @@
         <thead><tr><th>Release</th><th>Goal</th><th>Items</th></tr></thead>
         <tbody>
           <tr><td class="k">0.7</td><td>Run the personal machine. The personal sites and Loom on Bedrock, backups and alerts on, and OVH set up as the business machine running braintreelabs.io.</td><td class="items">20 21 22 23 24 25 26 27 28 29 33a 36 37 · 1 2 3 4 6 7 8 9 10 11 12 14 15 16 18 19</td></tr>
-          <tr><td class="k">0.8</td><td>Wire Loom. Enrollment, the fleet view, alerts as push, the Core's lifecycle from the app, agent approvals, Loom sign-in for routes.</td><td class="items">32 33b 34 35 · 25 to push, 19 in the fleet view</td></tr>
-          <tr><td class="k">0.9</td><td>Open the launchpad. Launch, previews, graduate.</td><td class="items">30 31</td></tr>
-          <tr><td class="k">1.0</td><td>Keep the promise. Stable manifest and API, upgrade guarantees, a security review, docs.</td><td class="items"></td></tr>
+          <tr><td class="k">0.8</td><td><strong>Abandoned.</strong> Wire Loom. Enrollment, the fleet view, alerts as push, the Core's lifecycle from the app, agent approvals, Loom sign-in for routes.</td><td class="items">32 33b 34 35</td></tr>
+          <tr><td class="k">0.9</td><td><strong>Abandoned.</strong> Open the launchpad. Launch, previews, graduate.</td><td class="items">30 31</td></tr>
+          <tr><td class="k">1.0</td><td><strong>Abandoned as a date.</strong> Stable manifest and API, upgrade guarantees, a security review, docs. Still the bar for 1.0 whenever it is called; no longer a release that work is aimed at.</td><td class="items"></td></tr>
         </tbody>
       </table>
     </div>
@@ -241,13 +250,14 @@
         </ul>
       </div>
       <div class="box">
-        <h3>In 0.8</h3>
+        <h3>Planned for 0.8, not happening</h3>
         <ul>
-          <li>CORE-03 (set up a new Core from the app) and CORE-04 (upgrade, rollback, status and backups from the app) build on Bedrock's API and the enrollment link.</li>
-          <li>A Fleet view: machines, apps, health, deploys, backups, drills, alerts, logs, approvals.</li>
-          <li>Alerts become push notifications.</li>
+          <li>CORE-03 (set up a new Core from the app) and CORE-04 (upgrade, rollback, status and backups from the app), both built on an enrollment link that is no longer being built.</li>
+          <li>A Fleet view: machines, apps, health, deploys, backups, drills, alerts, logs, approvals. <a href="ideas.html#i32">Tabled</a>, with the reasoning recorded.</li>
+          <li>Alerts become push notifications. Alerts stay email.</li>
           <li>Two Core endpoints for Loom sign-in on routes (35), and approval records for agent-run operations (34).</li>
         </ul>
+        <p class="muted">All of this depended on the enrollment link in item 32. Tabling that tabled the column.</p>
       </div>
     </div>
   </section>
@@ -277,7 +287,7 @@
   <footer class="sources">
     <div class="eyebrow">Sources</div>
     <ul>
-      <li><a href="https://claude.ai/artifact/8CkxxhsT75mKX5EB8t7z8H">Bedrock Ideas</a> (items 1 to 37) and the <a href="https://claude.ai/artifact/BUCyRXjPV4bqHRm2p5v6U6">blueprint</a></li>
+      <li><a href="ideas.html">Bedrock Ideas</a> (items 1 to 37) and the <a href="blueprint.html">blueprint</a></li>
       <li>Loom's core-provisioning charter (CORE-01 to CORE-06), <code>packages/core-provisioning/</code> and <code>deploy/ophelia/</code></li>
       <li>The September 18 server audit and the Dragon Writer recovery</li>
     </ul>

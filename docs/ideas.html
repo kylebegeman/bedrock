@@ -63,6 +63,7 @@
   .chip.impact-high { border-color: var(--accent); color: var(--accent); background: var(--surface); }
   .chip.impact-top { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--accent); }
   .chip.cx-massive { background: var(--amber-soft); border-color: var(--amber-soft); color: var(--amber); }
+  .chip.tabled { background: var(--amber-soft); border-color: var(--amber); color: var(--amber); }
   dl { margin: 0; display: grid; grid-template-columns: 7.5em 1fr; gap: 6px 14px; font-size: 0.95rem; }
   dt { font: 500 0.72rem/1.9 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
   dd { margin: 0; max-width: 62ch; }
@@ -96,7 +97,7 @@
     <ul>
       <li>Items 1 to 19 are smaller improvements; 20 to 37 are systems and refactors.</li>
       <li>Complexity: Small, Medium, Large, Massive. Impact: Low, Medium, High, Transformational.</li>
-      <li>Most items trace to something that went wrong this week or to a plan Ophelia wrote down and never built. The <a href="https://claude.ai/artifact/BUCyRXjPV4bqHRm2p5v6U6">blueprint</a> has that background.</li>
+      <li>Most items trace to something that went wrong this week or to a plan Ophelia wrote down and never built. The <a href="blueprint.html">blueprint</a> has that background.</li>
     </ul>
   </header>
 
@@ -510,13 +511,14 @@
       </article>
 
       <article class="item" id="i32">
-        <div class="item-head"><div class="num">32</div><div><h3>Bedrock and Loom: enrollment and the fleet view</h3><div class="chips"><span class="chip cx-massive">Massive</span><span class="chip impact-top">Impact: Transformational</span></div></div></div>
+        <div class="item-head"><div class="num">32</div><div><h3>Bedrock and Loom: enrollment and the fleet view</h3><div class="chips"><span class="chip tabled">Tabled</span><span class="chip cx-massive">Massive</span><span class="chip impact-top">Impact: Transformational</span></div></div></div>
         <dl>
           <dt>Summary</dt><dd>Each machine enrolls with Loom and keeps an outbound, mutually authenticated link. Loom shows every machine, app, deploy, backup, drill, alert and log, and is where approvals happen.</dd>
           <dt>How it works</dt><dd>Enrollment bound to a confirmation you see in Loom; signed, scoped commands with replay protection; an event stream with cursors; a Fleet mode in Loom built on the registry (14), the signals (19) and the receipts (3).</dd>
           <dt>Experience</dt><dd>Open Loom, see both machines and every app, approve a production deploy from your phone.</dd>
           <dt>Why</dt><dd>Loom is the UI. Ophelia's fleet control was turned off for new Cores, but its protocol design was sound and carries over.</dd>
           <dt>Unlocks</dt><dd>Agent operation (34), Loom sign-in (35), the Core lifecycle in the app (33).</dd>
+          <dt>Tabled</dt><dd>Tabled on September 21, 2026, for as long as the estate is two machines. A fleet view is a way to see more machines than you can hold in your head, and two is not that number: <code>bedrock status</code> over SSH already answers every question this would answer, on both machines, in about as long as it takes to open an app. The cost on the other side is an enrollment protocol, signed and scoped commands, replay protection, a cursored event stream and a whole new mode in Loom, all of which have to keep working forever. Revisit when there are enough machines that a missed one is plausible, or when someone other than Kyle needs to see the estate without an SSH key. Nothing here is wrong and nothing is being deleted; it is waiting for a reason. See the <a href="direction.html">direction</a>.</dd>
         </dl>
       </article>
 
@@ -626,7 +628,7 @@
   <footer class="sources">
     <div class="eyebrow">Sources</div>
     <ul>
-      <li>The <a href="https://claude.ai/artifact/BUCyRXjPV4bqHRm2p5v6U6">Bedrock blueprint</a> and the September 18 server audit and Dragon Writer recovery</li>
+      <li>The <a href="blueprint.html">Bedrock blueprint</a> and the September 18 server audit and Dragon Writer recovery</li>
       <li>Ophelia's roadmap, platform strategy (phases P0 to P5), portability features 1 to 8 and <code>src/</code> on <code>next</code> (commit dc358e5)</li>
       <li>Loom's <code>deploy/ophelia/</code>, <code>packages/core-provisioning/</code> and the core-provisioning charter (CORE-01 to CORE-06)</li>
     </ul>

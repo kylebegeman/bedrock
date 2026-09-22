@@ -55,9 +55,9 @@ func TestRecordsAreMadeKeptUpdatedAndRemoved(t *testing.T) {
 func TestARecordElsewhereIsNeverTakenSilently(t *testing.T) {
 	ctx := context.Background()
 	m, fake := setup(t)
-	fake.Seed(cloudflaretest.Record{Type: "A", Name: "dragonwriter.begam.in", Content: "15.204.243.222", Comment: "bedrock: dragon-writer on lumen"})
+	fake.Seed(cloudflaretest.Record{Type: "A", Name: "dragonwriter.begam.in", Content: "15.204.243.222", Comment: "bedrock: dragon-writer on braintreelabs"})
 	_, err := m.Ensure(ctx, "dragon-writer", "dragonwriter.begam.in", manifest.DNSDirect, false)
-	if !errors.Is(err, ErrElsewhere) || !strings.Contains(err.Error(), "15.204.243.222 (dragon-writer on lumen)") || !strings.Contains(err.Error(), "bedrock dns point dragonwriter.begam.in") {
+	if !errors.Is(err, ErrElsewhere) || !strings.Contains(err.Error(), "15.204.243.222 (dragon-writer on braintreelabs)") || !strings.Contains(err.Error(), "bedrock dns point dragonwriter.begam.in") {
 		t.Fatalf("%v", err)
 	}
 	// The other machine's record must not be removed by this machine.

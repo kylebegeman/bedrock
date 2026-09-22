@@ -92,6 +92,8 @@
   ol.decisions li::marker { font-family: var(--mono); color: var(--accent); }
   ol.decisions .pick { display: block; color: var(--muted); font-size: 0.93rem; }
 
+  .historical { border: 1px solid var(--amber); background: var(--amber-soft); border-radius: 8px; padding: 14px 16px; margin: 0 0 22px; }
+  .historical p { margin: 0; }
   .sources { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 20px; display: grid; gap: 6px; }
   .sources ul { margin: 0; padding-left: 1.1em; display: grid; gap: 4px; }
 
@@ -108,6 +110,10 @@
     <p class="lead">Rewrite Ophelia as one small Go program on each machine. It installs and runs everything the machine needs: builds, certificates, secrets, backups, health checks and alerts. Loom is where you see and approve it all.</p>
     <p class="muted">This week's recovery and cleanup showed what's missing. The largest gaps are in watching, backing up and retiring things, not in deploying them. Most of the business-launch features were already specified in Ophelia's docs, but never built: moving apps between machines (major features 1 to 4) and builds from git with previews (strategy phase P4).</p>
   </header>
+
+  <div class="historical">
+    <p><strong>The program described here is now called Bedrock.</strong> It was named Ophelia when this was written on September 18, 2026, then Quark, and it has been Bedrock since September 20, 2026. Every <code>ophelia</code> command below is <code>bedrock</code> today. The name Ophelia now refers only to the Python 0.6 line this replaced, archived on the <code>ophelia-0.6</code> branch. The text is left as written; for what is actually being built, see the <a href="direction.html">direction</a>.</p>
+  </div>
 
   <section>
     <div class="eyebrow">The shape</div>

@@ -1,6 +1,6 @@
 # Code Of Conduct
 
-Ophelia should be a practical, respectful, and technically serious project.
+Bedrock should be a practical, respectful, and technically serious project.
 This code applies to project spaces including issues, discussions, pull
 requests, reviews, documentation, and community chat.
 

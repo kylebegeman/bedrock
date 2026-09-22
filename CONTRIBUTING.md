@@ -1,6 +1,6 @@
-# Contributing To Ophelia
+# Contributing To Bedrock
 
-Thanks for helping improve Ophelia. This project is contract-first, fixture-first,
+Thanks for helping improve Bedrock. This project is contract-first, fixture-first,
 and safety-first: public examples should use synthetic apps, mutating flows
 should be previewable, and JSON surfaces should stay stable for agents.
 
@@ -44,7 +44,7 @@ bundle above before opening a pull request.
 
 ## Developer Certificate Of Origin
 
-Ophelia uses the Developer Certificate of Origin instead of a CLA. Every commit
+Bedrock uses the Developer Certificate of Origin instead of a CLA. Every commit
 must include a DCO sign-off:
 
 ```bash
