@@ -85,7 +85,7 @@ func newRoot(stdout, stderr io.Writer) *cobra.Command {
 	root.PersistentFlags().StringVar(&a.stateDir, "state-dir", envOr("BEDROCK_STATE_DIR", defaultStateDir()), "where bedrock keeps its state")
 	root.PersistentFlags().StringVar(&a.socket, "socket", envOr("BEDROCK_SOCKET", daemon.DefaultSocket), "the daemon's socket; the local kernel is used when nothing answers")
 	root.PersistentFlags().BoolVar(&a.json, "json", false, "print JSON, one object per line")
-	root.AddCommand(newVersion(a), newDoctor(a), newHost(a), newUpgrade(a), newDeploy(a), newRollback(a), newLs(a), newStatus(a), newExposure(a), newDNS(a), newPs(a), newLogs(a), newExec(a), newGC(a), newSecret(a), newIntegration(a), newRun(a), newJobs(a), newPsql(a), newBackup(a), newBackups(a), newDrill(a), newRestore(a), newAlerts(a), newWatch(a), newRemove(a), newGit(a), newReceive(a), newHistory(a), newKernel(a), newDaemon(a))
+	root.AddCommand(newVersion(a), newInit(a), newDoctor(a), newHost(a), newUpgrade(a), newDeploy(a), newRollback(a), newLs(a), newStatus(a), newExposure(a), newDNS(a), newPs(a), newLogs(a), newExec(a), newGC(a), newSecret(a), newIntegration(a), newRun(a), newJobs(a), newPsql(a), newBackup(a), newBackups(a), newDrill(a), newRestore(a), newAlerts(a), newWatch(a), newRemove(a), newGit(a), newReceive(a), newHistory(a), newKernel(a), newDaemon(a))
 	return root
 }
 

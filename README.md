@@ -56,6 +56,7 @@ bedrock integration set cloudflare # DNS records for your hosts
 bedrock integration set storage    # Backblaze B2 or any S3 store, for backups
 bedrock integration set email      # SMTP, for alerts
 
+bedrock init my-app --host app.example.com  # write a starting bedrock.yaml
 bedrock deploy ./my-app            # build, check, switch the edge
 bedrock status                     # health, traffic, errors, backups
 ```
@@ -64,7 +65,20 @@ Bedrock needs Ubuntu 22.04 or 24.04, or Debian 12 or 13, on x86_64 or aarch64.
 
 ## An app's manifest
 
-An app describes itself in `bedrock.yaml` at the root of its source:
+An app describes itself in `bedrock.yaml` at the root of its source.
+`bedrock init` writes a commented one for the shape you are building, so a
+new app never starts from a blank file:
+
+```sh
+bedrock init blog --kind static --host blog.example.com
+bedrock init api --host api.example.com --postgres
+bedrock init mailer --kind worker
+bedrock init nightly --kind cron --schedule "0 4 * * *"
+```
+
+It only writes a file; nothing on a machine is touched. What it writes is
+parsed and validated before it reaches disk, so a generated manifest always
+loads. Here is one in full:
 
 ```yaml
 app: hello
@@ -334,7 +348,7 @@ cannot be exported.
 | | |
 |---|---|
 | **Machine** | `host` · `daemon` · `doctor` · `upgrade` · `status` · `alerts` · `watch` |
-| **Apps** | `deploy` · `rollback` · `remove` · `ls` · `ps` · `logs` · `history` · `gc` |
+| **Apps** | `init` · `deploy` · `rollback` · `remove` · `ls` · `ps` · `logs` · `history` · `gc` |
 | **Data** | `backup` · `backups` · `restore` · `drill` · `psql` |
 | **Access** | `secret` · `integration` · `git` · `exec` · `run` · `jobs` |
 | **Network** | `dns` · `exposure` |

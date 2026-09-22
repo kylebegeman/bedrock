@@ -1,9 +1,14 @@
 # The lane
 
-The lane is a real machine that gets wiped and rebuilt for every milestone,
-so a green check means "this works on a real server", not "the unit tests
-pass". Today it is the Hostinger box (`hostinger.env`). Later it can be a
-Linux VM on the Mac.
+The lane is a real machine that gets wiped and rebuilt for every feature, so
+a green check means "this works on a real server", not "the unit tests pass".
+
+**The lane has no machine right now.** `hostinger.env` still points at the
+Hostinger box, and that box became production: it runs the personal sites,
+begamin, Dragon Writer and Loom Core. `reset.sh` refuses to touch a machine
+that is carrying apps, so the lane cannot run until `hostinger.env` points
+somewhere disposable. A second cheap VPS, or a Linux VM on the Mac, both
+work; nothing else in the lane depends on which it is.
 
 ## What you need
 
@@ -25,12 +30,24 @@ recreate action to succeed, asks Hostinger to install the deploy key on the
 fresh OS, waits for SSH, and pins the new host key in `lane/known_hosts`
 (ignored by git). Everything after that is bedrock's job.
 
-Recreating the machine deletes everything on it, including snapshots. The
-script never asks; the caller decides.
+Recreating the machine deletes everything on it, including snapshots.
+
+Before doing any of that, `reset.sh` asks the machine what it is carrying and
+refuses to recreate one with apps on it, printing their names. A machine that
+does not answer, or has no bedrock on it, is fine to take. To destroy one
+that does answer, name it exactly:
+
+```sh
+BEDROCK_LANE_DESTROY=203.0.113.10 lane/reset.sh
+```
+
+Naming the host is deliberate. The lane box quietly became the production
+host while `hostinger.env` still pointed at it, which left `make lane-reset`
+one command away from reinstalling the OS under five live apps.
 
 ## Proofs
 
-Each milestone has a script that runs bedrock on the machine and checks the
+Each proof is a script that runs bedrock on the machine and checks the
 result from the outside. They build the binary, install it, and print what
 they see; a failure says `NOT proven` and stops.
 
