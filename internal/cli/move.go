@@ -35,7 +35,7 @@ with no data rather than like a failure.
 The source keeps running and keeps serving throughout. Nothing is torn down
 until you tear it down, which is what makes the window a real one.`,
 	}
-	cmd.AddCommand(newMoveOut(a), newMoveIn(a))
+	cmd.AddCommand(newMoveOut(a), newMoveIn(a), newMoveSecrets(a))
 	return cmd
 }
 
@@ -158,4 +158,60 @@ func hostsOrIts(hosts []string) string {
 func thisMachine(ctx context.Context) string {
 	name, _ := host.RealEnv().Run(ctx, "hostname")
 	return strings.TrimSpace(name)
+}
+
+func newMoveSecrets(a *app) *cobra.Command {
+	var (
+		recipient string
+		accept    bool
+	)
+	cmd := &cobra.Command{
+		Use:   "secrets <app>",
+		Short: "Seal an app's secrets for the target machine, and accept them there.",
+		Long: `Seal an app's secrets for the target machine, and accept them there.
+
+A moved app has to arrive with the secrets it left with. Its database comes
+back from a snapshot still holding the role password the source generated, so
+a target that generated its own would be handed a database it cannot open.
+bedrock refuses that restore rather than performing it, which is why this
+step exists.
+
+  on the target:  bedrock secret recipient
+  on the source:  bedrock move secrets <app> --to <age1...> > secrets.age
+  on the target:  bedrock move secrets <app> --accept < secrets.age
+
+Only ciphertext is ever printed, sealed to the target's own key, and it stops
+being readable ten minutes after it is made. The values never appear in a
+terminal, a log or a shell history on either machine.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			switch {
+			case accept && recipient != "":
+				return fmt.Errorf("--accept reads secrets here; --to seals them for elsewhere")
+			case accept:
+				stored, err := a.secretsStore().ImportBundle(name, os.Stdin)
+				if err != nil {
+					return err
+				}
+				if len(stored) == 0 {
+					fmt.Fprintf(a.stdout, "%s already held every secret in the bundle.\n", name)
+					return nil
+				}
+				fmt.Fprintf(a.stdout, "stored %d secret(s) for %s: %s\n", len(stored), name, strings.Join(stored, ", "))
+				return nil
+			case recipient == "":
+				return fmt.Errorf("give --to with the target's recipient (bedrock secret recipient, run there), or --accept to read a bundle here")
+			}
+			sealed, err := a.secretsStore().ExportBundle(name, recipient)
+			if err != nil {
+				return err
+			}
+			_, err = io.WriteString(a.stdout, sealed)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&recipient, "to", "", "the target machine's recipient, from 'bedrock secret recipient' there")
+	cmd.Flags().BoolVar(&accept, "accept", false, "read a sealed bundle from standard input and store it here")
+	return cmd
 }
