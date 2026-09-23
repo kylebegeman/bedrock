@@ -123,6 +123,8 @@ func (s Setup) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, err
 	}
 	add(x.dockerStep())
 	add(x.registryStep())
+	// Before the edge, which reads the list when it is configured.
+	add(x.rangesStep())
 	add(x.edgeStep())
 	add(x.securityUpdatesStep())
 	add(x.journalStep())
@@ -297,22 +299,13 @@ func (x *setting) firewallStep() kernel.Step {
 		}
 	}
 	ranges := x.ranges.All()
-	note := x.firewallNote(ranges, "already only from Cloudflare")
-	if !x.ranges.fresh {
-		note += "; Cloudflare's list could not be read, so the copy kept at " + RangesPath + " is used"
-	}
 	return kernel.Step{
 		Name: "firewall", Change: "allow ssh in, and 80 and 443 only from Cloudflare, Docker's published ports included",
-		Note: note,
+		Note: x.firewallNote(ranges, "already only from Cloudflare"),
 		Apply: func(ctx context.Context, out io.Writer) error {
 			// A deploy may have added a direct route since the plan.
 			if err := x.s.checkRoutes(ctx); err != nil {
 				return err
-			}
-			if x.ranges.fresh {
-				if err := saveRanges(x.env, x.ranges.Ranges); err != nil {
-					return err
-				}
 			}
 			if err := ensureFirewall(ctx, x.env, out, ranges); err != nil {
 				return err
@@ -320,6 +313,50 @@ func (x *setting) firewallStep() kernel.Step {
 			return ensureWebGuard(ctx, x.env, out, ranges)
 		},
 	}
+}
+
+// rangesStep keeps Cloudflare's address ranges on the machine. The edge
+// trusts them to say who a visitor behind Cloudflare's proxy is, on every
+// machine, and a machine that takes the web only from Cloudflare lets only
+// them in. A machine open to anyone reads the list as it applies and
+// carries on without it; one closed to all but Cloudflare read it for the
+// plan and cannot.
+func (x *setting) rangesStep() kernel.Step {
+	step := kernel.Step{
+		Name: "cloudflare-ranges", Change: "keep Cloudflare's address ranges at " + RangesPath + ", which the edge trusts to name visitors behind its proxy",
+	}
+	if x.ranges != nil {
+		step.Note = doneIf(x.ranges.fresh, "read from Cloudflare", "Cloudflare's list could not be read, so the copy kept is used")
+		step.Apply = func(_ context.Context, out io.Writer) error {
+			if !x.ranges.fresh {
+				fmt.Fprintln(out, "kept the copy already here")
+				return nil
+			}
+			if err := saveRanges(x.env, x.ranges.Ranges); err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "kept %d range(s)\n", len(x.ranges.All()))
+			return nil
+		}
+		return step
+	}
+	step.Note = doneIf(x.env.Exists(RangesPath), "a copy is kept", "none kept yet")
+	step.Apply = func(ctx context.Context, out io.Writer) error {
+		ranges, err := x.s.fetchRanges(ctx)
+		switch {
+		case err != nil:
+			fmt.Fprintf(out, "Cloudflare's list could not be read, so visitors behind its proxy show as Cloudflare's addresses until a later setup reads it: %v\n", err)
+		case !ranges.fresh:
+			fmt.Fprintln(out, "Cloudflare's list could not be read; kept the copy already here")
+		default:
+			if err := saveRanges(x.env, ranges.Ranges); err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "kept %d range(s)\n", len(ranges.All()))
+		}
+		return nil
+	}
+	return step
 }
 
 // firewallNote says how far the firewall is from what the profile asks.

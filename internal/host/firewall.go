@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/netip"
 	"regexp"
 	"slices"
 	"sort"
@@ -34,9 +33,10 @@ const cloudflareComment = "bedrock: cloudflare"
 // webPorts is the edge's ports as one ufw rule allows them.
 const webPorts = "80,443"
 
-// RangesPath keeps the last list of Cloudflare's ranges bedrock applied, so
-// a reconcile still works while the list cannot be fetched.
-const RangesPath = "/etc/bedrock/cloudflare-ranges.json"
+// RangesPath keeps the last list of Cloudflare's ranges bedrock read, so a
+// reconcile still works while the list cannot be fetched, and so the edge
+// knows which connections are Cloudflare's.
+const RangesPath = cloudflare.RangesFile
 
 // ufwDefaults is ufw's own settings file; IPV6=no there means ufw leaves
 // IPv6 alone entirely.
@@ -196,7 +196,7 @@ func (s Setup) fetchRanges(ctx context.Context) (cloudflareRanges, error) {
 	}
 	got, err := fetch(ctx)
 	if err == nil {
-		if err = checkRanges(got); err == nil {
+		if err = got.Check(); err == nil {
 			return cloudflareRanges{Ranges: got, fresh: true}, nil
 		}
 	}
@@ -207,41 +207,13 @@ func (s Setup) fetchRanges(ctx context.Context) (cloudflareRanges, error) {
 	return cloudflareRanges{Ranges: kept}, nil
 }
 
-// checkRanges refuses a list that would open the web to far more than
-// Cloudflare: something other than addresses, or a range as wide as a
-// continent. Cloudflare's are /12 to /22 and /29 to /32.
-func checkRanges(r cloudflare.Ranges) error {
-	if len(r.IPv4) == 0 {
-		return errors.New("the list has no IPv4 ranges")
-	}
-	for _, list := range []struct {
-		ranges []string
-		v4     bool
-		widest int
-	}{{r.IPv4, true, 8}, {r.IPv6, false, 16}} {
-		for _, s := range list.ranges {
-			p, err := netip.ParsePrefix(s)
-			if err != nil {
-				return fmt.Errorf("%q is not an address range", s)
-			}
-			if p.Addr().Is4() != list.v4 || p != p.Masked() || p.Bits() < list.widest {
-				return fmt.Errorf("%q is not a range bedrock will open the web to", s)
-			}
-		}
-	}
-	return nil
-}
-
 func loadRanges(env Env) (cloudflare.Ranges, error) {
 	text, err := env.ReadFile(RangesPath)
 	if err != nil {
 		return cloudflare.Ranges{}, err
 	}
-	var r cloudflare.Ranges
-	if err := json.Unmarshal([]byte(text), &r); err != nil {
-		return cloudflare.Ranges{}, fmt.Errorf("%s: %w", RangesPath, err)
-	}
-	if err := checkRanges(r); err != nil {
+	r, err := cloudflare.ParseRanges([]byte(text))
+	if err != nil {
 		return cloudflare.Ranges{}, fmt.Errorf("%s: %w", RangesPath, err)
 	}
 	return r, nil

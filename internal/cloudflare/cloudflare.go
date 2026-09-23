@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -227,6 +228,49 @@ func (r Ranges) All() []string {
 	return append(append([]string(nil), r.IPv4...), r.IPv6...)
 }
 
+// RangesFile is where a machine keeps the ranges bedrock last read: host
+// setup writes it, and the edge trusts what it lists to say who a visitor
+// behind the proxy is.
+const RangesFile = "/etc/bedrock/cloudflare-ranges.json"
+
+// ParseRanges reads a kept list, refusing one that fails Check.
+func ParseRanges(b []byte) (Ranges, error) {
+	var r Ranges
+	if err := json.Unmarshal(b, &r); err != nil {
+		return Ranges{}, err
+	}
+	if err := r.Check(); err != nil {
+		return Ranges{}, err
+	}
+	return r, nil
+}
+
+// Check refuses a list that would give far more than Cloudflare what is
+// given to Cloudflare, whoever served it: something other than address
+// ranges, or a range as wide as a continent. Cloudflare's are /12 to /22
+// and /29 to /32.
+func (r Ranges) Check() error {
+	if len(r.IPv4) == 0 {
+		return errors.New("the list has no IPv4 ranges")
+	}
+	for _, list := range []struct {
+		ranges []string
+		v4     bool
+		widest int
+	}{{r.IPv4, true, 8}, {r.IPv6, false, 16}} {
+		for _, s := range list.ranges {
+			p, err := netip.ParsePrefix(s)
+			if err != nil {
+				return fmt.Errorf("%q is not an address range", s)
+			}
+			if p.Addr().Is4() != list.v4 || p != p.Masked() || p.Bits() < list.widest {
+				return fmt.Errorf("%q is not a range bedrock will trust as Cloudflare's", s)
+			}
+		}
+	}
+	return nil
+}
+
 // IPs reads Cloudflare's published ranges. The list is public: it needs
 // no token, so a client made with New("") can ask.
 func (c *Client) IPs(ctx context.Context) (Ranges, error) {
@@ -234,8 +278,8 @@ func (c *Client) IPs(ctx context.Context) (Ranges, error) {
 	if _, err := c.do(ctx, http.MethodGet, "/ips", nil, &r); err != nil {
 		return Ranges{}, err
 	}
-	if len(r.IPv4) == 0 {
-		return Ranges{}, errors.New("cloudflare: the address list has no IPv4 ranges")
+	if err := r.Check(); err != nil {
+		return Ranges{}, fmt.Errorf("cloudflare: %w", err)
 	}
 	return r, nil
 }

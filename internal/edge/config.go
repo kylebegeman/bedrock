@@ -56,9 +56,38 @@ type Guard struct {
 	HeaderValue string
 }
 
-// Config is Caddy's JSON, built from routes. Every host gets automatic
-// HTTPS because it appears in a host matcher.
-func Config(routes []Route) ([]byte, error) {
+// Config is Caddy's JSON, built from routes, trusting no proxy. Every
+// host gets automatic HTTPS because it appears in a host matcher.
+func Config(routes []Route) ([]byte, error) { return ConfigBehind(routes, nil) }
+
+// clientIP is the visitor's address as Caddy works it out: the connecting
+// address, or, when that is a trusted proxy's, the address the proxy says
+// it connected for.
+const clientIP = "{http.vars.client_ip}"
+
+// clientHeaders tell an upstream who the visitor is, and only that: one
+// address each, whatever the request carried. Caddy's own X-Forwarded-For
+// would keep what a client wrote in front of the proxy's entry, where an
+// app reading the first address would take it at its word.
+var clientHeaders = map[string][]string{
+	"X-Forwarded-For": {clientIP},
+	"X-Real-IP":       {clientIP},
+}
+
+// proxyTo is a reverse_proxy to one upstream that says who the visitor is.
+func proxyTo(dial string) map[string]any {
+	return map[string]any{
+		"handler":   "reverse_proxy",
+		"upstreams": []map[string]any{{"dial": dial}},
+		"headers":   map[string]any{"request": map[string]any{"set": clientHeaders}},
+	}
+}
+
+// ConfigBehind is Config for an edge that some requests reach through a
+// proxy, such as Cloudflare's: a request that arrives from one of proxies
+// is taken to be from the address the proxy names, and every other
+// request's claims about where it came from are ignored.
+func ConfigBehind(routes []Route, proxies []string) ([]byte, error) {
 	byHost := map[string][]Route{}
 	for _, r := range routes {
 		byHost[r.Host] = append(byHost[r.Host], r)
@@ -76,7 +105,7 @@ func Config(routes []Route) ([]byte, error) {
 		sort.Slice(rs, func(i, j int) bool { return len(rs[i].Path) > len(rs[j].Path) })
 		var sub []map[string]any
 		for _, r := range rs {
-			handle := []map[string]any{{"handler": "reverse_proxy", "upstreams": []map[string]any{{"dial": r.Dial}}}}
+			handle := []map[string]any{proxyTo(r.Dial)}
 			if r.Guard != nil {
 				// A guard that decides on the status alone can be talked
 				// into a yes by any server that answers 200 for a path it
@@ -107,6 +136,19 @@ func Config(routes []Route) ([]byte, error) {
 	if serverRoutes == nil {
 		serverRoutes = []map[string]any{}
 	}
+	server := map[string]any{
+		"listen": []string{":80", ":443"},
+		"routes": serverRoutes,
+		"logs":   map[string]any{},
+	}
+	if len(proxies) > 0 {
+		server["trusted_proxies"] = map[string]any{"source": "static", "ranges": proxies}
+		// Cloudflare sets CF-Connecting-IP to the visitor and nothing
+		// else. X-Forwarded-For is read right to left, past the proxies,
+		// so what a client wrote at its start is never taken.
+		server["client_ip_headers"] = []string{"CF-Connecting-IP", "X-Forwarded-For"}
+		server["trusted_proxies_strict"] = 1
+	}
 	cfg := map[string]any{
 		// The admin API is a socket in a directory only this machine and
 		// the edge share. bedrock keeps the configuration itself (BootFile),
@@ -120,13 +162,7 @@ func Config(routes []Route) ([]byte, error) {
 				// Per-host counters and latency histograms on the admin
 				// API's /metrics: the traffic signals bedrock keeps per app.
 				"metrics": map[string]any{"per_host": true},
-				"servers": map[string]any{
-					"bedrock": map[string]any{
-						"listen": []string{":80", ":443"},
-						"routes": serverRoutes,
-						"logs":   map[string]any{},
-					},
-				},
+				"servers": map[string]any{"bedrock": server},
 			},
 		},
 	}
@@ -165,6 +201,8 @@ func guardHandler(g *Guard, allowed []map[string]any) map[string]any {
 			"X-Forwarded-Method": []string{"{http.request.method}"},
 			"X-Forwarded-Uri":    []string{"{http.request.uri}"},
 			"X-Forwarded-Host":   []string{"{http.request.host}"},
+			"X-Forwarded-For":    clientHeaders["X-Forwarded-For"],
+			"X-Real-IP":          clientHeaders["X-Real-IP"],
 		}}},
 		"handle_response": []map[string]any{{
 			"match":  allow,

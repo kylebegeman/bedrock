@@ -1,0 +1,91 @@
+{
+  "admin": {
+    "config": {
+      "persist": false
+    },
+    "listen": "unix//run/bedrock/caddy.sock"
+  },
+  "apps": {
+    "http": {
+      "metrics": {
+        "per_host": true
+      },
+      "servers": {
+        "bedrock": {
+          "client_ip_headers": [
+            "CF-Connecting-IP",
+            "X-Forwarded-For"
+          ],
+          "listen": [
+            ":80",
+            ":443"
+          ],
+          "logs": {},
+          "routes": [
+            {
+              "handle": [
+                {
+                  "handler": "subroute",
+                  "routes": [
+                    {
+                      "handle": [
+                        {
+                          "handler": "reverse_proxy",
+                          "headers": {
+                            "request": {
+                              "set": {
+                                "X-Forwarded-For": [
+                                  "{http.vars.client_ip}"
+                                ],
+                                "X-Real-IP": [
+                                  "{http.vars.client_ip}"
+                                ]
+                              }
+                            }
+                          },
+                          "upstreams": [
+                            {
+                              "dial": "bedrock-site-web-abc:8080"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "match": [
+                {
+                  "host": [
+                    "site.example.com"
+                  ]
+                }
+              ],
+              "terminal": true
+            }
+          ],
+          "trusted_proxies": {
+            "ranges": [
+              "173.245.48.0/20",
+              "2400:cb00::/32"
+            ],
+            "source": "static"
+          },
+          "trusted_proxies_strict": 1
+        }
+      }
+    }
+  },
+  "logging": {
+    "logs": {
+      "default": {
+        "encoder": {
+          "format": "json"
+        },
+        "writer": {
+          "output": "stdout"
+        }
+      }
+    }
+  }
+}

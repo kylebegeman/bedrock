@@ -54,7 +54,8 @@ func openStore(t *testing.T) *state.Store {
 
 func registryWith(m *fakeMachine) kernel.Registry {
 	reg := kernel.Registry{}
-	reg.Add(Setup{Env: m.env()})
+	// Cloudflare's list is never fetched from a test.
+	reg.Add(Setup{Env: m.env(), CloudflareRanges: rangesFrom(testRanges, nil)})
 	return reg
 }
 
@@ -62,7 +63,7 @@ func TestSetupPlansEveryStepAndSaysWhatEachWillChange(t *testing.T) {
 	m := freshUbuntu(t)
 	allowEverything(m)
 	view, notes := planSteps(t, m, Profile{Hostname: "personal-vps", SwapGiB: 4})
-	want := []string{"packages", "hostname", "swap", "docker", "registry", "edge", "security-updates", "journal", "ssh", "firewall", "fail2ban", "pushes", "time", "profile"}
+	want := []string{"packages", "hostname", "swap", "docker", "registry", "cloudflare-ranges", "edge", "security-updates", "journal", "ssh", "firewall", "fail2ban", "pushes", "time", "profile"}
 	var got []string
 	for _, st := range view.Steps {
 		got = append(got, st.Name)
@@ -70,7 +71,7 @@ func TestSetupPlansEveryStepAndSaysWhatEachWillChange(t *testing.T) {
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("steps %v, want %v", got, want)
 	}
-	for name, note := range map[string]string{"hostname": "currently srv1614602", "swap": "none yet", "docker": "not installed", "registry": "not running", "ssh": "password logins on", "firewall": "inactive", "pushes": "no bedrock user yet"} {
+	for name, note := range map[string]string{"hostname": "currently srv1614602", "swap": "none yet", "docker": "not installed", "registry": "not running", "ssh": "password logins on", "firewall": "inactive", "pushes": "no bedrock user yet", "cloudflare-ranges": "none kept yet"} {
 		if notes[name] != note {
 			t.Errorf("%s note %q, want %q", name, notes[name], note)
 		}
@@ -79,7 +80,7 @@ func TestSetupPlansEveryStepAndSaysWhatEachWillChange(t *testing.T) {
 		t.Errorf("packages note %q", notes["packages"])
 	}
 	// Planning read the machine and changed nothing.
-	if m.ranCommand("apt-get install") || m.ranCommand("ufw allow") || m.ranCommand("ufw --force") || m.read(ProfilePath) != "" {
+	if m.ranCommand("apt-get install") || m.ranCommand("ufw allow") || m.ranCommand("ufw --force") || m.read(ProfilePath) != "" || m.read(RangesPath) != "" {
 		t.Fatalf("planning changed the machine: %v", m.commands())
 	}
 	// The same input plans to the same digest, notes aside.

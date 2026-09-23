@@ -249,6 +249,11 @@ dns point <host>` moves one on purpose. Retiring a route, or the app, removes
 its record. `bedrock dns` explains every host; `bedrock dns audit` finds
 records that point here with nothing routed.
 
+An app is told who its visitor is in `X-Forwarded-For` and `X-Real-IP`: one
+address each, whatever the request claimed. Behind Cloudflare's proxy that
+is the visitor Cloudflare names, believed only on connections from
+Cloudflare's own ranges, which `bedrock host setup` keeps on every machine.
+
 A proxied record hides the machine's address, but only until someone learns
 it. `bedrock host setup --web-from cloudflare` makes that not matter: only
 Cloudflare's proxy may reach 80 and 443, so the address answers nobody else

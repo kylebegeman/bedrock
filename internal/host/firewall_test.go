@@ -233,8 +233,8 @@ func TestSetupKeepsWorkingOnTheLastRangesWhenCloudflareCannotBeAsked(t *testing.
 		t.Fatal(err)
 	}
 	_, notes := planStepsWith(t, m, Setup{CloudflareRanges: down}, cloudflareProfile())
-	if !strings.Contains(notes["firewall"], "the copy kept at "+RangesPath) {
-		t.Fatalf("note %q", notes["firewall"])
+	if notes["cloudflare-ranges"] != "Cloudflare's list could not be read, so the copy kept is used" {
+		t.Fatalf("note %q", notes["cloudflare-ranges"])
 	}
 }
 
@@ -250,11 +250,11 @@ func TestSetupRefusesRangesWiderThanCloudflares(t *testing.T) {
 		{IPv4: []string{"173.245.48.0/20"}, IPv6: []string{"::/0"}},
 		{IPv4: []string{"not a range"}},
 	} {
-		if err := checkRanges(bad); err == nil {
+		if err := bad.Check(); err == nil {
 			t.Errorf("%v was accepted", bad)
 		}
 	}
-	if err := checkRanges(testRanges); err != nil {
+	if err := testRanges.Check(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -383,4 +383,32 @@ func planStepsWith(t *testing.T, m *fakeMachine, s Setup, p Profile) (*kernel.Pl
 		notes[st.Name] = st.Note
 	}
 	return view, notes
+}
+
+// Every machine keeps Cloudflare's list, so the edge can name the visitor
+// behind a proxied route. A machine open to anyone carries on when the
+// list cannot be read.
+func TestEveryMachineKeepsCloudflaresRangesWithoutDependingOnThem(t *testing.T) {
+	m := freshUbuntu(t)
+	allowEverything(m)
+	engine := kernel.New(openStore(t), registryWith(m), "test")
+	receipt, err := engine.Run(context.Background(), SetupKind, profileJSON(t, Profile{Hostname: "personal-vps"}), func(kernel.Event) {})
+	if err != nil || receipt.Status != state.Succeeded {
+		t.Fatalf("%v %+v", err, receipt)
+	}
+	if kept, err := loadRanges(m.env()); err != nil || !slices.Equal(kept.All(), testRanges.All()) {
+		t.Fatalf("kept %v %v", kept, err)
+	}
+
+	m = freshUbuntu(t)
+	allowEverything(m)
+	down := Setup{CloudflareRanges: rangesFrom(cloudflare.Ranges{}, errors.New("no route to host"))}
+	engine = kernel.New(openStore(t), cloudflareRegistry(m, down), "test")
+	receipt, err = engine.Run(context.Background(), SetupKind, profileJSON(t, Profile{Hostname: "personal-vps"}), func(kernel.Event) {})
+	if err != nil || receipt.Status != state.Succeeded {
+		t.Fatalf("a list that cannot be read must not stop setup: %v %+v", err, receipt)
+	}
+	if m.read(RangesPath) != "" {
+		t.Fatal("nothing should be kept")
+	}
 }

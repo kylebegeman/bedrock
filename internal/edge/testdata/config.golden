@@ -1,0 +1,243 @@
+{
+  "admin": {
+    "config": {
+      "persist": false
+    },
+    "listen": "unix//run/bedrock/caddy.sock"
+  },
+  "apps": {
+    "http": {
+      "metrics": {
+        "per_host": true
+      },
+      "servers": {
+        "bedrock": {
+          "listen": [
+            ":80",
+            ":443"
+          ],
+          "logs": {},
+          "routes": [
+            {
+              "handle": [
+                {
+                  "handler": "subroute",
+                  "routes": [
+                    {
+                      "handle": [
+                        {
+                          "handle_response": [
+                            {
+                              "match": {
+                                "headers": {
+                                  "X-Loom-Verified": [
+                                    "yes"
+                                  ]
+                                },
+                                "status_code": [
+                                  2
+                                ]
+                              },
+                              "routes": [
+                                {
+                                  "handle": [
+                                    {
+                                      "handler": "reverse_proxy",
+                                      "headers": {
+                                        "request": {
+                                          "set": {
+                                            "X-Forwarded-For": [
+                                              "{http.vars.client_ip}"
+                                            ],
+                                            "X-Real-IP": [
+                                              "{http.vars.client_ip}"
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      "upstreams": [
+                                        {
+                                          "dial": "bedrock-admin-web-abc:8080"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ],
+                          "handler": "reverse_proxy",
+                          "headers": {
+                            "request": {
+                              "set": {
+                                "X-Forwarded-For": [
+                                  "{http.vars.client_ip}"
+                                ],
+                                "X-Forwarded-Host": [
+                                  "{http.request.host}"
+                                ],
+                                "X-Forwarded-Method": [
+                                  "{http.request.method}"
+                                ],
+                                "X-Forwarded-Uri": [
+                                  "{http.request.uri}"
+                                ],
+                                "X-Real-IP": [
+                                  "{http.vars.client_ip}"
+                                ]
+                              }
+                            }
+                          },
+                          "rewrite": {
+                            "method": "GET",
+                            "uri": "/api/cloud/auth/verify"
+                          },
+                          "transport": {
+                            "protocol": "http",
+                            "tls": {
+                              "server_name": "core.example.com"
+                            }
+                          },
+                          "upstreams": [
+                            {
+                              "dial": "core.example.com:443"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "match": [
+                {
+                  "host": [
+                    "admin.example.com"
+                  ]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "handle": [
+                {
+                  "handler": "subroute",
+                  "routes": [
+                    {
+                      "handle": [
+                        {
+                          "handler": "reverse_proxy",
+                          "headers": {
+                            "request": {
+                              "set": {
+                                "X-Forwarded-For": [
+                                  "{http.vars.client_ip}"
+                                ],
+                                "X-Real-IP": [
+                                  "{http.vars.client_ip}"
+                                ]
+                              }
+                            }
+                          },
+                          "upstreams": [
+                            {
+                              "dial": "unix//run/bedrock/hooks.sock"
+                            }
+                          ]
+                        }
+                      ],
+                      "match": [
+                        {
+                          "path": [
+                            "/_bedrock/hook",
+                            "/_bedrock/hook/*"
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "handle": [
+                        {
+                          "handler": "reverse_proxy",
+                          "headers": {
+                            "request": {
+                              "set": {
+                                "X-Forwarded-For": [
+                                  "{http.vars.client_ip}"
+                                ],
+                                "X-Real-IP": [
+                                  "{http.vars.client_ip}"
+                                ]
+                              }
+                            }
+                          },
+                          "upstreams": [
+                            {
+                              "dial": "bedrock-site-api-abc:9000"
+                            }
+                          ]
+                        }
+                      ],
+                      "match": [
+                        {
+                          "path": [
+                            "/api",
+                            "/api/*"
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "handle": [
+                        {
+                          "handler": "reverse_proxy",
+                          "headers": {
+                            "request": {
+                              "set": {
+                                "X-Forwarded-For": [
+                                  "{http.vars.client_ip}"
+                                ],
+                                "X-Real-IP": [
+                                  "{http.vars.client_ip}"
+                                ]
+                              }
+                            }
+                          },
+                          "upstreams": [
+                            {
+                              "dial": "bedrock-site-web-abc:8080"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "match": [
+                {
+                  "host": [
+                    "site.example.com"
+                  ]
+                }
+              ],
+              "terminal": true
+            }
+          ]
+        }
+      }
+    }
+  },
+  "logging": {
+    "logs": {
+      "default": {
+        "encoder": {
+          "format": "json"
+        },
+        "writer": {
+          "output": "stdout"
+        }
+      }
+    }
+  }
+}

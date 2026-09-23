@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -21,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kylebegeman/bedrock/internal/cloudflare"
 	"github.com/kylebegeman/bedrock/internal/docker"
 	"github.com/kylebegeman/bedrock/internal/edge"
 	"github.com/kylebegeman/bedrock/internal/integration"
@@ -641,7 +643,25 @@ func edgeConfig(ctx context.Context, store *state.Store, sec *secrets.Store) ([]
 			}
 		}
 	}
-	return edge.Config(routes)
+	return edge.ConfigBehind(routes, cloudflareProxies())
+}
+
+// cloudflareProxies are the ranges the edge trusts to say who a visitor
+// behind Cloudflare's proxy is: the list host setup keeps. Without one, or
+// with one that does not parse, nothing is trusted and apps see the
+// connecting address, which is the safe way to be wrong. Tests replace it.
+var cloudflareProxies = func() []string { return keptProxies(cloudflare.RangesFile) }
+
+func keptProxies(path string) []string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	r, err := cloudflare.ParseRanges(b)
+	if err != nil {
+		return nil
+	}
+	return r.All()
 }
 
 func checkTimeout(c manifest.Check) time.Duration {
