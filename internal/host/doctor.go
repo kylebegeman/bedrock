@@ -2,6 +2,7 @@ package host
 
 import (
 	"fmt"
+	"strings"
 )
 
 // Verdict is how a check came out.
@@ -150,6 +151,7 @@ func diagnoseServices(f Facts) []Result {
 
 func diagnoseAccess(f Facts) []Result {
 	r := results{diagnoseFirewall(f)}
+	r = append(r, diagnosePublished(f)...)
 	switch {
 	case f.SSH.PasswordAuth && f.SSH.RootKeys == 0:
 		r.add("ssh", Fail, "password login on, root has no key", "add a key to /root/.ssh/authorized_keys, then "+runSetup)
@@ -199,6 +201,37 @@ func diagnoseFirewall(f Facts) Result {
 	default:
 		return result(Pass, "active: ssh, 80, 443", "")
 	}
+}
+
+// diagnosePublished lists every port an app publishes on a public address
+// against ufw. Docker opens a published port itself, ahead of ufw's rules,
+// so anyone can reach it whatever ufw says; a rule open to anyone is how
+// ufw status comes to say so. A rule for only some sources reads as open
+// to them alone, which is not what happens, so it is no pass. And on a
+// machine that takes the web only from Cloudflare, bedrock's guard holds
+// 80 and 443 alone: a published port is outside it, and the doctor says so.
+func diagnosePublished(f Facts) []Result {
+	var r results
+	guard := ""
+	if f.CloudflareOnly() {
+		guard = "; the Cloudflare-only guard covers 80 and 443 alone, not this port"
+	}
+	for _, p := range f.Published {
+		name := "port " + p.Port
+		whose := fmt.Sprintf("published by %s's %s", p.App, p.Workload)
+		allow := "ufw allow " + p.Port + ", so the firewall says what is open; Docker publishes it either way"
+		open, sources := f.PortSources(p.Port)
+		switch {
+		case open:
+			r.add(name, Pass, whose+", open to anyone, as ufw says"+guard, "")
+		case len(sources) > 0:
+			r.add(name, Warn, fmt.Sprintf("%s to anyone past ufw, which allows it only from %s", whose, strings.Join(sources, ", "))+guard,
+				allow+". ufw can't narrow a port Docker publishes; to keep it off the internet, publish it on a private address (ports[].address)")
+		default:
+			r.add(name, Warn, whose+" to anyone past ufw, which has no rule for it"+guard, allow)
+		}
+	}
+	return r
 }
 
 func diagnoseUpkeep(f Facts) []Result {

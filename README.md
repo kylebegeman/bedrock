@@ -204,6 +204,57 @@ bedrock.worker.yaml` deploys the other one, and `bedrock secret copy <app> NAME
 
 </details>
 
+<details>
+<summary><b>A port on the machine itself, past the edge</b></summary>
+
+<br>
+
+Traffic that isn't HTTP on a hostname, such as Headscale's STUN, is published
+on the machine's own address instead of routed through the edge:
+
+```yaml
+app: headscale
+workloads:
+  server:
+    kind: web
+    image: headscale/headscale:0.26
+    port: 8080
+    routes: [{host: hs.example.com}]
+    singleton: true              # required: two copies can't hold one port
+    ports:
+      - port: 3478               # the container's port
+        protocol: udp            # tcp (the default) or udp
+        # host_port: 3478        # the machine's port; default the same
+        # address: 203.0.113.4   # one of the machine's addresses; default all
+```
+
+Only web and worker workloads publish ports, and only as singletons: a deploy
+starts the new container beside the old one, and the two can't hold one port,
+so a singleton's old container stops first. 22, 80, 443 and 5000 are the
+machine's own. A port another app on the machine already publishes is refused
+while the deploy is still a plan, and the plan lists what it will publish.
+One-off jobs, drills and previews publish nothing.
+
+Docker opens a published port ahead of ufw's rules, so the firewall neither
+opens nor closes it: anyone can reach it. Deploys don't change the firewall,
+so add the rule yourself, once, on the machine:
+
+```sh
+ufw allow 3478/udp
+```
+
+That rule changes nothing about what is reachable; it makes `ufw status` say
+what is open. `bedrock doctor` lists every port an app publishes on a public
+address, and warns about one ufw has no rule for, or allows only from some
+sources, since Docker publishes it to everyone either way. To keep a port off
+the internet, give it a private `address`; ufw can't narrow it.
+
+`bedrock host setup --web-from cloudflare` does not cover published ports.
+Its guard holds 80 and 443 alone, so a published port still answers anyone
+who knows the machine's address, and the doctor says so beside each one.
+
+</details>
+
 ## How apps are kept apart
 
 Each app runs as if it were alone on the machine.
@@ -266,7 +317,9 @@ reconcile` keeps it current. Every route must
 then be `dns: proxied`: setup refuses while an app routes a host any other
 way, and `deploy`, `rollback` and `dns point` refuse to add one. SSH stays
 reachable, keys only. Running setup again keeps the setting unless
-`--web-from` is given, and `--web-from anyone` opens the web again.
+`--web-from` is given, and `--web-from anyone` opens the web again. The guard
+covers 80 and 443 only: a port an app publishes on the machine with `ports:`
+stays open to anyone, and `bedrock doctor` says so.
 
 `bedrock git allow <app> <public key>` lets a key push that app and nothing
 else. Then, from the app's checkout:

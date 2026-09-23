@@ -53,8 +53,11 @@ type Facts struct {
 		Present bool `json:"present"`
 		Running bool `json:"running"`
 	} `json:"registry"`
-	EdgeRunning   bool `json:"edge_running"`
-	DaemonAnswers bool `json:"daemon_answers"`
+	// Published are the ports apps publish on the machine's public
+	// addresses, which Docker opens whatever ufw says.
+	Published     []PublishedPort `json:"published,omitempty"`
+	EdgeRunning   bool            `json:"edge_running"`
+	DaemonAnswers bool            `json:"daemon_answers"`
 	// PushUser is whether the bedrock user, which receives pushes, exists.
 	PushUser bool `json:"push_user"`
 }
@@ -72,6 +75,15 @@ type FirewallFacts struct {
 	// WebGuard is what stands between Docker's published web ports and
 	// the internet, which ufw's rules do not reach.
 	WebGuard WebGuard `json:"web_guard"`
+}
+
+// PublishedPort is a port an app's container publishes on the machine.
+type PublishedPort struct {
+	// Port is the machine's port and protocol, such as 3478/udp.
+	Port string `json:"port"`
+	// App and Workload are whose it is.
+	App      string `json:"app"`
+	Workload string `json:"workload"`
 }
 
 // RegistryContainer is the local image registry every build lands in.
@@ -148,6 +160,9 @@ func (f *Facts) gatherDocker(ctx context.Context, env Env) {
 		if state, err := env.Run(ctx, "docker", "inspect", "-f", "{{.State.Running}}", "bedrock-edge"); err == nil {
 			f.EdgeRunning = strings.TrimSpace(state) == "true"
 		}
+		if out, err := env.Run(ctx, "docker", "ps", "--filter", "label=bedrock.app", "--format", publishedFormat); err == nil {
+			f.Published = parsePublished(out)
+		}
 	}
 }
 
@@ -222,6 +237,49 @@ func (f *Facts) gatherUpkeep(ctx context.Context, env Env, socket string) {
 	}
 }
 
+// publishedFormat is what docker ps prints for each app container: whose
+// it is, and its ports as Docker writes them, such as
+// "0.0.0.0:3478->3478/udp, [::]:3478->3478/udp".
+const publishedFormat = "{{.Label \"bedrock.app\"}}\t{{.Label \"bedrock.workload\"}}\t{{.Ports}}"
+
+// parsePublished reads the ports app containers publish, once each however
+// many addresses they are bound to. A port bound only to the loopback
+// address is not reachable from outside and is left out, as is one the
+// image exposes without publishing.
+func parsePublished(text string) []PublishedPort {
+	var out []PublishedPort
+	seen := map[string]bool{}
+	for _, line := range strings.Split(text, "\n") {
+		fields := strings.Split(line, "\t")
+		if len(fields) != 3 {
+			continue
+		}
+		for _, binding := range strings.Split(fields[2], ", ") {
+			host, container, ok := strings.Cut(strings.TrimSpace(binding), "->")
+			if !ok {
+				continue
+			}
+			i := strings.LastIndex(host, ":")
+			if i < 0 {
+				continue
+			}
+			address := strings.Trim(host[:i], "[]")
+			if ip := net.ParseIP(address); ip != nil && ip.IsLoopback() {
+				continue
+			}
+			_, proto, _ := strings.Cut(container, "/")
+			port := host[i+1:] + "/" + proto
+			key := fields[0] + " " + fields[1] + " " + port
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, PublishedPort{Port: port, App: fields[0], Workload: fields[1]})
+		}
+	}
+	return out
+}
+
 // parseKeyValues reads KEY=value lines, unquoting values.
 func parseKeyValues(text string) map[string]string {
 	kv := map[string]string{}
@@ -254,7 +312,9 @@ func parseSSHDConfig(text string) map[string]string {
 // including through a named application profile like OpenSSH.
 func (f Facts) Allows(port string) bool {
 	for _, rule := range f.Firewall.Allowed {
-		if rule == port || (port == "22/tcp" && (rule == "OpenSSH" || rule == "22")) || rule == strings.TrimSuffix(port, "/tcp") {
+		// A rule without a protocol, such as 3478, allows both.
+		number, _, _ := strings.Cut(port, "/")
+		if rule == port || (port == "22/tcp" && (rule == "OpenSSH" || rule == "22")) || rule == number {
 			return true
 		}
 	}

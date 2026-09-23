@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -255,7 +257,73 @@ type Workload struct {
 	// again if the deploy fails. For a workload that owns state no second
 	// copy may share, such as a lock-holding worker or a SQLite file.
 	Singleton bool `yaml:"singleton,omitempty" json:"singleton,omitempty"`
+	// Ports are published on the machine itself, past the edge, for
+	// traffic that isn't HTTP on a hostname, such as STUN on 3478/udp. A
+	// workload that publishes one must be a singleton.
+	Ports []PublishedPort `yaml:"ports,omitempty" json:"ports,omitempty"`
 }
+
+// PublishedPort is one of a workload's ports reached directly on the
+// machine's own address rather than through the edge.
+type PublishedPort struct {
+	// Port is the container port.
+	Port int `yaml:"port" json:"port"`
+	// Protocol is tcp (the default) or udp.
+	Protocol string `yaml:"protocol,omitempty" json:"protocol,omitempty"`
+	// HostPort is the machine's port. Default the container port.
+	HostPort int `yaml:"host_port,omitempty" json:"host_port,omitempty"`
+	// Address is the machine address to listen on. Default every one.
+	Address string `yaml:"address,omitempty" json:"address,omitempty"`
+}
+
+// Proto is the port's protocol with its default applied.
+func (p PublishedPort) Proto() string {
+	if p.Protocol == "" {
+		return "tcp"
+	}
+	return p.Protocol
+}
+
+// OnHost is the machine's port with its default applied.
+func (p PublishedPort) OnHost() int {
+	if p.HostPort == 0 {
+		return p.Port
+	}
+	return p.HostPort
+}
+
+// String is the port as the machine sees it, such as 3478/udp or
+// 127.0.0.1:8443/tcp.
+func (p PublishedPort) String() string {
+	port := fmt.Sprintf("%d/%s", p.OnHost(), p.Proto())
+	if p.Address == "" {
+		return port
+	}
+	return net.JoinHostPort(p.Address, port)
+}
+
+// Overlaps reports whether two ports would claim the same socket on the
+// machine: the same port and protocol, on the same address or where
+// either listens on every address.
+func (p PublishedPort) Overlaps(o PublishedPort) bool {
+	if p.OnHost() != o.OnHost() || p.Proto() != o.Proto() {
+		return false
+	}
+	if p.Address == "" || o.Address == "" {
+		return true
+	}
+	a, errA := netip.ParseAddr(p.Address)
+	b, errB := netip.ParseAddr(o.Address)
+	if errA != nil || errB != nil {
+		return true
+	}
+	return a == b || a.IsUnspecified() || b.IsUnspecified()
+}
+
+// reservedHostPorts are the machine's own: ssh, the edge on 80 and 443
+// (443 over UDP too, for HTTP/3), and the image registry on 5000, which
+// is docker.Registry.
+var reservedHostPorts = map[int]string{22: "ssh", 80: "the edge", 443: "the edge", 5000: "bedrock's image registry"}
 
 // Build says how to build a workload's image.
 type Build struct {
@@ -427,13 +495,14 @@ func (m *Manifest) Validate() error {
 	if len(m.Workloads) == 0 {
 		fail("workloads: an app needs at least one")
 	}
-	claimed := map[string]string{} // host+path -> workload
-	names := map[string]string{}   // workload names and aliases -> workload
+	claimed := map[string]string{}   // host+path -> workload
+	names := map[string]string{}     // workload names and aliases -> workload
+	published := map[string]string{} // host port/protocol -> workload
 	for name := range m.Workloads {
 		names[name] = name
 	}
 	for _, name := range m.WorkloadNames() {
-		m.validateWorkload(name, claimed, names, fail)
+		m.validateWorkload(name, claimed, names, published, fail)
 	}
 	m.validateDNSModes(fail)
 	m.validateData(fail)
@@ -448,11 +517,13 @@ func (m *Manifest) Validate() error {
 }
 
 // validateWorkload checks one workload. claimed maps each host and path
-// to the workload routing it, names each name and alias to its workload.
-func (m *Manifest) validateWorkload(name string, claimed, names map[string]string, fail func(format string, args ...any)) {
+// to the workload routing it, names each name and alias to its workload,
+// and published each port and protocol on the machine to its workload.
+func (m *Manifest) validateWorkload(name string, claimed, names, published map[string]string, fail func(format string, args ...any)) {
 	w := m.Workloads[name]
 	at := "workloads." + name
 	validateShape(at, name, w, fail)
+	validatePorts(at, name, w, published, fail)
 	m.validateNames(at, name, w, names, fail)
 	validateRoutes(at, name, w, claimed, fail)
 	validateIsolation(at, w, fail)
@@ -524,6 +595,46 @@ func validateShape(at, name string, w Workload, fail func(format string, args ..
 	}
 	if w.Resources.Pids != 0 && (w.Resources.Pids < 16 || w.Resources.Pids > 1<<20) {
 		fail("%s.resources.pids: must be 16 or more", at)
+	}
+}
+
+// validatePorts checks the ports a workload publishes on the machine.
+// published maps each port and protocol already published in the app,
+// by the workloads before this one, to the workload publishing it.
+func validatePorts(at, name string, w Workload, published map[string]string, fail func(format string, args ...any)) {
+	if len(w.Ports) > 0 {
+		if w.Kind != Web && w.Kind != Worker {
+			fail("%s.ports: only web and worker workloads publish ports", at)
+		} else if !w.Singleton {
+			// A deploy starts the new revision beside the old, and two
+			// containers cannot hold one port on the machine.
+			fail("%s.ports: a workload that publishes a port must be singleton: true, so the old container lets go of the port before the new one takes it", at)
+		}
+	}
+	for i, p := range w.Ports {
+		pa := fmt.Sprintf("%s.ports[%d]", at, i)
+		if p.Port < 1 || p.Port > 65535 {
+			fail("%s.port: must be a port number, 1 to 65535", pa)
+		}
+		if p.HostPort != 0 && (p.HostPort < 1 || p.HostPort > 65535) {
+			fail("%s.host_port: must be a port number, 1 to 65535", pa)
+		}
+		if p.Protocol != "" && p.Protocol != "tcp" && p.Protocol != "udp" {
+			fail("%s.protocol: %q isn't tcp or udp", pa, p.Protocol)
+		}
+		if p.Address != "" {
+			if _, err := netip.ParseAddr(p.Address); err != nil {
+				fail("%s.address: %q isn't an IP address; leave it out to listen on every one", pa, p.Address)
+			}
+		}
+		if owner, taken := reservedHostPorts[p.OnHost()]; taken {
+			fail("%s: %d on the machine belongs to %s", pa, p.OnHost(), owner)
+		}
+		key := fmt.Sprintf("%d/%s", p.OnHost(), p.Proto())
+		if other, taken := published[key]; taken {
+			fail("%s: %s is already published by %s", pa, key, other)
+		}
+		published[key] = name
 	}
 }
 
@@ -807,6 +918,11 @@ func (m *Manifest) validatePreview(fail func(format string, args ...any)) {
 					fail("workloads.%s.routes[%d]: a preview's routes are all behind a sign-in (auth: loom)", name, i)
 				}
 			}
+			// Its parent already holds them, and a branch has no business
+			// answering on the machine's own address.
+			if len(m.Workloads[name].Ports) > 0 {
+				fail("workloads.%s.ports: a preview publishes nothing on the machine; its parent holds the ports", name)
+			}
 		}
 	}
 }
@@ -1071,6 +1187,25 @@ func (m *Manifest) GuardedRoutes() []string {
 			if r.Auth.Guarded() {
 				out = append(out, r.Host+r.NormalizedPath())
 			}
+		}
+	}
+	return out
+}
+
+// Published is one port an app publishes on the machine, and the workload
+// that publishes it.
+type Published struct {
+	Workload string
+	PublishedPort
+}
+
+// PublishedPorts lists every port the app publishes on the machine, in
+// the order the workloads are named.
+func (m *Manifest) PublishedPorts() []Published {
+	var out []Published
+	for _, name := range m.WorkloadNames() {
+		for _, p := range m.Workloads[name].Ports {
+			out = append(out, Published{Workload: name, PublishedPort: p})
 		}
 	}
 	return out

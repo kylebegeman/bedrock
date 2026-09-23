@@ -117,6 +117,60 @@ func openPorts(rules []FirewallRule) []string {
 	return open
 }
 
+// covers reports whether the rule is for a port such as 3478/udp: the
+// port itself, its number without a protocol (which ufw takes as both), or
+// a list or range that holds it, such as 3478,3479/udp or 60000:61000/udp.
+func (r FirewallRule) covers(port string) bool {
+	number, proto, _ := strings.Cut(port, "/")
+	n, err := strconv.Atoi(number)
+	if err != nil {
+		return false
+	}
+	ports, ruleProto, hasProto := strings.Cut(r.To, "/")
+	if hasProto && ruleProto != proto {
+		return false
+	}
+	for _, part := range strings.Split(ports, ",") {
+		lo, hi, isRange := strings.Cut(part, ":")
+		first, err := strconv.Atoi(lo)
+		if err != nil {
+			continue
+		}
+		last := first
+		if isRange {
+			if last, err = strconv.Atoi(hi); err != nil {
+				continue
+			}
+		}
+		if first <= n && n <= last {
+			return true
+		}
+	}
+	return false
+}
+
+// PortSources says who ufw lets reach a port such as 3478/udp: open when a
+// rule lets anyone reach it over IPv4, as Allowed lists them, and otherwise
+// the sources the rules for it let in, if any.
+func (f Facts) PortSources(port string) (open bool, sources []string) {
+	for _, r := range f.Firewall.Rules {
+		if !r.Lets() || !r.covers(port) {
+			continue
+		}
+		if r.Open() && !r.V6 {
+			return true, nil
+		}
+		from := r.From
+		if r.Open() {
+			from += " (v6)"
+		}
+		if !slices.Contains(sources, from) {
+			sources = append(sources, from)
+		}
+	}
+	return false, sources
+}
+
 // WebOpen reports whether the firewall lets anyone reach 80 or 443.
 func (f Facts) WebOpen() bool {
 	for _, r := range f.Firewall.Rules {

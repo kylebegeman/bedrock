@@ -37,12 +37,14 @@ workloads:
     grace: 20m
     order: 2
     singleton: false
+    ports: [{port: 0, protocol: sctp, host_port: 70000, address: nowhere}, {port: 443}, {port: 3478}]
   job:
     kind: cron
     image: x
     schedule: never
     timeout: forever
     routes: [{host: b.com}]
+    ports: [{port: 3478}]
   rel:
     kind: release
     image: x

@@ -137,7 +137,8 @@ type Spec struct {
 	Labels     map[string]string
 	// Networks the container joins; the first is its primary.
 	Networks []string
-	// Publish maps host ports, as "127.0.0.1:2019:2019/tcp" or "443:443/udp".
+	// Publish maps host ports, as "127.0.0.1:2019:2019/tcp", "443:443/udp"
+	// or "[::1]:8443:8443/tcp".
 	Publish []string
 	// Mounts as "volume:/path" or "/host/path:/path[:ro]".
 	Mounts      []string
@@ -315,12 +316,21 @@ func parsePublish(spec string) (network.Port, network.PortBinding, error) {
 		proto = spec[i+1:]
 		spec = spec[:i]
 	}
-	parts := strings.Split(spec, ":")
 	var hostIP, hostPort, containerPort string
-	switch len(parts) {
-	case 2:
+	// An IPv6 address carries colons of its own, so it comes in brackets,
+	// as in [::1]:8443:8443/tcp.
+	if strings.HasPrefix(spec, "[") {
+		end := strings.Index(spec, "]:")
+		if end < 0 {
+			return network.Port{}, network.PortBinding{}, fmt.Errorf("bad port publish %q", spec)
+		}
+		hostIP, spec = spec[1:end], spec[end+2:]
+	}
+	parts := strings.Split(spec, ":")
+	switch {
+	case len(parts) == 2:
 		hostPort, containerPort = parts[0], parts[1]
-	case 3:
+	case len(parts) == 3 && hostIP == "":
 		hostIP, hostPort, containerPort = parts[0], parts[1], parts[2]
 	default:
 		return network.Port{}, network.PortBinding{}, fmt.Errorf("bad port publish %q", spec)

@@ -60,6 +60,12 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 		}
 		r.images = rev.Images
 	}
+	// A port another app already holds on the machine would fail the new
+	// container at start, after the build and the releases. Refuse it
+	// while it is still only a plan.
+	if err := checkPublishedPorts(ctx, r.store, m); err != nil {
+		return nil, err
+	}
 	for _, name := range m.WorkloadNames() {
 		if m.Workloads[name].LongRunning() {
 			r.containers[name] = docker.ContainerName(m.App, name, revision)
@@ -366,7 +372,7 @@ func (r *rollout) releaseStep(releases []string) kernel.Step {
 
 func (r *rollout) startStep() kernel.Step {
 	return kernel.Step{
-		Name: "start", Change: fmt.Sprintf("start %d container(s)", len(r.containers)),
+		Name: "start", Change: fmt.Sprintf("start %d container(s)", len(r.containers)) + publishedSummary(r.m),
 		Note: notes("revision "+r.revision, secretsNote(r.m)),
 		Apply: func(ctx context.Context, out io.Writer) (startErr error) {
 			e, err := r.connect(ctx)

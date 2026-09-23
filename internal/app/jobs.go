@@ -86,7 +86,7 @@ func (j *Jobs) RunWith(ctx context.Context, rev *state.Revision, workload string
 	if err != nil {
 		return -1, err
 	}
-	spec, err := containerSpec(&m, workload, w, rev.ID, image, values)
+	spec, err := jobSpec(&m, rev.ID, workload, w, image, values)
 	if err != nil {
 		return -1, err
 	}
@@ -97,13 +97,6 @@ func (j *Jobs) RunWith(ctx context.Context, rev *state.Revision, workload string
 		}
 		spec.Env = append(spec.Env, name+"="+v)
 	}
-	spec.Name = fmt.Sprintf("bedrock-%s-%s-job-%d", rev.App, workload, time.Now().UnixMilli())
-	spec.Restart = false
-	// A job never takes traffic: it stays on the app's own network, and
-	// answers to none of the workload's names, which belong to the
-	// workload's running containers.
-	spec.Networks = []string{docker.AppNetwork(rev.App)}
-	spec.Aliases = nil
 	spec.Stdin = opts.Stdin
 	if len(command) > 0 {
 		spec.Cmd = command
@@ -339,4 +332,23 @@ func (c *closingWriter) close() {
 	c.mu.Lock()
 	c.closed = true
 	c.mu.Unlock()
+}
+
+// jobSpec is the container a one-off job runs in: the workload's own, made
+// into something that runs once beside it.
+func jobSpec(m *manifest.Manifest, revision, workload string, w manifest.Workload, image string, values map[string]string) (docker.Spec, error) {
+	spec, err := containerSpec(m, workload, w, revision, image, values)
+	if err != nil {
+		return spec, err
+	}
+	spec.Name = fmt.Sprintf("bedrock-%s-%s-job-%d", m.App, workload, time.Now().UnixMilli())
+	spec.Restart = false
+	// A job never takes traffic: it stays on the app's own network, and
+	// answers to none of the workload's names, which belong to the
+	// workload's running containers. Its ports on the machine are theirs
+	// too, and are already taken.
+	spec.Networks = []string{docker.AppNetwork(m.App)}
+	spec.Aliases = nil
+	spec.Publish = nil
+	return spec, nil
 }

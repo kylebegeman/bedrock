@@ -2,6 +2,7 @@ app: "Bad" must be lowercase letters, digits and hyphens, up to 40 characters
 workloads.job.schedule: expected exactly 5 fields, found 1: [never]
 workloads.job: a cron workload has no routes or port
 workloads.job.timeout: "forever" isn't a duration such as 30m
+workloads.job.ports: only web and worker workloads publish ports
 workloads.rel: a release workload runs once per deploy; it has no routes, port or schedule
 workloads.site: a static workload needs dir, the directory to serve
 workloads.site: a static workload has dir only, no image, build or port
@@ -11,6 +12,13 @@ workloads.web: dir is for static workloads
 workloads.web: order is for release workloads
 workloads.web.grace: "20m" must be a duration from 1s to 10m
 workloads.web.resources.pids: must be 16 or more
+workloads.web.ports: a workload that publishes a port must be singleton: true, so the old container lets go of the port before the new one takes it
+workloads.web.ports[0].port: must be a port number, 1 to 65535
+workloads.web.ports[0].host_port: must be a port number, 1 to 65535
+workloads.web.ports[0].protocol: "sctp" isn't tcp or udp
+workloads.web.ports[0].address: "nowhere" isn't an IP address; leave it out to listen on every one
+workloads.web.ports[1]: 443 on the machine belongs to the edge
+workloads.web.ports[2]: 3478/tcp is already published by job
 workloads.web.aliases: "Bad" must be lowercase letters, digits and hyphens
 workloads.web.health: give a path or a command, not both
 workloads.web.health.command: an argument is empty
@@ -56,10 +64,12 @@ backup.verify: sql is required
 preview.of: "Bad" must name the app this previews
 preview.branch: must name the branch, on one line
 workloads.job.routes[0]: a preview's routes are all behind a sign-in (auth: loom)
+workloads.job.ports: a preview publishes nothing on the machine; its parent holds the ports
 workloads.site.routes[0]: a preview's routes are all behind a sign-in (auth: loom)
 workloads.web.routes[0]: a preview's routes are all behind a sign-in (auth: loom)
 workloads.web.routes[1]: a preview's routes are all behind a sign-in (auth: loom)
 workloads.web.routes[2]: a preview's routes are all behind a sign-in (auth: loom)
+workloads.web.ports: a preview publishes nothing on the machine; its parent holds the ports
 checks[0]: url must start with https:// or http://
 checks[0]: status must be an HTTP status
 checks[0].within: "soon" isn't a duration such as 5s
