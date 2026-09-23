@@ -124,7 +124,7 @@
         <tbody>
           <tr><td class="k">Workload shapes</td><td>Done</td><td><code>web</code>, <code>static</code>, <code>worker</code>, <code>cron</code> and <code>release</code>. A release workload runs migrations after the data is up and before the new revision starts.</td></tr>
           <tr><td class="k">Getting an image</td><td>Done</td><td>Build from a Dockerfile with BuildKit into a local registry, or pull a published image. Build context, target stage and args are all in the manifest.</td></tr>
-          <tr><td class="k">Routing and TLS</td><td>Done</td><td>Caddy, routes by host and path, certificates issued and renewed automatically, DNS written to Cloudflare to match the manifest.</td></tr>
+          <tr><td class="k">Routing and TLS</td><td>Done</td><td>Caddy, routes by host and path, certificates issued and renewed automatically, DNS written to Cloudflare to match the manifest. As of 0.7.8 a reload lets upgraded connections finish for up to five minutes instead of cutting them.</td></tr>
           <tr><td class="k">Data</td><td>Partial</td><td>Postgres and named volumes are first class. S3-compatible object storage is first class. Everything else, including Redis or MySQL, has to be hand-rolled as a worker with a volume.</td></tr>
           <tr><td class="k">Secrets</td><td>Done</td><td>Sealed with age against a recovery identity, generated or derived per app, never in arguments, logs, receipts or backups.</td></tr>
           <tr><td class="k">Backups</td><td>Done</td><td>restic to B2, writers quiesced before the snapshot and the capture refused if a writer had to be killed, scheduled, with restore drills and a verification query.</td></tr>
@@ -136,6 +136,7 @@
           <tr><td class="k">Moving an app to its own machine</td><td>Partial</td><td><code>bedrock move</code> as of 0.7.6: two commands, one per machine, over the shared bucket. Needs both machines reading the same storage, which these two do not.</td></tr>
           <tr><td class="k">Putting a sign-in on a route</td><td>Done</td><td><code>auth: loom</code> as of 0.7.6, through the edge, with no auth code in the app. Fixed in 0.7.7: a status code alone could be answered by the Core's single-page fallback, which left the guard open.</td></tr>
           <tr><td class="k">Previewing a branch</td><td>Done</td><td><code>bedrock preview up</code> as of 0.7.7. A branch runs as its own app, guarded, with an empty database.</td></tr>
+          <tr><td class="k">Publishing a port on the machine</td><td>Done</td><td><code>ports:</code> as of 0.7.8, for a singleton web or worker workload, such as a STUN relay on 3478/udp. Docker publishes ahead of ufw, so <code>bedrock doctor</code> reports each public port ufw does not allow.</td></tr>
           <tr><td class="k">Setting up machine number two</td><td>Partial</td><td>Every integration is sealed per machine and typed in again on each new one. Nothing carries over.</td></tr>
           <tr><td class="k">The test bed</td><td>Broken</td><td>The lane has no machine: its target became production. Proofs cannot run until it points somewhere disposable.</td></tr>
         </tbody>
