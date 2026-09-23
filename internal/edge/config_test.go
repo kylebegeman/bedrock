@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestConfigGroupsByHostAndOrdersPrefixes(t *testing.T) {
@@ -81,5 +82,54 @@ func TestInitialServesNothingButAnswersAdmin(t *testing.T) {
 	}
 	if !strings.Contains(string(Initial()), `"routes": []`) {
 		t.Fatalf("initial config:\n%s", Initial())
+	}
+}
+
+// Every handler that reaches an app keeps its upgraded connections for a
+// while after a reload, guarded or not; the guard's own probe is never
+// upgraded and has no reason to.
+func TestUpgradedConnectionsOutliveAReload(t *testing.T) {
+	cfg, err := Config([]Route{
+		{Host: "site.example.com", Path: "/", Dial: "bedrock-site-abc:8080"},
+		{Host: "site.example.com", Path: "/ws/", Dial: "bedrock-site-abc:8081"},
+		{Host: "admin.example.com", Path: "/", Dial: "bedrock-admin-abc:8000",
+			Guard: &Guard{Dial: "loom.example.com:443", Path: "/verify", TLS: true, HeaderName: "X-Loom-Verified", HeaderValue: "1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tree any
+	if err := json.Unmarshal(cfg, &tree); err != nil {
+		t.Fatal(err)
+	}
+	delays := map[string]any{}
+	var walk func(v any)
+	walk = func(v any) {
+		switch v := v.(type) {
+		case map[string]any:
+			if v["handler"] == "reverse_proxy" {
+				dial := v["upstreams"].([]any)[0].(map[string]any)["dial"].(string)
+				delays[dial] = v["stream_close_delay"]
+			}
+			for _, child := range v {
+				walk(child)
+			}
+		case []any:
+			for _, child := range v {
+				walk(child)
+			}
+		}
+	}
+	walk(tree)
+	for _, dial := range []string{"bedrock-site-abc:8080", "bedrock-site-abc:8081", "bedrock-admin-abc:8000"} {
+		if delays[dial] != StreamCloseDelay {
+			t.Errorf("%s: stream_close_delay %v, want %s", dial, delays[dial], StreamCloseDelay)
+		}
+	}
+	if delay, found := delays["loom.example.com:443"]; !found || delay != nil {
+		t.Errorf("the guard's probe: stream_close_delay %v (found %v), want none", delay, found)
+	}
+	if _, err := time.ParseDuration(StreamCloseDelay); err != nil {
+		t.Fatalf("Caddy reads the delay as a Go duration: %v", err)
 	}
 }

@@ -55,6 +55,7 @@
                                           }
                                         }
                                       },
+                                      "stream_close_delay": "5m",
                                       "upstreams": [
                                         {
                                           "dial": "bedrock-admin-web-abc:8080"
@@ -139,6 +140,7 @@
                               }
                             }
                           },
+                          "stream_close_delay": "5m",
                           "upstreams": [
                             {
                               "dial": "unix//run/bedrock/hooks.sock"
@@ -171,6 +173,7 @@
                               }
                             }
                           },
+                          "stream_close_delay": "5m",
                           "upstreams": [
                             {
                               "dial": "bedrock-site-api-abc:9000"
@@ -203,6 +206,7 @@
                               }
                             }
                           },
+                          "stream_close_delay": "5m",
                           "upstreams": [
                             {
                               "dial": "bedrock-site-web-abc:8080"
