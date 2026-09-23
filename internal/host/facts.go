@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kylebegeman/bedrock/internal/edge"
 )
 
 // Facts is what bedrock knows about the machine after looking, without
@@ -81,9 +83,31 @@ type FirewallFacts struct {
 type PublishedPort struct {
 	// Port is the machine's port and protocol, such as 3478/udp.
 	Port string `json:"port"`
-	// App and Workload are whose it is.
+	// Container is the container that publishes it.
+	Container string `json:"container,omitempty"`
+	// App and Workload are whose it is. Bedrock's own containers, such
+	// as the edge, have no workload.
 	App      string `json:"app"`
 	Workload string `json:"workload"`
+}
+
+// Whose names what publishes the port, the way the doctor reads: the edge
+// or the registry for bedrock's own, an app's workload for the rest, and
+// the app or the container alone when a label is missing.
+func (p PublishedPort) Whose() string {
+	switch {
+	case p.Container == edge.Container:
+		return "the edge"
+	case p.Container == RegistryContainer:
+		return "the registry"
+	case p.App != "" && p.Workload != "":
+		return p.App + "'s " + p.Workload
+	case p.App != "":
+		return p.App
+	case p.Container != "":
+		return p.Container
+	}
+	return "a container"
 }
 
 // RegistryContainer is the local image registry every build lands in.
@@ -157,7 +181,7 @@ func (f *Facts) gatherDocker(ctx context.Context, env Env) {
 			f.Registry.Present = true
 			f.Registry.Running = strings.TrimSpace(state) == "true"
 		}
-		if state, err := env.Run(ctx, "docker", "inspect", "-f", "{{.State.Running}}", "bedrock-edge"); err == nil {
+		if state, err := env.Run(ctx, "docker", "inspect", "-f", "{{.State.Running}}", edge.Container); err == nil {
 			f.EdgeRunning = strings.TrimSpace(state) == "true"
 		}
 		if out, err := env.Run(ctx, "docker", "ps", "--filter", "label=bedrock.app", "--format", publishedFormat); err == nil {
@@ -237,10 +261,10 @@ func (f *Facts) gatherUpkeep(ctx context.Context, env Env, socket string) {
 	}
 }
 
-// publishedFormat is what docker ps prints for each app container: whose
-// it is, and its ports as Docker writes them, such as
+// publishedFormat is what docker ps prints for each app container: its
+// name, whose it is, and its ports as Docker writes them, such as
 // "0.0.0.0:3478->3478/udp, [::]:3478->3478/udp".
-const publishedFormat = "{{.Label \"bedrock.app\"}}\t{{.Label \"bedrock.workload\"}}\t{{.Ports}}"
+const publishedFormat = "{{.Names}}\t{{.Label \"bedrock.app\"}}\t{{.Label \"bedrock.workload\"}}\t{{.Ports}}"
 
 // parsePublished reads the ports app containers publish, once each however
 // many addresses they are bound to. A port bound only to the loopback
@@ -251,10 +275,11 @@ func parsePublished(text string) []PublishedPort {
 	seen := map[string]bool{}
 	for _, line := range strings.Split(text, "\n") {
 		fields := strings.Split(line, "\t")
-		if len(fields) != 3 {
+		if len(fields) != 4 {
 			continue
 		}
-		for _, binding := range strings.Split(fields[2], ", ") {
+		name, app, workload := fields[0], fields[1], fields[2]
+		for _, binding := range strings.Split(fields[3], ", ") {
 			host, container, ok := strings.Cut(strings.TrimSpace(binding), "->")
 			if !ok {
 				continue
@@ -269,12 +294,12 @@ func parsePublished(text string) []PublishedPort {
 			}
 			_, proto, _ := strings.Cut(container, "/")
 			port := host[i+1:] + "/" + proto
-			key := fields[0] + " " + fields[1] + " " + port
+			key := name + " " + port
 			if seen[key] {
 				continue
 			}
 			seen[key] = true
-			out = append(out, PublishedPort{Port: port, App: fields[0], Workload: fields[1]})
+			out = append(out, PublishedPort{Port: port, Container: name, App: app, Workload: workload})
 		}
 	}
 	return out

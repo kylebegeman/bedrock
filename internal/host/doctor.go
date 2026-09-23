@@ -218,7 +218,7 @@ func diagnosePublished(f Facts) []Result {
 	}
 	for _, p := range f.Published {
 		name := "port " + p.Port
-		whose := fmt.Sprintf("published by %s's %s", p.App, p.Workload)
+		whose := "published by " + p.Whose()
 		allow := "ufw allow " + p.Port + ", so the firewall says what is open; Docker publishes it either way"
 		open, sources := f.PortSources(p.Port)
 		switch {

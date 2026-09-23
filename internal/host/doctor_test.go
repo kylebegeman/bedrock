@@ -99,13 +99,16 @@ func TestDoctorNeverSuggestsLockingYourselfOut(t *testing.T) {
 func TestThePortsAppsPublishAreListedAgainstTheFirewall(t *testing.T) {
 	m := setUpBox(t)
 	m.answers["docker ps --filter label=bedrock.app --format "+publishedFormat] = strings.Join([]string{
-		"headscale\tserver\t0.0.0.0:3478->3478/udp, [::]:3478->3478/udp, 127.0.0.1:19090->9090/tcp, 8080/tcp",
-		"relay\tstun\t0.0.0.0:3479->3479/udp, [::]:3479->3479/udp",
-		"site\tweb\t8000/tcp",
+		"headscale-server-3f2a\theadscale\tserver\t0.0.0.0:3478->3478/udp, [::]:3478->3478/udp, 127.0.0.1:19090->9090/tcp, 8080/tcp",
+		"relay-stun-9c1d\trelay\tstun\t0.0.0.0:3479->3479/udp, [::]:3479->3479/udp",
+		"site-web-77e0\tsite\tweb\t8000/tcp",
 	}, "\n")
 	m.answers["ufw status"] += "3479/udp                   ALLOW       Anywhere\n"
 	f := Gather(context.Background(), m.env(), "")
-	want := []PublishedPort{{Port: "3478/udp", App: "headscale", Workload: "server"}, {Port: "3479/udp", App: "relay", Workload: "stun"}}
+	want := []PublishedPort{
+		{Port: "3478/udp", Container: "headscale-server-3f2a", App: "headscale", Workload: "server"},
+		{Port: "3479/udp", Container: "relay-stun-9c1d", App: "relay", Workload: "stun"},
+	}
 	if !slices.Equal(f.Published, want) {
 		t.Fatalf("published %+v, want %+v", f.Published, want)
 	}
@@ -121,6 +124,42 @@ func TestThePortsAppsPublishAreListedAgainstTheFirewall(t *testing.T) {
 	}
 	if r["firewall"].Verdict != Pass {
 		t.Fatalf("the firewall itself: %+v", r["firewall"])
+	}
+}
+
+// The edge carries the app label but no workload, so its ports read as
+// the edge's, not as an app's workload with no name.
+func TestTheEdgesPortsReadAsTheEdges(t *testing.T) {
+	m := setUpBox(t)
+	m.answers["docker ps --filter label=bedrock.app --format "+publishedFormat] =
+		"bedrock-edge\tedge\t\t0.0.0.0:80->80/tcp, [::]:80->80/tcp, 0.0.0.0:443->443/tcp, [::]:443->443/tcp, 0.0.0.0:443->443/udp, [::]:443->443/udp"
+	f := Gather(context.Background(), m.env(), "")
+	r := byName(Diagnose(f))
+	if got := r["port 80/tcp"]; got.Verdict != Pass || !strings.HasPrefix(got.Detail, "published by the edge, open to anyone") {
+		t.Fatalf("80/tcp: %+v", got)
+	}
+	if got := r["port 443/udp"]; got.Verdict != Warn || !strings.HasPrefix(got.Detail, "published by the edge to anyone past ufw") {
+		t.Fatalf("443/udp: %+v", got)
+	}
+}
+
+// A container missing a label still says whose its port is, as fully as
+// its labels allow, with no dangling possessive.
+func TestAPublishedPortIsNamedWhateverLabelsItHas(t *testing.T) {
+	for _, c := range []struct {
+		port PublishedPort
+		want string
+	}{
+		{PublishedPort{Container: "headscale-server-3f2a", App: "headscale", Workload: "server"}, "headscale's server"},
+		{PublishedPort{Container: "bedrock-edge", App: "edge"}, "the edge"},
+		{PublishedPort{Container: RegistryContainer}, "the registry"},
+		{PublishedPort{Container: "chat-3f2a", App: "chat"}, "chat"},
+		{PublishedPort{Container: "chat-3f2a"}, "chat-3f2a"},
+		{PublishedPort{}, "a container"},
+	} {
+		if got := c.port.Whose(); got != c.want {
+			t.Errorf("%+v: %q, want %q", c.port, got, c.want)
+		}
 	}
 }
 
