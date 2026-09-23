@@ -93,136 +93,167 @@ func (s Scaffold) Render() ([]byte, error) {
 	if err := s.Check(); err != nil {
 		return nil, err
 	}
-	var b strings.Builder
-	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
-
-	w("# %s, as bedrock deploys it.\n", s.App)
-	w("#\n")
-	w("# Anything left out takes its default, and the defaults are the safe\n")
-	w("# ones: a read-only root, no capabilities, a non-root user. Run\n")
-	w("# `bedrock deploy` from the directory holding this file.\n")
-	w("app: %s\n", s.App)
-	w("description: What this app is\n")
-	w("owner: personal\n")
-	w("\n")
-	w("workloads:\n")
-
+	r := &rendering{s: s}
+	r.header()
 	switch s.Kind {
 	case Static:
-		dir := s.Dir
-		if dir == "" {
-			dir = "public"
-		}
-		w("  # A static workload serves files straight from the source. It has\n")
-		w("  # no image and no port; the edge serves the directory itself.\n")
-		w("  pages:\n")
-		w("    kind: static\n")
-		w("    dir: %s\n", dir)
-		w("    routes:\n")
-		w("      - host: %s\n", s.Host)
+		r.static()
 	case Web:
-		port := s.Port
-		if port == 0 {
-			port = DefaultPort
-		}
-		w("  web:\n")
-		w("    kind: web\n")
-		w("    # Built from ./Dockerfile. To deploy an image that is already\n")
-		w("    # published, drop `build` and give `image: registry/name:tag`.\n")
-		w("    build:\n")
-		w("      context: .\n")
-		w("    # The port the process listens on inside the container.\n")
-		w("    port: %d\n", port)
-		w("    routes:\n")
-		w("      - host: %s\n", s.Host)
-		w("    # Until this answers 200 the new revision is never given traffic,\n")
-		w("    # and a deploy that cannot pass it rolls back on its own.\n")
-		w("    health:\n")
-		w("      path: /healthz\n")
-		w("    resources:\n")
-		w("      memory: 512m\n")
+		r.web()
 	case Worker:
-		w("  # A worker runs without listening, so it has no port and no routes.\n")
-		w("  worker:\n")
-		w("    kind: worker\n")
-		w("    build:\n")
-		w("      context: .\n")
-		w("    # Without a command the image's own CMD runs.\n")
-		w("    # command: [./app, worker]\n")
-		w("    #\n")
-		w("    # singleton keeps the old copy from overlapping the new one\n")
-		w("    # during a deploy, for work that must not run twice at once.\n")
-		w("    # singleton: true\n")
-		w("    resources:\n")
-		w("      memory: 512m\n")
+		r.worker()
 	case Cron:
-		schedule := s.Schedule
-		if schedule == "" {
-			schedule = DefaultSchedule
-		}
-		w("  # A cron workload runs its command on a schedule and exits. It is\n")
-		w("  # never given traffic, so it has no port and no routes.\n")
-		w("  job:\n")
-		w("    kind: cron\n")
-		w("    build:\n")
-		w("      context: .\n")
-		w("    schedule: %q\n", schedule)
-		w("    # A run that outlives its timeout is stopped and recorded failed.\n")
-		w("    timeout: 30m\n")
-		w("    # command: [./app, nightly]\n")
-		w("    resources:\n")
-		w("      memory: 512m\n")
+		r.cron()
 	}
-
 	if s.Postgres {
-		w("\n")
-		w("  # A release workload runs once per deploy, after the database is up\n")
-		w("  # and before the new revision starts. This is where migrations go.\n")
-		w("  # It is commented out because only you know the command; a release\n")
-		w("  # step that runs the wrong thing runs it on every single deploy.\n")
-		w("  #\n")
-		w("  # migrate:\n")
-		w("  #   kind: release\n")
-		w("  #   order: 1\n")
-		w("  #   build:\n")
-		w("  #     context: .\n")
-		w("  #   command: [./app, migrate]\n")
-		w("  #   timeout: 5m\n")
+		r.release()
+		r.data()
 	}
-
-	if s.Postgres {
-		w("\n")
-		w("data:\n")
-		w("  # Every workload above is given DATABASE_URL pointing here, so\n")
-		w("  # nothing else needs declaring to use it. bedrock generates the\n")
-		w("  # password, seals it, and never writes it to a log or a receipt.\n")
-		w("  postgres:\n")
-		w("    version: \"17\"\n")
-		w("\n")
-		w("backup:\n")
-		w("  # An app with data is backed up nightly by default, with a weekly\n")
-		w("  # drill that restores it somewhere safe to prove it opens.\n")
-		w("  #\n")
-		w("  # A verify query makes a backup prove it holds real rows before it\n")
-		w("  # counts. Point it at a table that is never legitimately empty.\n")
-		w("  #\n")
-		w("  # verify:\n")
-		w("  #   sql: select count(*) from users\n")
-		w("  #   at_least: 1\n")
-	}
-
 	if s.Host != "" {
-		w("\n")
-		w("# Checked after the deploy. A failure here rolls the deploy back.\n")
-		w("checks:\n")
-		w("  - url: https://%s/\n", s.Host)
+		r.checks()
 	}
-
-	out := []byte(b.String())
+	out := []byte(r.b.String())
 	if _, err := Parse(out); err != nil {
 		return nil, fmt.Errorf("the generated manifest is not valid, which is a bug in bedrock: %w", err)
 	}
 	return out, nil
+}
+
+// rendering is a scaffold being written, one section per method.
+type rendering struct {
+	s Scaffold
+	b strings.Builder
+}
+
+func (r *rendering) w(format string, args ...any) { fmt.Fprintf(&r.b, format, args...) }
+
+func (r *rendering) header() {
+	r.w("# %s, as bedrock deploys it.\n", r.s.App)
+	r.w("#\n")
+	r.w("# Anything left out takes its default, and the defaults are the safe\n")
+	r.w("# ones: a read-only root, no capabilities, a non-root user. Run\n")
+	r.w("# `bedrock deploy` from the directory holding this file.\n")
+	r.w("app: %s\n", r.s.App)
+	r.w("description: What this app is\n")
+	r.w("owner: personal\n")
+	r.w("\n")
+	r.w("workloads:\n")
+}
+
+func (r *rendering) static() {
+	dir := r.s.Dir
+	if dir == "" {
+		dir = "public"
+	}
+	r.w("  # A static workload serves files straight from the source. It has\n")
+	r.w("  # no image and no port; the edge serves the directory itself.\n")
+	r.w("  pages:\n")
+	r.w("    kind: static\n")
+	r.w("    dir: %s\n", dir)
+	r.w("    routes:\n")
+	r.w("      - host: %s\n", r.s.Host)
+}
+
+func (r *rendering) web() {
+	port := r.s.Port
+	if port == 0 {
+		port = DefaultPort
+	}
+	r.w("  web:\n")
+	r.w("    kind: web\n")
+	r.w("    # Built from ./Dockerfile. To deploy an image that is already\n")
+	r.w("    # published, drop `build` and give `image: registry/name:tag`.\n")
+	r.w("    build:\n")
+	r.w("      context: .\n")
+	r.w("    # The port the process listens on inside the container.\n")
+	r.w("    port: %d\n", port)
+	r.w("    routes:\n")
+	r.w("      - host: %s\n", r.s.Host)
+	r.w("    # Until this answers 200 the new revision is never given traffic,\n")
+	r.w("    # and a deploy that cannot pass it rolls back on its own.\n")
+	r.w("    health:\n")
+	r.w("      path: /healthz\n")
+	r.w("    resources:\n")
+	r.w("      memory: 512m\n")
+}
+
+func (r *rendering) worker() {
+	r.w("  # A worker runs without listening, so it has no port and no routes.\n")
+	r.w("  worker:\n")
+	r.w("    kind: worker\n")
+	r.w("    build:\n")
+	r.w("      context: .\n")
+	r.w("    # Without a command the image's own CMD runs.\n")
+	r.w("    # command: [./app, worker]\n")
+	r.w("    #\n")
+	r.w("    # singleton keeps the old copy from overlapping the new one\n")
+	r.w("    # during a deploy, for work that must not run twice at once.\n")
+	r.w("    # singleton: true\n")
+	r.w("    resources:\n")
+	r.w("      memory: 512m\n")
+}
+
+func (r *rendering) cron() {
+	schedule := r.s.Schedule
+	if schedule == "" {
+		schedule = DefaultSchedule
+	}
+	r.w("  # A cron workload runs its command on a schedule and exits. It is\n")
+	r.w("  # never given traffic, so it has no port and no routes.\n")
+	r.w("  job:\n")
+	r.w("    kind: cron\n")
+	r.w("    build:\n")
+	r.w("      context: .\n")
+	r.w("    schedule: %q\n", schedule)
+	r.w("    # A run that outlives its timeout is stopped and recorded failed.\n")
+	r.w("    timeout: 30m\n")
+	r.w("    # command: [./app, nightly]\n")
+	r.w("    resources:\n")
+	r.w("      memory: 512m\n")
+}
+
+func (r *rendering) release() {
+	r.w("\n")
+	r.w("  # A release workload runs once per deploy, after the database is up\n")
+	r.w("  # and before the new revision starts. This is where migrations go.\n")
+	r.w("  # It is commented out because only you know the command; a release\n")
+	r.w("  # step that runs the wrong thing runs it on every single deploy.\n")
+	r.w("  #\n")
+	r.w("  # migrate:\n")
+	r.w("  #   kind: release\n")
+	r.w("  #   order: 1\n")
+	r.w("  #   build:\n")
+	r.w("  #     context: .\n")
+	r.w("  #   command: [./app, migrate]\n")
+	r.w("  #   timeout: 5m\n")
+}
+
+func (r *rendering) data() {
+	r.w("\n")
+	r.w("data:\n")
+	r.w("  # Every workload above is given DATABASE_URL pointing here, so\n")
+	r.w("  # nothing else needs declaring to use it. bedrock generates the\n")
+	r.w("  # password, seals it, and never writes it to a log or a receipt.\n")
+	r.w("  postgres:\n")
+	r.w("    version: \"17\"\n")
+	r.w("\n")
+	r.w("backup:\n")
+	r.w("  # An app with data is backed up nightly by default, with a weekly\n")
+	r.w("  # drill that restores it somewhere safe to prove it opens.\n")
+	r.w("  #\n")
+	r.w("  # A verify query makes a backup prove it holds real rows before it\n")
+	r.w("  # counts. Point it at a table that is never legitimately empty.\n")
+	r.w("  #\n")
+	r.w("  # verify:\n")
+	r.w("  #   sql: select count(*) from users\n")
+	r.w("  #   at_least: 1\n")
+}
+
+func (r *rendering) checks() {
+	r.w("\n")
+	r.w("# Checked after the deploy. A failure here rolls the deploy back.\n")
+	r.w("checks:\n")
+	r.w("  - url: https://%s/\n", r.s.Host)
 }
 
 // Next says what the person still has to supply, in the order they will

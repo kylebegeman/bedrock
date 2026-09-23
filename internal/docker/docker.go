@@ -183,10 +183,40 @@ func (e *Engine) Run(ctx context.Context, spec Spec) error {
 		_, err := e.cli.ContainerStart(ctx, info.ID, client.ContainerStartOptions{})
 		return err
 	}
-	labels := map[string]string{LabelOwner: OwnerValue}
-	for k, v := range spec.Labels {
-		labels[k] = v
+	hostConfig, exposed, err := hostConfigFor(spec)
+	if err != nil {
+		return err
 	}
+	endpoints := map[string]*network.EndpointSettings{}
+	if len(spec.Networks) > 0 {
+		endpoints[spec.Networks[0]] = &network.EndpointSettings{Aliases: spec.Aliases}
+	}
+	created, err := e.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Name:             spec.Name,
+		Config:           containerConfigFor(spec, exposed),
+		HostConfig:       hostConfig,
+		NetworkingConfig: &network.NetworkingConfig{EndpointsConfig: endpoints},
+	})
+	if err != nil {
+		return fmt.Errorf("create %s: %w", spec.Name, err)
+	}
+	for _, extra := range spec.Networks[min(1, len(spec.Networks)):] {
+		if _, err := e.cli.NetworkConnect(ctx, extra, client.NetworkConnectOptions{Container: created.ID, EndpointConfig: &network.EndpointSettings{}}); err != nil {
+			return fmt.Errorf("connect %s to %s: %w", spec.Name, extra, err)
+		}
+	}
+	if spec.Stdin != nil {
+		return e.startAttached(ctx, created.ID, spec)
+	}
+	if _, err := e.cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
+		return fmt.Errorf("start %s: %w", spec.Name, err)
+	}
+	return nil
+}
+
+// hostConfigFor is how Docker is to run a spec: its mounts, limits and
+// privileges, and the ports it publishes, which the container also exposes.
+func hostConfigFor(spec Spec) (*container.HostConfig, network.PortSet, error) {
 	hostConfig := &container.HostConfig{
 		Binds:          spec.Mounts,
 		LogConfig:      container.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "20m", "max-file": "5"}},
@@ -231,15 +261,21 @@ func (e *Engine) Run(ctx context.Context, spec Spec) error {
 		for _, p := range spec.Publish {
 			port, binding, err := parsePublish(p)
 			if err != nil {
-				return err
+				return nil, nil, err
 			}
 			exposed[port] = struct{}{}
 			hostConfig.PortBindings[port] = append(hostConfig.PortBindings[port], binding)
 		}
 	}
-	endpoints := map[string]*network.EndpointSettings{}
-	if len(spec.Networks) > 0 {
-		endpoints[spec.Networks[0]] = &network.EndpointSettings{Aliases: spec.Aliases}
+	return hostConfig, exposed, nil
+}
+
+// containerConfigFor is what the container is: its image, command,
+// environment, labels and user.
+func containerConfigFor(spec Spec, exposed network.PortSet) *container.Config {
+	labels := map[string]string{LabelOwner: OwnerValue}
+	for k, v := range spec.Labels {
+		labels[k] = v
 	}
 	config := &container.Config{Image: spec.Image, Entrypoint: spec.Entrypoint, Cmd: spec.Cmd, Env: spec.Env, Labels: labels, ExposedPorts: exposed, User: spec.User}
 	if spec.NoHealthcheck {
@@ -248,43 +284,28 @@ func (e *Engine) Run(ctx context.Context, spec Spec) error {
 	if spec.Stdin != nil {
 		config.OpenStdin, config.StdinOnce, config.AttachStdin = true, true, true
 	}
-	created, err := e.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
-		Name:             spec.Name,
-		Config:           config,
-		HostConfig:       hostConfig,
-		NetworkingConfig: &network.NetworkingConfig{EndpointsConfig: endpoints},
-	})
+	return config
+}
+
+// startAttached starts a container with its input attached first, so no
+// input is lost, and feeds it spec.Stdin.
+func (e *Engine) startAttached(ctx context.Context, id string, spec Spec) error {
+	attached, err := e.cli.ContainerAttach(ctx, id, client.ContainerAttachOptions{Stream: true, Stdin: true})
 	if err != nil {
-		return fmt.Errorf("create %s: %w", spec.Name, err)
+		return fmt.Errorf("attach %s: %w", spec.Name, err)
 	}
-	for _, extra := range spec.Networks[min(1, len(spec.Networks)):] {
-		if _, err := e.cli.NetworkConnect(ctx, extra, client.NetworkConnectOptions{Container: created.ID, EndpointConfig: &network.EndpointSettings{}}); err != nil {
-			return fmt.Errorf("connect %s to %s: %w", spec.Name, extra, err)
-		}
-	}
-	if spec.Stdin != nil {
-		// Attached before the start, so no input is lost.
-		attached, err := e.cli.ContainerAttach(ctx, created.ID, client.ContainerAttachOptions{Stream: true, Stdin: true})
-		if err != nil {
-			return fmt.Errorf("attach %s: %w", spec.Name, err)
-		}
-		if _, err := e.cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
-			attached.Close()
-			return fmt.Errorf("start %s: %w", spec.Name, err)
-		}
-		go func() {
-			defer attached.Close()
-			_, _ = io.Copy(attached.Conn, spec.Stdin)
-			_ = attached.CloseWrite()
-			// Hold the connection until the container has read what it
-			// wants; its end closes the stream.
-			_, _ = io.Copy(io.Discard, attached.Reader)
-		}()
-		return nil
-	}
-	if _, err := e.cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
+	if _, err := e.cli.ContainerStart(ctx, id, client.ContainerStartOptions{}); err != nil {
+		attached.Close()
 		return fmt.Errorf("start %s: %w", spec.Name, err)
 	}
+	go func() {
+		defer attached.Close()
+		_, _ = io.Copy(attached.Conn, spec.Stdin)
+		_ = attached.CloseWrite()
+		// Hold the connection until the container has read what it wants;
+		// its end closes the stream.
+		_, _ = io.Copy(io.Discard, attached.Reader)
+	}()
 	return nil
 }
 

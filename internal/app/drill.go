@@ -91,11 +91,17 @@ func (n drillNames) cleanup(e *docker.Engine) {
 	_ = os.RemoveAll(n.dir)
 }
 
-// drillState is what the steps share.
+// drillState is one drill being planned: what its steps share, and each
+// step as a method.
 type drillState struct {
+	dr       Drill
+	app      string
+	snapshot string // as asked: an id, or latest
+	rev      *state.Revision
+	m        manifest.Manifest
 	run      *backupRun
 	names    drillNames
-	snapshot *restic.Snapshot
+	found    *restic.Snapshot
 	restored *restic.RestoreSummary
 	details  []string
 	started  time.Time
@@ -137,14 +143,30 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 			return nil, fmt.Errorf("cannot safely drill privileged workload %s: it could escape the scratch network", name)
 		}
 	}
-	app := in.App
-	d := &drillState{run: &backupRun{store: dr.Store, app: app, kind: state.BackupRunDrill}, names: newDrillNames(dr.StateDir, &m)}
-	verifySQL, atLeast := m.VerifyQuery()
-	plan := &kernel.Plan{Target: app, Recovery: kernel.Resume}
-	add := func(st kernel.Step) { plan.Steps = append(plan.Steps, st) }
+	d := &drillState{dr: dr, app: in.App, snapshot: in.Snapshot, rev: rev, m: m,
+		run: &backupRun{store: dr.Store, app: in.App, kind: state.BackupRunDrill}, names: newDrillNames(dr.StateDir, &m)}
+	plan := &kernel.Plan{Target: in.App, Recovery: kernel.Resume}
+	plan.Steps = append(plan.Steps, d.restoreStep())
+	// The scratch services answer, on the drill's own network, to the
+	// names the app's services have on the app's: the app's secrets,
+	// DATABASE_URL and every derived URL included, work unchanged against
+	// the restored copies, and can't reach the real ones.
+	if m.PostgresVersion() != "" {
+		plan.Steps = append(plan.Steps, d.databaseStep())
+	}
+	if m.HasObjects() {
+		plan.Steps = append(plan.Steps, d.objectsStep())
+	}
+	if len(d.names.containers) > 0 {
+		plan.Steps = append(plan.Steps, d.appStep())
+	}
+	plan.Steps = append(plan.Steps, d.cleanupStep())
+	return plan, nil
+}
 
-	add(kernel.Step{
-		Name: "restore", Change: fmt.Sprintf("restore snapshot %s into scratch volumes beside the app", in.Snapshot),
+func (d *drillState) restoreStep() kernel.Step {
+	return kernel.Step{
+		Name: "restore", Change: fmt.Sprintf("restore snapshot %s into scratch volumes beside the app", d.snapshot),
 		Apply: func(ctx context.Context, out io.Writer) error {
 			d.started = time.Now().UTC()
 			if err := d.run.begin(ctx); err != nil {
@@ -159,31 +181,12 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 			if err := os.MkdirAll(d.names.dir, 0o700); err != nil {
 				return d.abort(e, err)
 			}
-			r, _, err := openRepo(dr.Secrets, e, app, app, nil)
+			r, _, err := openRepo(d.dr.Secrets, e, d.app, d.app, nil)
 			if err != nil {
 				return d.abort(e, err)
 			}
-			if in.Snapshot == "latest" {
-				d.snapshot, err = r.Latest(ctx, app)
-				if errors.Is(err, restic.ErrNoRepository) {
-					return d.abort(e, fmt.Errorf("%s has no backups yet; run bedrock backup %s first", app, app))
-				}
-				if err != nil {
-					return d.abort(e, err)
-				}
-			} else {
-				snaps, err := r.Snapshots(ctx, app)
-				if err != nil {
-					return d.abort(e, err)
-				}
-				for i := range snaps {
-					if strings.HasPrefix(snaps[i].ID, in.Snapshot) {
-						d.snapshot = &snaps[i]
-					}
-				}
-				if d.snapshot == nil {
-					return d.abort(e, fmt.Errorf("no snapshot %s for %s", in.Snapshot, app))
-				}
+			if d.found, err = d.pick(ctx, r); err != nil {
+				return d.abort(e, err)
 			}
 			mounts := []string{restic.DirMount(d.names.dir, false)}
 			for _, v := range sortedKeys(d.names.volumes) {
@@ -195,7 +198,7 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 				}
 				mounts = append(mounts, restic.VolumeMount(d.names.volumes[v], v, false))
 			}
-			d.restored, err = r.Restore(ctx, d.snapshot.ID, app, mounts)
+			d.restored, err = r.Restore(ctx, d.found.ID, d.app, mounts)
 			if err != nil {
 				return d.abort(e, err)
 			}
@@ -203,172 +206,207 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 				return d.abort(e, fmt.Errorf("restored %d of %d files", d.restored.FilesRestored, d.restored.TotalFiles))
 			}
 			d.details = append(d.details, fmt.Sprintf("%d files (%s) restored", d.restored.FilesRestored, HumanBytes(d.restored.BytesRestored)))
-			fmt.Fprintf(out, "snapshot %s from %s: %s\n", d.snapshot.ShortID, d.snapshot.Time.Local().Format("2006-01-02 15:04"), d.details[0])
+			fmt.Fprintf(out, "snapshot %s from %s: %s\n", d.found.ShortID, d.found.Time.Local().Format("2006-01-02 15:04"), d.details[0])
 			return nil
 		},
-	})
-	// The scratch services answer, on the drill's own network, to the
-	// names the app's services have on the app's: the app's secrets,
-	// DATABASE_URL and every derived URL included, work unchanged against
-	// the restored copies, and can't reach the real ones.
-	if m.PostgresVersion() != "" {
-		change := "start a scratch database and load the dump"
-		if verifySQL != "" {
-			change += ", then run the verify query"
+	}
+}
+
+// pick finds the snapshot the drill restores: the latest, or the one
+// whose id starts with what was asked for.
+func (d *drillState) pick(ctx context.Context, r restic.Runner) (*restic.Snapshot, error) {
+	if d.snapshot == "latest" {
+		found, err := r.Latest(ctx, d.app)
+		if errors.Is(err, restic.ErrNoRepository) {
+			return nil, fmt.Errorf("%s has no backups yet; run bedrock backup %s first", d.app, d.app)
 		}
-		add(kernel.Step{
-			Name: "database", Change: change,
-			Apply: func(ctx context.Context, out io.Writer) error {
-				e, err := docker.Connect(ctx)
-				if err != nil {
-					return d.run.fail(err)
-				}
-				defer e.Close()
-				if err := e.EnsureInternalNetwork(ctx, d.names.network); err != nil {
-					return d.abort(e, err)
-				}
-				values, err := dr.Secrets.Load(app, rev.SecretsVersion)
-				if err != nil {
-					return d.abort(e, err)
-				}
-				// The first-run scripts make the roles the dump names.
-				svc, err := postgresService(&m, values, filepath.Join(d.names.dir, initSnapshotDir))
-				if err != nil {
-					return d.abort(e, err)
-				}
-				if !keepsOwners(&m) {
-					svc.InitDir = ""
-				} else if !dirExists(svc.InitDir) {
-					return d.abort(e, errors.New("the snapshot holds no database init scripts"))
-				}
-				svc.Container, svc.Volume, svc.Network = d.names.postgres, d.names.postgresVolume, d.names.network
-				svc.Labels = map[string]string{docker.LabelApp: app, docker.LabelWorkload: "drill"}
-				svc.Aliases = []string{PostgresContainer(app)}
-				if err := svc.start(ctx, e, out); err != nil {
-					return d.abort(e, err)
-				}
-				dump := filepath.Join(d.names.dir, "postgres.dump")
-				if _, err := os.Stat(dump); err != nil {
-					return d.abort(e, errors.New("the snapshot holds no postgres.dump"))
-				}
-				tables, err := restoreDump(ctx, e, svc, dump, keepsOwners(&m))
-				if err != nil {
-					return d.abort(e, err)
-				}
-				if n, _ := strconv.Atoi(tables); n == 0 {
-					return d.abort(e, errors.New("the restored database has no tables"))
-				}
-				d.details = append(d.details, tables+" tables")
-				fmt.Fprintf(out, "database restored: %s tables\n", tables)
-				if verifySQL != "" {
-					got, err := scalar(ctx, e, svc, verifySQL)
-					if err != nil {
-						return d.abort(e, fmt.Errorf("verify query: %w", err))
-					}
-					n, err := strconv.Atoi(got)
-					if err != nil {
-						return d.abort(e, fmt.Errorf("the verify query returned %q, not a number", got))
-					}
-					if n < atLeast {
-						return d.abort(e, fmt.Errorf("the verify query returned %d, below %d", n, atLeast))
-					}
-					d.details = append(d.details, fmt.Sprintf("verify query %d (at least %d)", n, atLeast))
-					fmt.Fprintf(out, "verify query: %d\n", n)
-				}
-				return nil
-			},
-		})
+		return found, err
 	}
-	if m.HasObjects() {
-		add(kernel.Step{
-			Name: "objects", Change: "start a scratch object store on the restored files",
-			Apply: func(ctx context.Context, out io.Writer) error {
-				e, err := docker.Connect(ctx)
-				if err != nil {
-					return d.run.fail(err)
-				}
-				defer e.Close()
-				if err := e.EnsureInternalNetwork(ctx, d.names.network); err != nil {
-					return d.abort(e, err)
-				}
-				values, err := dr.Secrets.Load(app, rev.SecretsVersion)
-				if err != nil {
-					return d.abort(e, err)
-				}
-				o := objectsServiceFor(&m, values)
-				o.Container, o.Volume, o.Network = d.names.objects, d.names.volumes[manifest.ObjectsVolume], d.names.network
-				if empty, err := e.VolumeEmpty(ctx, o.Volume); err != nil {
-					return d.abort(e, err)
-				} else if empty {
-					return d.abort(e, errors.New("the snapshot holds no object store files"))
-				}
-				o.Labels = map[string]string{docker.LabelApp: app, docker.LabelWorkload: "drill"}
-				o.Aliases = []string{ObjectsContainer(app)}
-				if err := o.start(ctx, e, out); err != nil {
-					return d.abort(e, err)
-				}
-				d.details = append(d.details, "object store answered")
-				fmt.Fprintln(out, "object store answered on the restored files")
-				return nil
-			},
-		})
+	snaps, err := r.Snapshots(ctx, d.app)
+	if err != nil {
+		return nil, err
 	}
-	if len(d.names.containers) > 0 {
-		add(kernel.Step{
-			Name: "app", Change: "start the app's long-running workloads on the restored data and wait for them",
-			Apply: func(ctx context.Context, out io.Writer) error {
-				e, err := docker.Connect(ctx)
-				if err != nil {
-					return d.run.fail(err)
-				}
-				defer e.Close()
-				if err := e.EnsureInternalNetwork(ctx, d.names.network); err != nil {
-					return d.abort(e, err)
-				}
-				values, err := dr.Secrets.Load(app, rev.SecretsVersion)
-				if err != nil {
-					return d.abort(e, err)
-				}
-				for _, name := range sortedKeys(d.names.containers) {
-					w := m.Workloads[name]
-					image := rev.Images[name]
-					if image == "" {
-						return d.abort(e, fmt.Errorf("no image recorded for %s", name))
-					}
-					spec, err := containerSpec(&m, name, w, rev.ID, image, values)
-					if err != nil {
-						return d.abort(e, err)
-					}
-					spec.Name = d.names.containers[name]
-					spec.Networks = []string{d.names.network}
-					spec.Restart = false
-					spec.Mounts = nil
-					for _, mt := range w.Mounts {
-						spec.Mounts = append(spec.Mounts, d.names.volumes[mt.Volume]+":"+mt.Path)
-					}
-					if _, err := isolate(ctx, e, &spec, w, image); err != nil {
-						return d.abort(e, err)
-					}
-					if err := e.Run(ctx, spec); err != nil {
-						return d.abort(e, err)
-					}
-				}
-				// Dependencies must all be running before any readiness probe.
-				for _, name := range sortedKeys(d.names.containers) {
-					w := m.Workloads[name]
-					started := time.Now()
-					if err := waitReady(ctx, e, d.names.containers[name], w); err != nil {
-						return d.abort(e, fmt.Errorf("%s on the restored data: %w", name, err))
-					}
-					took := time.Since(started).Round(100 * time.Millisecond)
-					d.details = append(d.details, fmt.Sprintf("%s answered in %s", name, took))
-					fmt.Fprintf(out, "%s answered in %s\n", name, took)
-				}
-				return nil
-			},
-		})
+	var found *restic.Snapshot
+	for i := range snaps {
+		if strings.HasPrefix(snaps[i].ID, d.snapshot) {
+			found = &snaps[i]
+		}
 	}
-	add(kernel.Step{
+	if found == nil {
+		return nil, fmt.Errorf("no snapshot %s for %s", d.snapshot, d.app)
+	}
+	return found, nil
+}
+
+func (d *drillState) databaseStep() kernel.Step {
+	verifySQL, atLeast := d.m.VerifyQuery()
+	change := "start a scratch database and load the dump"
+	if verifySQL != "" {
+		change += ", then run the verify query"
+	}
+	return kernel.Step{
+		Name: "database", Change: change,
+		Apply: func(ctx context.Context, out io.Writer) error {
+			e, err := docker.Connect(ctx)
+			if err != nil {
+				return d.run.fail(err)
+			}
+			defer e.Close()
+			if err := e.EnsureInternalNetwork(ctx, d.names.network); err != nil {
+				return d.abort(e, err)
+			}
+			values, err := d.dr.Secrets.Load(d.app, d.rev.SecretsVersion)
+			if err != nil {
+				return d.abort(e, err)
+			}
+			// The first-run scripts make the roles the dump names.
+			svc, err := postgresService(&d.m, values, filepath.Join(d.names.dir, initSnapshotDir))
+			if err != nil {
+				return d.abort(e, err)
+			}
+			if !keepsOwners(&d.m) {
+				svc.InitDir = ""
+			} else if !dirExists(svc.InitDir) {
+				return d.abort(e, errors.New("the snapshot holds no database init scripts"))
+			}
+			svc.Container, svc.Volume, svc.Network = d.names.postgres, d.names.postgresVolume, d.names.network
+			svc.Labels = map[string]string{docker.LabelApp: d.app, docker.LabelWorkload: "drill"}
+			svc.Aliases = []string{PostgresContainer(d.app)}
+			if err := svc.start(ctx, e, out); err != nil {
+				return d.abort(e, err)
+			}
+			dump := filepath.Join(d.names.dir, "postgres.dump")
+			if _, err := os.Stat(dump); err != nil {
+				return d.abort(e, errors.New("the snapshot holds no postgres.dump"))
+			}
+			tables, err := restoreDump(ctx, e, svc, dump, keepsOwners(&d.m))
+			if err != nil {
+				return d.abort(e, err)
+			}
+			if n, _ := strconv.Atoi(tables); n == 0 {
+				return d.abort(e, errors.New("the restored database has no tables"))
+			}
+			d.details = append(d.details, tables+" tables")
+			fmt.Fprintf(out, "database restored: %s tables\n", tables)
+			if verifySQL == "" {
+				return nil
+			}
+			got, err := scalar(ctx, e, svc, verifySQL)
+			if err != nil {
+				return d.abort(e, fmt.Errorf("verify query: %w", err))
+			}
+			n, err := strconv.Atoi(got)
+			if err != nil {
+				return d.abort(e, fmt.Errorf("the verify query returned %q, not a number", got))
+			}
+			if n < atLeast {
+				return d.abort(e, fmt.Errorf("the verify query returned %d, below %d", n, atLeast))
+			}
+			d.details = append(d.details, fmt.Sprintf("verify query %d (at least %d)", n, atLeast))
+			fmt.Fprintf(out, "verify query: %d\n", n)
+			return nil
+		},
+	}
+}
+
+func (d *drillState) objectsStep() kernel.Step {
+	return kernel.Step{
+		Name: "objects", Change: "start a scratch object store on the restored files",
+		Apply: func(ctx context.Context, out io.Writer) error {
+			e, err := docker.Connect(ctx)
+			if err != nil {
+				return d.run.fail(err)
+			}
+			defer e.Close()
+			if err := e.EnsureInternalNetwork(ctx, d.names.network); err != nil {
+				return d.abort(e, err)
+			}
+			values, err := d.dr.Secrets.Load(d.app, d.rev.SecretsVersion)
+			if err != nil {
+				return d.abort(e, err)
+			}
+			o := objectsServiceFor(&d.m, values)
+			o.Container, o.Volume, o.Network = d.names.objects, d.names.volumes[manifest.ObjectsVolume], d.names.network
+			if empty, err := e.VolumeEmpty(ctx, o.Volume); err != nil {
+				return d.abort(e, err)
+			} else if empty {
+				return d.abort(e, errors.New("the snapshot holds no object store files"))
+			}
+			o.Labels = map[string]string{docker.LabelApp: d.app, docker.LabelWorkload: "drill"}
+			o.Aliases = []string{ObjectsContainer(d.app)}
+			if err := o.start(ctx, e, out); err != nil {
+				return d.abort(e, err)
+			}
+			d.details = append(d.details, "object store answered")
+			fmt.Fprintln(out, "object store answered on the restored files")
+			return nil
+		},
+	}
+}
+
+func (d *drillState) appStep() kernel.Step {
+	return kernel.Step{
+		Name: "app", Change: "start the app's long-running workloads on the restored data and wait for them",
+		Apply: func(ctx context.Context, out io.Writer) error {
+			e, err := docker.Connect(ctx)
+			if err != nil {
+				return d.run.fail(err)
+			}
+			defer e.Close()
+			if err := e.EnsureInternalNetwork(ctx, d.names.network); err != nil {
+				return d.abort(e, err)
+			}
+			values, err := d.dr.Secrets.Load(d.app, d.rev.SecretsVersion)
+			if err != nil {
+				return d.abort(e, err)
+			}
+			for _, name := range sortedKeys(d.names.containers) {
+				if err := d.startScratch(ctx, e, name, values); err != nil {
+					return d.abort(e, err)
+				}
+			}
+			// Dependencies must all be running before any readiness probe.
+			for _, name := range sortedKeys(d.names.containers) {
+				started := time.Now()
+				if err := waitReady(ctx, e, d.names.containers[name], d.m.Workloads[name]); err != nil {
+					return d.abort(e, fmt.Errorf("%s on the restored data: %w", name, err))
+				}
+				took := time.Since(started).Round(100 * time.Millisecond)
+				d.details = append(d.details, fmt.Sprintf("%s answered in %s", name, took))
+				fmt.Fprintf(out, "%s answered in %s\n", name, took)
+			}
+			return nil
+		},
+	}
+}
+
+// startScratch starts one long-running workload on the scratch network
+// and volumes, never restarted, isolated as the real one is.
+func (d *drillState) startScratch(ctx context.Context, e *docker.Engine, name string, values map[string]string) error {
+	w := d.m.Workloads[name]
+	image := d.rev.Images[name]
+	if image == "" {
+		return fmt.Errorf("no image recorded for %s", name)
+	}
+	spec, err := containerSpec(&d.m, name, w, d.rev.ID, image, values)
+	if err != nil {
+		return err
+	}
+	spec.Name = d.names.containers[name]
+	spec.Networks = []string{d.names.network}
+	spec.Restart = false
+	spec.Mounts = nil
+	for _, mt := range w.Mounts {
+		spec.Mounts = append(spec.Mounts, d.names.volumes[mt.Volume]+":"+mt.Path)
+	}
+	if _, err := isolate(ctx, e, &spec, w, image); err != nil {
+		return err
+	}
+	return e.Run(ctx, spec)
+}
+
+func (d *drillState) cleanupStep() kernel.Step {
+	return kernel.Step{
 		Name: "cleanup", Change: "remove the scratch volumes, database and containers, and record the drill",
 		Apply: func(ctx context.Context, out io.Writer) error {
 			e, err := docker.Connect(ctx)
@@ -377,13 +415,13 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 			}
 			defer e.Close()
 			d.names.cleanup(e)
-			if d.snapshot == nil {
+			if d.found == nil {
 				// Resumed past the restore step: the record can't say more.
 				return d.run.fail(errors.New("the drill was interrupted; run it again"))
 			}
-			point := time.Since(d.snapshot.Time).Round(time.Minute)
+			point := time.Since(d.found.Time).Round(time.Minute)
 			d.details = append(d.details, fmt.Sprintf("recovery point %s before the drill, recovery time %s", point, time.Since(d.started).Round(time.Second)))
-			result := state.BackupRun{Snapshot: d.snapshot.ShortID, SnapshotAt: d.snapshot.Time, Detail: strings.Join(d.details, "; ")}
+			result := state.BackupRun{Snapshot: d.found.ShortID, SnapshotAt: d.found.Time, Detail: strings.Join(d.details, "; ")}
 			if d.restored != nil {
 				result.Files, result.Bytes = d.restored.FilesRestored, d.restored.BytesRestored
 			}
@@ -393,6 +431,5 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 			fmt.Fprintln(out, result.Detail)
 			return nil
 		},
-	})
-	return plan, nil
+	}
 }

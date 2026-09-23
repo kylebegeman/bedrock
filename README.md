@@ -249,6 +249,20 @@ dns point <host>` moves one on purpose. Retiring a route, or the app, removes
 its record. `bedrock dns` explains every host; `bedrock dns audit` finds
 records that point here with nothing routed.
 
+A proxied record hides the machine's address, but only until someone learns
+it. `bedrock host setup --web-from cloudflare` makes that not matter: only
+Cloudflare's proxy may reach 80 and 443, so the address answers nobody else
+on the web. Setup reads Cloudflare's published ranges and allows them in ufw
+before it removes the open rules. Docker forwards the edge's published ports
+past ufw, so setup also puts a guard in Docker's `DOCKER-USER` chain, run
+again at every boot before Docker starts. It keeps a copy of the ranges in
+`/etc/bedrock` for when the list can't be read, and `bedrock host
+reconcile` keeps it current. Every route must
+then be `dns: proxied`: setup refuses while an app routes a host any other
+way, and `deploy`, `rollback` and `dns point` refuse to add one. SSH stays
+reachable, keys only. Running setup again keeps the setting unless
+`--web-from` is given, and `--web-from anyone` opens the web again.
+
 `bedrock git allow <app> <public key>` lets a key push that app and nothing
 else. Then, from the app's checkout:
 

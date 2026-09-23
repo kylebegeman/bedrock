@@ -10,8 +10,10 @@ import (
 	"github.com/kylebegeman/bedrock/internal/manifest"
 )
 
-// PreviewSuffix separates a parent app's name from its branch.
-const PreviewSuffix = "-pr-"
+// previewSuffix separates a parent app's name from its branch in a
+// preview's name. The name is only a name: the manifest's preview block is
+// what says an app is a preview.
+const previewSuffix = "-pr-"
 
 // maxAppName is what a manifest accepts for an app's name.
 const maxAppName = 40
@@ -56,6 +58,7 @@ func PreviewOf(parent *manifest.Manifest, branch, domain string) (*manifest.Mani
 	preview := *parent
 	preview.App = previewName(parent.App, branch)
 	preview.Description = fmt.Sprintf("Preview of %s at %s", parent.App, branch)
+	preview.Preview = &manifest.Preview{Of: parent.App, Branch: branch}
 	preview.Checks = nil
 	preview.Backup = &manifest.Backup{Off: true}
 	if parent.Backup != nil && parent.Backup.Keep != nil {
@@ -132,7 +135,7 @@ func SetRouteDNS(m *manifest.Manifest, mode manifest.DNSMode) {
 // same app, and deploying a branch twice updates it instead of making a
 // second one.
 func previewName(app, branch string) string {
-	name := app + PreviewSuffix + DNSLabel(branch)
+	name := app + previewSuffix + DNSLabel(branch)
 	if len(name) <= maxAppName {
 		return name
 	}
@@ -181,14 +184,4 @@ func DNSLabel(s string) string {
 		out = strings.Trim(out[:63], "-")
 	}
 	return out
-}
-
-// IsPreview reports whether an app is a preview of another one, and of
-// which.
-func IsPreview(app string) (parent string, ok bool) {
-	i := strings.LastIndex(app, PreviewSuffix)
-	if i <= 0 {
-		return "", false
-	}
-	return app[:i], true
 }

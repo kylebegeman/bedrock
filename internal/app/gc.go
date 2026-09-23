@@ -72,19 +72,39 @@ func (g GC) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, error)
 	}
 
 	plan := &kernel.Plan{Target: "this machine", Recovery: kernel.Resume}
-	plan.Steps = append(plan.Steps, kernel.Step{
+	plan.Steps = append(plan.Steps, g.containersStep(len(containersNow)), g.imagesStep(len(imagesNow)))
+	if !in.KeepBuildCache {
+		plan.Steps = append(plan.Steps, buildCacheStep(in.BuildCacheMax))
+	}
+	plan.Steps = append(plan.Steps, g.forgetStep())
+	return plan, nil
+}
+
+// connect opens Docker and works out, at apply time, which revisions stay:
+// a deploy may have finished between the plan and this step.
+func (g GC) connect(ctx context.Context) (*docker.Engine, map[string]bool, error) {
+	e, err := docker.Connect(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	keep, err := keptRevisions(ctx, g.Store)
+	if err != nil {
+		e.Close()
+		return nil, nil, err
+	}
+	return e, keep, nil
+}
+
+func (g GC) containersStep(now int) kernel.Step {
+	return kernel.Step{
 		Name: "containers", Change: "remove containers of revisions that are neither active nor kept for rollback",
-		Note: countNote(len(containersNow), "container"),
+		Note: countNote(now, "container"),
 		Apply: func(ctx context.Context, out io.Writer) error {
-			e, err := docker.Connect(ctx)
+			e, keep, err := g.connect(ctx)
 			if err != nil {
 				return err
 			}
 			defer e.Close()
-			keep, err := keptRevisions(ctx, g.Store)
-			if err != nil {
-				return err
-			}
 			stale, err := staleContainers(ctx, e, keep)
 			if err != nil {
 				return err
@@ -97,20 +117,19 @@ func (g GC) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, error)
 			}
 			return nil
 		},
-	})
-	plan.Steps = append(plan.Steps, kernel.Step{
+	}
+}
+
+func (g GC) imagesStep(now int) kernel.Step {
+	return kernel.Step{
 		Name: "images", Change: "remove images of revisions that are neither active nor kept for rollback",
-		Note: countNote(len(imagesNow), "image"),
+		Note: countNote(now, "image"),
 		Apply: func(ctx context.Context, out io.Writer) error {
-			e, err := docker.Connect(ctx)
+			e, keep, err := g.connect(ctx)
 			if err != nil {
 				return err
 			}
 			defer e.Close()
-			keep, err := keptRevisions(ctx, g.Store)
-			if err != nil {
-				return err
-			}
 			stale, err := staleImages(ctx, e, keep)
 			if err != nil {
 				return err
@@ -128,31 +147,40 @@ func (g GC) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, error)
 			}
 			return nil
 		},
-	})
-	if !in.KeepBuildCache {
-		keep := in.BuildCacheMax
-		if keep == 0 {
-			keep = DefaultBuildCacheMax
-		}
-		if keep < 0 {
-			keep = 0
-		}
-		change := "drop build cache older than a day"
-		if keep > 0 {
-			change += ", then keep at most " + megabytes(keep)
-		}
-		plan.Steps = append(plan.Steps, kernel.Step{
-			Name: "build-cache", Change: change,
-			Apply: func(ctx context.Context, out io.Writer) error {
-				freed, err := docker.PruneBuildCache(ctx, 24*time.Hour, keep)
-				if freed > 0 {
-					fmt.Fprintf(out, "reclaimed %s of build cache\n", megabytes(freed))
-				}
-				return err
-			},
-		})
 	}
-	plan.Steps = append(plan.Steps, kernel.Step{
+}
+
+// buildCacheStep prunes Docker's build cache. max is GCInput.BuildCacheMax.
+func buildCacheStep(max int64) kernel.Step {
+	keep := max
+	if keep == 0 {
+		keep = DefaultBuildCacheMax
+	}
+	if keep < 0 {
+		keep = 0
+	}
+	change := "drop build cache older than a day"
+	if keep > 0 {
+		change += ", then keep at most " + megabytes(keep)
+	}
+	return kernel.Step{
+		Name: "build-cache", Change: change,
+		Apply: func(ctx context.Context, out io.Writer) error {
+			freed, err := docker.PruneBuildCache(ctx, 24*time.Hour, keep)
+			if freed > 0 {
+				fmt.Fprintf(out, "reclaimed %s of build cache\n", megabytes(freed))
+			}
+			return err
+		},
+	}
+}
+
+// retiredKept is how many retired or failed revisions an app keeps on
+// record after a collection.
+const retiredKept = 5
+
+func (g GC) forgetStep() kernel.Step {
+	return kernel.Step{
 		Name: "forget", Change: "forget retired revisions older than the last five",
 		Apply: func(ctx context.Context, out io.Writer) error {
 			apps, err := g.Store.Apps(ctx)
@@ -170,10 +198,7 @@ func (g GC) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, error)
 						old = append(old, r)
 					}
 				}
-				for i, r := range old {
-					if i < 5 {
-						continue
-					}
+				for _, r := range old[min(retiredKept, len(old)):] {
 					if err := g.Store.ForgetRevision(ctx, r.App, r.ID); err != nil {
 						return err
 					}
@@ -182,8 +207,7 @@ func (g GC) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, error)
 			}
 			return nil
 		},
-	})
-	return plan, nil
+	}
 }
 
 // keptRevisions returns "app/revision" for every active or previous revision.

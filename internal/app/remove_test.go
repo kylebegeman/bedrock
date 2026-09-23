@@ -16,7 +16,18 @@ import (
 
 func seedApp(t *testing.T, store *state.Store, app string) {
 	t.Helper()
-	manifest := `{"app":"` + app + `","workloads":{"web":{"kind":"web","image":"x","port":80,"routes":[{"host":"` + app + `.example.com"}]}}}`
+	seedManifest(t, store, app, `{"app":"`+app+`","workloads":{"web":{"kind":"web","image":"x","port":80,"routes":[{"host":"`+app+`.example.com"}]}}}`)
+}
+
+// seedPreview records a preview the way preview up derives one: the name
+// alone doesn't make it one, its preview block does.
+func seedPreview(t *testing.T, store *state.Store, app, of string) {
+	t.Helper()
+	seedManifest(t, store, app, `{"app":"`+app+`","preview":{"of":"`+of+`","branch":"nav"},"workloads":{"web":{"kind":"web","image":"x","port":80,"routes":[{"host":"`+app+`.example.com","auth":"loom"}]}}}`)
+}
+
+func seedManifest(t *testing.T, store *state.Store, app, manifest string) {
+	t.Helper()
 	rev := state.Revision{App: app, ID: "r1", Status: state.RevisionActive, Manifest: json.RawMessage(manifest), CreatedAt: time.Now().UTC()}
 	if err := store.SaveRevision(context.Background(), rev); err != nil {
 		t.Fatal(err)
@@ -30,7 +41,9 @@ func TestRemovingAPreviewWithItsDataForgetsItsSecrets(t *testing.T) {
 	}
 	defer store.Close()
 	seedApp(t, store, "site")
-	seedApp(t, store, "site-pr-nav")
+	seedPreview(t, store, "site-pr-nav", "site")
+	// Named like a preview, but not one.
+	seedApp(t, store, "api-pr-tools")
 	r := Remove{Store: store, Secrets: newSecrets(t), StateDir: t.TempDir()}
 	forget := func(in RemoveInput) string {
 		t.Helper()
@@ -49,6 +62,9 @@ func TestRemovingAPreviewWithItsDataForgetsItsSecrets(t *testing.T) {
 	}
 	if c := forget(RemoveInput{App: "site-pr-nav"}); strings.Contains(c, "secrets") {
 		t.Fatalf("a preview kept for its data lost its secrets: %q", c)
+	}
+	if c := forget(RemoveInput{App: "api-pr-tools", Data: true}); strings.Contains(c, "secrets") {
+		t.Fatalf("an app named like a preview lost its secrets: %q", c)
 	}
 	if c := forget(RemoveInput{App: "site", Data: true}); strings.Contains(c, "secrets") {
 		t.Fatalf("an app removed with its data lost its secrets unasked: %q", c)

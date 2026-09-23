@@ -1,0 +1,9 @@
+target loom, resume
+ 1 edge: run the edge, the app's own network and the one it shares with the edge alone
+ 2 dns: confirm core.example.com, runner.example.com point at this machine
+ 3 data: keep the app's data: postgres 17, object store, volume core-data
+ 4 start: start 3 container(s) (revision 20260918-120000; secrets: DATABASE_URL, LOOM_CORE_API_DATABASE_URL)
+ 5 ready: wait until every workload answers
+ 6 switch: route the edge to the new revision
+ 7 certificates: wait for certificates for core.example.com, runner.example.com
+ 8 retire: stop the revision this one replaces

@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/kylebegeman/bedrock/internal/manifest"
+
+	"gopkg.in/yaml.v3"
 )
 
 const parentYAML = `
@@ -145,9 +147,6 @@ func TestAPreviewsNameIsStableAndFitsAManifest(t *testing.T) {
 		if err := (manifest.Scaffold{App: first, Kind: manifest.Worker}).Check(); err != nil {
 			t.Fatalf("%s: %q is not a usable app name: %v", branch, first, err)
 		}
-		if p, ok := IsPreview(first); !ok || p != "kylebegeman" {
-			t.Fatalf("%s: %q does not read back as a preview of kylebegeman (%q %v)", branch, first, p, ok)
-		}
 	}
 	// Two long branches of one app must not land on the same preview.
 	a := previewName("kylebegeman", "renovate/bump-the-first-extremely-long-dependency-name-here")
@@ -230,5 +229,29 @@ func TestAPreviewSharesNothingWithItsParent(t *testing.T) {
 	}
 	if src.Workloads["web"].Routes[0].DNS != manifest.DNSDirect || p.Workloads["web"].Routes[0].DNS != manifest.DNSManual {
 		t.Fatalf("routes: parent %v, preview %v", src.Workloads["web"].Routes, p.Workloads["web"].Routes)
+	}
+}
+
+func TestAPreviewSaysWhatItPreviewsWhateverItIsCalled(t *testing.T) {
+	p, err := PreviewOf(parent(t), "feature/new-nav", "preview.begam.in")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Preview == nil || p.Preview.Of != "kylebegeman" || p.Preview.Branch != "feature/new-nav" {
+		t.Fatalf("preview block: %+v", p.Preview)
+	}
+	// The mark survives the round trip a deploy makes of it.
+	body, err := yaml.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := manifest.Parse(body)
+	if err != nil || back.Preview == nil || back.Preview.Of != "kylebegeman" {
+		t.Fatalf("%v %+v", err, back)
+	}
+	// An app whose name merely looks like a preview's is not one.
+	plain, err := manifest.Parse([]byte("app: api-pr-tools\nworkloads:\n  w:\n    kind: worker\n    image: x\n"))
+	if err != nil || plain.Preview != nil {
+		t.Fatalf("%v %+v", err, plain)
 	}
 }

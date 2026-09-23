@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kylebegeman/bedrock/internal/cloudflare"
 	"github.com/kylebegeman/bedrock/internal/gitdeploy"
 	"github.com/kylebegeman/bedrock/internal/kernel"
 )
@@ -24,6 +25,13 @@ type Setup struct {
 	Socket string
 	// EnsureEdge runs the web edge; nil skips it (tests).
 	EnsureEdge func(ctx context.Context, out io.Writer) error
+	// Routes lists the hosts the machine's apps route. Setup reads it
+	// before taking the web only from Cloudflare, which a route that does
+	// not go through Cloudflare's proxy cannot survive. Nil means none.
+	Routes func(ctx context.Context) ([]Route, error)
+	// CloudflareRanges reads the ranges Cloudflare's proxy connects from;
+	// nil asks Cloudflare's public API.
+	CloudflareRanges func(ctx context.Context) (cloudflare.Ranges, error)
 }
 
 // Kind implements kernel.Definition.
@@ -89,151 +97,295 @@ func (s Setup) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, err
 	if !f.Systemd {
 		return nil, errors.New("host setup needs systemd")
 	}
-	codename, debArch := osCodename(env), debianArch(ctx, env)
 	installed := installedPackages(ctx, env, append(append([]string{}, basePackages...), dockerPackages...))
-	missingBase := missing(installed, basePackages)
-	missingDocker := missing(installed, dockerPackages)
+	x := &setting{s: s, env: env, p: p, f: f, codename: osCodename(env), debArch: debianArch(ctx, env),
+		missingBase: missing(installed, basePackages), missingDocker: missing(installed, dockerPackages)}
+	if p.CloudflareOnly() {
+		if err := s.checkRoutes(ctx); err != nil {
+			return nil, err
+		}
+		ranges, err := s.fetchRanges(ctx)
+		if err != nil {
+			return nil, err
+		}
+		x.ranges = &ranges
+	}
 
 	plan := &kernel.Plan{Target: p.Hostname, Recovery: kernel.Resume}
 	add := func(st kernel.Step) { plan.Steps = append(plan.Steps, st) }
+	add(x.packagesStep())
+	add(x.hostnameStep())
+	if p.Timezone != "" {
+		add(x.timezoneStep())
+	}
+	if p.SwapGiB > 0 {
+		add(x.swapStep())
+	}
+	add(x.dockerStep())
+	add(x.registryStep())
+	add(x.edgeStep())
+	add(x.securityUpdatesStep())
+	add(x.journalStep())
+	add(x.sshStep())
+	add(x.firewallStep())
+	add(x.fail2banStep())
+	add(x.pushesStep())
+	add(x.timeStep())
+	add(x.profileStep())
+	return plan, nil
+}
 
-	add(kernel.Step{
+// setting is one host setup being planned: the profile it applies, what
+// the machine looked like, and each step as a method.
+type setting struct {
+	s                          Setup
+	env                        Env
+	p                          Profile
+	f                          Facts
+	codename, debArch          string
+	missingBase, missingDocker []string
+	// ranges are Cloudflare's, when the profile takes the web only from
+	// Cloudflare; nil otherwise.
+	ranges *cloudflareRanges
+}
+
+// checkRoutes refuses to close the web to everyone but Cloudflare while
+// an app routes a host that does not go through Cloudflare's proxy.
+func (s Setup) checkRoutes(ctx context.Context) error {
+	if s.Routes == nil {
+		return nil
+	}
+	routes, err := s.Routes(ctx)
+	if err != nil {
+		return fmt.Errorf("read the routes on this machine: %w", err)
+	}
+	return requireProxied(routes)
+}
+
+func (x *setting) packagesStep() kernel.Step {
+	return kernel.Step{
 		Name: "packages", Change: "install " + strings.Join(basePackages, ", "),
-		Note: doneIf(len(missingBase) == 0, "all installed", "missing "+strings.Join(missingBase, ", ")),
+		Note: doneIf(len(x.missingBase) == 0, "all installed", "missing "+strings.Join(x.missingBase, ", ")),
 		Apply: func(ctx context.Context, out io.Writer) error {
-			if _, err := env.Run(ctx, "apt-get", "update"); err != nil {
+			if _, err := x.env.Run(ctx, "apt-get", "update"); err != nil {
 				return err
 			}
-			_, err := env.Run(ctx, "apt-get", append([]string{"install", "-y", "--no-install-recommends"}, basePackages...)...)
+			_, err := x.env.Run(ctx, "apt-get", append([]string{"install", "-y", "--no-install-recommends"}, basePackages...)...)
 			fmt.Fprintln(out, "packages present")
 			return err
 		},
-	})
-	add(kernel.Step{
-		Name: "hostname", Change: "set the hostname to " + p.Hostname,
-		Note: doneIf(f.Hostname == p.Hostname, "already "+p.Hostname, "currently "+orUnknown(f.Hostname)),
-		Apply: func(ctx context.Context, out io.Writer) error {
-			if _, err := env.Run(ctx, "hostnamectl", "set-hostname", p.Hostname); err != nil {
-				return err
-			}
-			return ensureHostsEntry(env, p.Hostname, out)
-		},
-	})
-	if p.Timezone != "" {
-		add(kernel.Step{
-			Name: "timezone", Change: "set the timezone to " + p.Timezone,
-			Note: doneIf(f.Timezone == p.Timezone, "already "+p.Timezone, "currently "+orUnknown(f.Timezone)),
-			Apply: func(ctx context.Context, _ io.Writer) error {
-				_, err := env.Run(ctx, "timedatectl", "set-timezone", p.Timezone)
-				return err
-			},
-		})
 	}
-	if p.SwapGiB > 0 {
-		add(kernel.Step{
-			Name: "swap", Change: fmt.Sprintf("keep a %d GiB swap file", p.SwapGiB),
-			Note: doneIf(f.SwapBytes > 0, "already "+gigs(f.SwapBytes), "none yet"),
-			Apply: func(ctx context.Context, out io.Writer) error {
-				return ensureSwap(ctx, env, p.SwapGiB, out)
-			},
-		})
-	}
-	add(kernel.Step{
-		Name: "docker", Change: "install Docker from Docker's repository, with compose and buildx",
-		Note: doneIf(len(missingDocker) == 0 && f.Docker.Running, "already "+orUnknown(f.Docker.Version), "not installed"),
+}
+
+func (x *setting) hostnameStep() kernel.Step {
+	return kernel.Step{
+		Name: "hostname", Change: "set the hostname to " + x.p.Hostname,
+		Note: doneIf(x.f.Hostname == x.p.Hostname, "already "+x.p.Hostname, "currently "+orUnknown(x.f.Hostname)),
 		Apply: func(ctx context.Context, out io.Writer) error {
-			return ensureDocker(ctx, env, f.OSID, codename, debArch, len(missingDocker) > 0, out)
-		},
-	})
-	add(kernel.Step{
-		Name: "registry", Change: "run the local image registry on 127.0.0.1:5000",
-		Note: doneIf(f.Registry.Running, "already running", "not running"),
-		Apply: func(ctx context.Context, out io.Writer) error {
-			return ensureRegistry(ctx, env, out)
-		},
-	})
-	add(kernel.Step{
-		Name: "edge", Change: "run the web edge on ports 80 and 443",
-		Note: doneIf(f.EdgeRunning, "already running", "not running"),
-		Apply: func(ctx context.Context, out io.Writer) error {
-			if s.EnsureEdge == nil {
-				return nil
-			}
-			return s.EnsureEdge(ctx, out)
-		},
-	})
-	add(kernel.Step{
-		Name: "security-updates", Change: "install security updates automatically, without automatic reboots",
-		Note: doneIf(f.UnattendedUpgrades, "already on", "off"),
-		Apply: func(ctx context.Context, out io.Writer) error {
-			if _, err := env.WriteFile("/etc/apt/apt.conf.d/20auto-upgrades", autoUpgrades, 0o644); err != nil {
+			if _, err := x.env.Run(ctx, "hostnamectl", "set-hostname", x.p.Hostname); err != nil {
 				return err
 			}
-			_, err := env.WriteFile("/etc/apt/apt.conf.d/52bedrock-unattended", unattendedBedrock, 0o644)
+			return ensureHostsEntry(x.env, x.p.Hostname, out)
+		},
+	}
+}
+
+func (x *setting) timezoneStep() kernel.Step {
+	return kernel.Step{
+		Name: "timezone", Change: "set the timezone to " + x.p.Timezone,
+		Note: doneIf(x.f.Timezone == x.p.Timezone, "already "+x.p.Timezone, "currently "+orUnknown(x.f.Timezone)),
+		Apply: func(ctx context.Context, _ io.Writer) error {
+			_, err := x.env.Run(ctx, "timedatectl", "set-timezone", x.p.Timezone)
 			return err
 		},
-	})
-	add(kernel.Step{
+	}
+}
+
+func (x *setting) swapStep() kernel.Step {
+	return kernel.Step{
+		Name: "swap", Change: fmt.Sprintf("keep a %d GiB swap file", x.p.SwapGiB),
+		Note: doneIf(x.f.SwapBytes > 0, "already "+gigs(x.f.SwapBytes), "none yet"),
+		Apply: func(ctx context.Context, out io.Writer) error {
+			return ensureSwap(ctx, x.env, x.p.SwapGiB, out)
+		},
+	}
+}
+
+func (x *setting) dockerStep() kernel.Step {
+	return kernel.Step{
+		Name: "docker", Change: "install Docker from Docker's repository, with compose and buildx",
+		Note: doneIf(len(x.missingDocker) == 0 && x.f.Docker.Running, "already "+orUnknown(x.f.Docker.Version), "not installed"),
+		Apply: func(ctx context.Context, out io.Writer) error {
+			return ensureDocker(ctx, x.env, x.f.OSID, x.codename, x.debArch, len(x.missingDocker) > 0, out)
+		},
+	}
+}
+
+func (x *setting) registryStep() kernel.Step {
+	return kernel.Step{
+		Name: "registry", Change: "run the local image registry on 127.0.0.1:5000",
+		Note: doneIf(x.f.Registry.Running, "already running", "not running"),
+		Apply: func(ctx context.Context, out io.Writer) error {
+			return ensureRegistry(ctx, x.env, out)
+		},
+	}
+}
+
+func (x *setting) edgeStep() kernel.Step {
+	return kernel.Step{
+		Name: "edge", Change: "run the web edge on ports 80 and 443",
+		Note: doneIf(x.f.EdgeRunning, "already running", "not running"),
+		Apply: func(ctx context.Context, out io.Writer) error {
+			if x.s.EnsureEdge == nil {
+				return nil
+			}
+			return x.s.EnsureEdge(ctx, out)
+		},
+	}
+}
+
+func (x *setting) securityUpdatesStep() kernel.Step {
+	return kernel.Step{
+		Name: "security-updates", Change: "install security updates automatically, without automatic reboots",
+		Note: doneIf(x.f.UnattendedUpgrades, "already on", "off"),
+		Apply: func(ctx context.Context, out io.Writer) error {
+			if _, err := x.env.WriteFile("/etc/apt/apt.conf.d/20auto-upgrades", autoUpgrades, 0o644); err != nil {
+				return err
+			}
+			_, err := x.env.WriteFile("/etc/apt/apt.conf.d/52bedrock-unattended", unattendedBedrock, 0o644)
+			return err
+		},
+	}
+}
+
+func (x *setting) journalStep() kernel.Step {
+	return kernel.Step{
 		Name: "journal", Change: "cap the system journal at 500M",
-		Note: doneIf(f.JournalMaxUse == "500M", "already capped", "unbounded"),
+		Note: doneIf(x.f.JournalMaxUse == "500M", "already capped", "unbounded"),
 		Apply: func(ctx context.Context, _ io.Writer) error {
-			changed, err := env.WriteFile("/etc/systemd/journald.conf.d/bedrock.conf", journaldBedrock, 0o644)
+			changed, err := x.env.WriteFile("/etc/systemd/journald.conf.d/bedrock.conf", journaldBedrock, 0o644)
 			if err != nil || !changed {
 				return err
 			}
-			_, err = env.Run(ctx, "systemctl", "restart", "systemd-journald")
+			_, err = x.env.Run(ctx, "systemctl", "restart", "systemd-journald")
 			return err
 		},
-	})
-	add(kernel.Step{
+	}
+}
+
+func (x *setting) sshStep() kernel.Step {
+	return kernel.Step{
 		Name: "ssh", Change: "allow only key logins over SSH",
-		Note: doneIf(!f.SSH.PasswordAuth, "already keys only", "password logins on"),
+		Note: doneIf(!x.f.SSH.PasswordAuth, "already keys only", "password logins on"),
 		Apply: func(ctx context.Context, out io.Writer) error {
-			return ensureSSHKeysOnly(ctx, env, out)
+			return ensureSSHKeysOnly(ctx, x.env, out)
 		},
-	})
-	add(kernel.Step{
-		Name: "firewall", Change: "allow only ssh, 80 and 443 in",
-		Note: doneIf(f.Firewall.Active && f.Allows("22/tcp") && f.Allows("80/tcp") && f.Allows("443/tcp"), "already active", "inactive"),
+	}
+}
+
+func (x *setting) firewallStep() kernel.Step {
+	if x.ranges == nil {
+		return kernel.Step{
+			Name: "firewall", Change: "allow only ssh, 80 and 443 in",
+			Note: x.firewallNote(nil, "already active"),
+			Apply: func(ctx context.Context, out io.Writer) error {
+				if err := ensureFirewall(ctx, x.env, out, nil); err != nil {
+					return err
+				}
+				return removeWebGuard(ctx, x.env, out)
+			},
+		}
+	}
+	ranges := x.ranges.All()
+	note := x.firewallNote(ranges, "already only from Cloudflare")
+	if !x.ranges.fresh {
+		note += "; Cloudflare's list could not be read, so the copy kept at " + RangesPath + " is used"
+	}
+	return kernel.Step{
+		Name: "firewall", Change: "allow ssh in, and 80 and 443 only from Cloudflare, Docker's published ports included",
+		Note: note,
 		Apply: func(ctx context.Context, out io.Writer) error {
-			return ensureFirewall(ctx, env, out)
+			// A deploy may have added a direct route since the plan.
+			if err := x.s.checkRoutes(ctx); err != nil {
+				return err
+			}
+			if x.ranges.fresh {
+				if err := saveRanges(x.env, x.ranges.Ranges); err != nil {
+					return err
+				}
+			}
+			if err := ensureFirewall(ctx, x.env, out, ranges); err != nil {
+				return err
+			}
+			return ensureWebGuard(ctx, x.env, out, ranges)
 		},
-	})
-	add(kernel.Step{
+	}
+}
+
+// firewallNote says how far the firewall is from what the profile asks.
+func (x *setting) firewallNote(ranges []string, done string) string {
+	f := x.f
+	switch {
+	case firewallDone(f, ranges):
+		return done
+	case !f.Firewall.Active:
+		return "inactive"
+	case ranges != nil && f.WebOpen():
+		return "the web is open to anyone"
+	case ranges != nil && !f.Firewall.WebGuard.InPlace():
+		return "Docker's published web ports are open to anyone"
+	case ranges != nil:
+		return "Cloudflare's ranges changed"
+	case len(f.CloudflareSources()) > 0 || f.Firewall.WebGuard.Drops:
+		return "the web is open only to Cloudflare"
+	default:
+		return "ssh, 80 or 443 not allowed"
+	}
+}
+
+func (x *setting) fail2banStep() kernel.Step {
+	return kernel.Step{
 		Name: "fail2ban", Change: "ban repeated SSH failures",
-		Note: doneIf(f.Fail2ban, "already active", "inactive"),
+		Note: doneIf(x.f.Fail2ban, "already active", "inactive"),
 		Apply: func(ctx context.Context, _ io.Writer) error {
-			if _, err := env.WriteFile("/etc/fail2ban/jail.d/bedrock.conf", fail2banBedrock, 0o644); err != nil {
+			if _, err := x.env.WriteFile("/etc/fail2ban/jail.d/bedrock.conf", fail2banBedrock, 0o644); err != nil {
 				return err
 			}
-			_, err := env.Run(ctx, "systemctl", "enable", "--now", "fail2ban")
-			if err != nil {
+			if _, err := x.env.Run(ctx, "systemctl", "enable", "--now", "fail2ban"); err != nil {
 				return err
 			}
-			_, err = env.Run(ctx, "systemctl", "restart", "fail2ban")
+			_, err := x.env.Run(ctx, "systemctl", "restart", "fail2ban")
 			return err
 		},
-	})
-	add(kernel.Step{
+	}
+}
+
+func (x *setting) pushesStep() kernel.Step {
+	return kernel.Step{
 		Name: "pushes", Change: "keep the bedrock user, which receives git pushes; each of its keys deploys only the apps it names",
-		Note: doneIf(f.PushUser, "already there", "no bedrock user yet"),
+		Note: doneIf(x.f.PushUser, "already there", "no bedrock user yet"),
 		Apply: func(ctx context.Context, out io.Writer) error {
-			return ensurePushUser(ctx, env, s.Socket, out)
+			return ensurePushUser(ctx, x.env, x.s.Socket, out)
 		},
-	})
-	add(kernel.Step{
+	}
+}
+
+func (x *setting) timeStep() kernel.Step {
+	return kernel.Step{
 		Name: "time", Change: "keep the clock synchronized",
-		Note: doneIf(f.TimeSynced, "already synchronized", "not synchronized"),
+		Note: doneIf(x.f.TimeSynced, "already synchronized", "not synchronized"),
 		Apply: func(ctx context.Context, _ io.Writer) error {
-			_, err := env.Run(ctx, "systemctl", "enable", "--now", "systemd-timesyncd")
+			_, err := x.env.Run(ctx, "systemctl", "enable", "--now", "systemd-timesyncd")
 			return err
 		},
-	})
-	add(kernel.Step{
+	}
+}
+
+func (x *setting) profileStep() kernel.Step {
+	return kernel.Step{
 		Name: "profile", Change: "record the profile at " + ProfilePath,
-		Apply: func(_ context.Context, _ io.Writer) error { return SaveProfile(env, p) },
-	})
-	return plan, nil
+		Apply: func(_ context.Context, _ io.Writer) error { return SaveProfile(x.env, x.p) },
+	}
 }
 
 func doneIf(done bool, yes, no string) string {
@@ -418,21 +570,6 @@ func ensureSSHKeysOnly(ctx context.Context, env Env, out io.Writer) error {
 		}
 	}
 	fmt.Fprintln(out, "password logins off")
-	return nil
-}
-
-// ensureFirewall allows ssh before anything is denied, so a mistake can't
-// lock the door.
-func ensureFirewall(ctx context.Context, env Env, out io.Writer) error {
-	for _, args := range [][]string{
-		{"allow", "OpenSSH"}, {"allow", "22/tcp"}, {"allow", "80/tcp"}, {"allow", "443/tcp"},
-		{"default", "deny", "incoming"}, {"default", "allow", "outgoing"}, {"--force", "enable"},
-	} {
-		if _, err := env.Run(ctx, "ufw", args...); err != nil {
-			return err
-		}
-	}
-	fmt.Fprintln(out, "firewall active: ssh, 80, 443")
 	return nil
 }
 

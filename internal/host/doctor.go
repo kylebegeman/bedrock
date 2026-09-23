@@ -48,145 +48,194 @@ func Supported(f Facts) bool {
 // is broken; warns are worth fixing.
 func Diagnose(f Facts) []Result {
 	var out []Result
-	add := func(name string, v Verdict, detail, fix string) {
-		out = append(out, Result{Name: name, Verdict: v, Detail: detail, Fix: fix})
+	for _, check := range []func(Facts) []Result{diagnoseSystem, diagnoseResources, diagnoseServices, diagnoseAccess, diagnoseUpkeep} {
+		out = append(out, check(f)...)
 	}
-	const setup = "run bedrock host setup"
+	return out
+}
 
+// runSetup is the fix for most of what setup would have done.
+const runSetup = "run bedrock host setup"
+
+// results collects verdicts in the order they are added.
+type results []Result
+
+func (r *results) add(name string, v Verdict, detail, fix string) {
+	*r = append(*r, Result{Name: name, Verdict: v, Detail: detail, Fix: fix})
+}
+
+func diagnoseSystem(f Facts) []Result {
+	var r results
 	if Supported(f) {
-		add("system", Pass, fmt.Sprintf("%s on %s", f.OSName, f.Arch), "")
+		r.add("system", Pass, fmt.Sprintf("%s on %s", f.OSName, f.Arch), "")
 	} else {
-		add("system", Fail, fmt.Sprintf("%s on %s", orUnknown(f.OSName), orUnknown(f.Arch)), "bedrock needs Ubuntu 22.04 or 24.04, or Debian 12 or 13, on x86_64 or aarch64")
+		r.add("system", Fail, fmt.Sprintf("%s on %s", orUnknown(f.OSName), orUnknown(f.Arch)), "bedrock needs Ubuntu 22.04 or 24.04, or Debian 12 or 13, on x86_64 or aarch64")
 	}
 	if !f.Systemd {
-		add("systemd", Fail, "not running", "bedrock's daemon needs systemd")
+		r.add("systemd", Fail, "not running", "bedrock's daemon needs systemd")
 	} else {
-		add("systemd", Pass, "running", "")
+		r.add("systemd", Pass, "running", "")
 	}
 	if !f.Privileged {
-		add("privileges", Warn, "not root", "setup and the daemon need root")
+		r.add("privileges", Warn, "not root", "setup and the daemon need root")
 	} else {
-		add("privileges", Pass, "root", "")
+		r.add("privileges", Pass, "root", "")
 	}
+	return r
+}
 
+func diagnoseResources(f Facts) []Result {
+	var r results
 	switch {
 	case f.CPUs < 2:
-		add("cpu", Fail, fmt.Sprintf("%d cpu", f.CPUs), "bedrock needs at least 2")
+		r.add("cpu", Fail, fmt.Sprintf("%d cpu", f.CPUs), "bedrock needs at least 2")
 	case f.CPUs < 4:
-		add("cpu", Warn, fmt.Sprintf("%d cpus", f.CPUs), "builds are slow below 4")
+		r.add("cpu", Warn, fmt.Sprintf("%d cpus", f.CPUs), "builds are slow below 4")
 	default:
-		add("cpu", Pass, fmt.Sprintf("%d cpus", f.CPUs), "")
+		r.add("cpu", Pass, fmt.Sprintf("%d cpus", f.CPUs), "")
 	}
 	switch {
 	case f.MemoryBytes < 2*gib:
-		add("memory", Fail, gigs(f.MemoryBytes), "bedrock needs at least 2 GiB")
+		r.add("memory", Fail, gigs(f.MemoryBytes), "bedrock needs at least 2 GiB")
 	case f.MemoryBytes < 8*gib:
-		add("memory", Warn, gigs(f.MemoryBytes), "apps and builds share memory; 8 GiB or more is comfortable")
+		r.add("memory", Warn, gigs(f.MemoryBytes), "apps and builds share memory; 8 GiB or more is comfortable")
 	default:
-		add("memory", Pass, gigs(f.MemoryBytes), "")
+		r.add("memory", Pass, gigs(f.MemoryBytes), "")
 	}
 	switch {
 	case f.DiskFreeBytes < 5*gb:
-		add("disk", Fail, gigs(f.DiskFreeBytes)+" free", "less than 5 GB free; free space or run bedrock gc")
+		r.add("disk", Fail, gigs(f.DiskFreeBytes)+" free", "less than 5 GB free; free space or run bedrock gc")
 	case f.DiskFreeBytes < 20*gb:
-		add("disk", Warn, gigs(f.DiskFreeBytes)+" free", "less than 20 GB free; images and backups need room")
+		r.add("disk", Warn, gigs(f.DiskFreeBytes)+" free", "less than 20 GB free; images and backups need room")
 	default:
-		add("disk", Pass, gigs(f.DiskFreeBytes)+" free", "")
+		r.add("disk", Pass, gigs(f.DiskFreeBytes)+" free", "")
 	}
 	if f.SwapBytes == 0 {
-		add("swap", Warn, "none", setup+" adds a swap file")
+		r.add("swap", Warn, "none", runSetup+" adds a swap file")
 	} else {
-		add("swap", Pass, gigs(f.SwapBytes), "")
+		r.add("swap", Pass, gigs(f.SwapBytes), "")
 	}
+	return r
+}
 
+func diagnoseServices(f Facts) []Result {
+	var r results
 	switch {
 	case !f.Docker.Installed:
-		add("docker", Fail, "not installed", setup)
+		r.add("docker", Fail, "not installed", runSetup)
 	case !f.Docker.Running:
-		add("docker", Fail, "installed but not running", "systemctl start docker")
+		r.add("docker", Fail, "installed but not running", "systemctl start docker")
 	case !f.Docker.Compose || !f.Docker.Buildx:
-		add("docker", Warn, "running, plugins missing", setup+" installs compose and buildx")
+		r.add("docker", Warn, "running, plugins missing", runSetup+" installs compose and buildx")
 	default:
-		add("docker", Pass, "running, "+f.Docker.Version, "")
+		r.add("docker", Pass, "running, "+f.Docker.Version, "")
 	}
 	switch {
 	case !f.Registry.Present:
-		add("registry", Fail, "no local image registry", setup)
+		r.add("registry", Fail, "no local image registry", runSetup)
 	case !f.Registry.Running:
-		add("registry", Fail, "registry container stopped", "docker start "+RegistryContainer)
+		r.add("registry", Fail, "registry container stopped", "docker start "+RegistryContainer)
 	default:
-		add("registry", Pass, "running on 127.0.0.1:5000", "")
+		r.add("registry", Pass, "running on 127.0.0.1:5000", "")
 	}
-
 	if f.Docker.Running {
 		if f.EdgeRunning {
-			add("edge", Pass, "running on 80 and 443", "")
+			r.add("edge", Pass, "running on 80 and 443", "")
 		} else {
-			add("edge", Fail, "not running", setup)
+			r.add("edge", Fail, "not running", runSetup)
 		}
 	}
+	return r
+}
 
-	switch {
-	case !f.Firewall.Installed:
-		add("firewall", Fail, "ufw not installed", setup)
-	case !f.Firewall.Active:
-		add("firewall", Fail, "ufw inactive", setup)
-	case !f.Allows("22/tcp"):
-		add("firewall", Fail, "active without ssh allowed", "ufw allow OpenSSH, before anything else")
-	case !f.Allows("80/tcp") || !f.Allows("443/tcp"):
-		add("firewall", Warn, "active, web ports closed", setup+" opens 80 and 443")
-	default:
-		add("firewall", Pass, "active: ssh, 80, 443", "")
-	}
+func diagnoseAccess(f Facts) []Result {
+	r := results{diagnoseFirewall(f)}
 	switch {
 	case f.SSH.PasswordAuth && f.SSH.RootKeys == 0:
-		add("ssh", Fail, "password login on, root has no key", "add a key to /root/.ssh/authorized_keys, then "+setup)
+		r.add("ssh", Fail, "password login on, root has no key", "add a key to /root/.ssh/authorized_keys, then "+runSetup)
 	case f.SSH.PasswordAuth:
-		add("ssh", Fail, "password login on", setup+" turns it off")
+		r.add("ssh", Fail, "password login on", runSetup+" turns it off")
 	case f.SSH.RootKeys == 0:
-		add("ssh", Warn, "key-only, but root has no key", "add a key to /root/.ssh/authorized_keys")
+		r.add("ssh", Warn, "key-only, but root has no key", "add a key to /root/.ssh/authorized_keys")
 	default:
-		add("ssh", Pass, fmt.Sprintf("key-only, %d root key(s)", f.SSH.RootKeys), "")
+		r.add("ssh", Pass, fmt.Sprintf("key-only, %d root key(s)", f.SSH.RootKeys), "")
 	}
 	if !f.Fail2ban {
-		add("fail2ban", Warn, "not active", setup)
+		r.add("fail2ban", Warn, "not active", runSetup)
 	} else {
-		add("fail2ban", Pass, "active", "")
+		r.add("fail2ban", Pass, "active", "")
 	}
+	return r
+}
 
+// diagnoseFirewall checks ufw against the profile: ssh always, and the web
+// open to anyone or only to Cloudflare, as the machine was set up.
+func diagnoseFirewall(f Facts) Result {
+	const reconcile = "bedrock host reconcile"
+	result := func(v Verdict, detail, fix string) Result {
+		return Result{Name: "firewall", Verdict: v, Detail: detail, Fix: fix}
+	}
+	switch {
+	case !f.Firewall.Installed:
+		return result(Fail, "ufw not installed", runSetup)
+	case !f.Firewall.Active:
+		return result(Fail, "ufw inactive", runSetup)
+	case !f.Allows("22/tcp"):
+		return result(Fail, "active without ssh allowed", "ufw allow OpenSSH, before anything else")
+	case f.CloudflareOnly() && f.WebOpen():
+		return result(Fail, "the web is open to anyone, though this machine takes it only from Cloudflare", reconcile)
+	case f.CloudflareOnly() && len(f.CloudflareSources()) == 0:
+		return result(Fail, "80 and 443 are closed to Cloudflare too", reconcile)
+	case f.CloudflareOnly() && !f.Firewall.WebGuard.InPlace():
+		return result(Fail, "Docker forwards 80 and 443 past ufw, and bedrock's guard for them is not in place, so the edge answers anyone", reconcile)
+	case f.CloudflareOnly() && !f.Firewall.IPv6:
+		return result(Warn, "ufw leaves IPv6 alone (IPV6=no), so the web ports are not filtered there", "set IPV6=yes in "+ufwDefaults+", then "+reconcile)
+	case f.CloudflareOnly():
+		return result(Pass, fmt.Sprintf("active: ssh; 80 and 443 only from Cloudflare (%d ranges)", len(f.CloudflareSources())), "")
+	case f.Firewall.WebGuard.Drops:
+		return result(Warn, "the edge takes the web only from Cloudflare, though this machine is set up to take it from anyone", reconcile)
+	case !f.Allows("80/tcp") || !f.Allows("443/tcp"):
+		return result(Warn, "active, web ports closed", runSetup+" opens 80 and 443")
+	default:
+		return result(Pass, "active: ssh, 80, 443", "")
+	}
+}
+
+func diagnoseUpkeep(f Facts) []Result {
+	var r results
 	switch {
 	case f.RebootRequired:
-		add("updates", Warn, "a reboot is pending", "bedrock host maintain")
+		r.add("updates", Warn, "a reboot is pending", "bedrock host maintain")
 	case f.UpdatesPending > 0:
-		add("updates", Warn, fmt.Sprintf("%d package(s) can be upgraded", f.UpdatesPending), "bedrock host maintain")
+		r.add("updates", Warn, fmt.Sprintf("%d package(s) can be upgraded", f.UpdatesPending), "bedrock host maintain")
 	case f.UpdatesPending < 0:
-		add("updates", Warn, "unknown", "apt-get didn't answer")
+		r.add("updates", Warn, "unknown", "apt-get didn't answer")
 	default:
-		add("updates", Pass, "up to date", "")
+		r.add("updates", Pass, "up to date", "")
 	}
 	if !f.UnattendedUpgrades {
-		add("security updates", Warn, "automatic security updates off", setup)
+		r.add("security updates", Warn, "automatic security updates off", runSetup)
 	} else {
-		add("security updates", Pass, "automatic", "")
+		r.add("security updates", Pass, "automatic", "")
 	}
 	if !f.TimeSynced {
-		add("time", Warn, "clock not synchronized", "systemctl restart systemd-timesyncd")
+		r.add("time", Warn, "clock not synchronized", "systemctl restart systemd-timesyncd")
 	} else {
-		add("time", Pass, "synchronized"+tz(f.Timezone), "")
+		r.add("time", Pass, "synchronized"+tz(f.Timezone), "")
 	}
 	if f.JournalMaxUse == "" {
-		add("logs", Warn, "journal unbounded", setup+" caps it")
+		r.add("logs", Warn, "journal unbounded", runSetup+" caps it")
 	} else {
-		add("logs", Pass, "journal capped at "+f.JournalMaxUse, "")
+		r.add("logs", Pass, "journal capped at "+f.JournalMaxUse, "")
 	}
 	if f.Systemd {
 		if !f.DaemonAnswers {
-			add("daemon", Fail, "not answering", "bedrock daemon install")
+			r.add("daemon", Fail, "not answering", "bedrock daemon install")
 		} else {
-			add("daemon", Pass, "answering", "")
+			r.add("daemon", Pass, "answering", "")
 		}
 	}
-	return out
+	return r
 }
 
 // Worst returns the worst verdict in a set.

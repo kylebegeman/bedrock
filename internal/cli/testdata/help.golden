@@ -1,0 +1,1127 @@
+== bedrock (hidden false)
+One small program that runs your machines.
+
+Usage:
+  bedrock [command]
+
+Available Commands:
+  alerts      What is wrong right now, and what was recently.
+  backup      Back the app's data up to its bucket now. "bedrock" backs up the machine's own state.
+  backups     List backups, drills and restores, newest first.
+  daemon      The host daemon: run it, install it under systemd, or check it.
+  deploy      Deploy the app in a source directory: build, start, check, switch the edge, retire the old revision.
+  dns         The records behind every host this machine routes, as Cloudflare and the world see them.
+  doctor      Check this machine and say what to fix. Changes nothing.
+  drill       Prove a backup: restore it beside the app, start the app on it, check, clean up.
+  exec        Run a command inside a workload's container.
+  exposure    What each container may do and what reaches it: user, capabilities, root filesystem, networks, ports, mounts.
+  gc          Remove containers, images and build cache that no kept revision uses.
+  git         Deploy by pushing: which keys may push which apps, remotes, and GitHub webhooks.
+  history     List recent operations, or show one receipt.
+  host        Set up, keep and maintain this machine.
+  init        Write a starting bedrock.yaml for a new app.
+  integration The credentials bedrock itself uses: storage for backups, email for alerts, Cloudflare for DNS.
+  jobs        List recent cron runs and one-off commands.
+  launch      Take a repository from nothing to running here.
+  logs        Show a workload's output; the app's only workload when there is one.
+  ls          List the apps on this machine: owner, hosts, repository, last deploy, last backup.
+  move        Move an app, and its data, to another machine.
+  preview     Run a branch of an app beside it, behind a sign-in.
+  ps          List apps, their workloads and what is running.
+  psql        Open psql on the app's database.
+  remove      Take an app off this machine. Its volumes, database and secrets stay unless asked.
+  restore     Bring an app's data back from its bucket onto this machine, before deploying it here.
+  rollback    Make the previous revision active again.
+  run         Run a one-off command with a workload's image, environment, secrets and volumes.
+  secret      Keep an app's secrets sealed on this machine.
+  status      How the machine and its apps are doing: health, traffic, resources, backups, alerts.
+  upgrade     Replace bedrock with a new build and restart the daemon; systemd rolls back if it can't start.
+  version     Print the version of this build.
+  watch       Public URLs this machine checks from the outside, such as the other machine's sites.
+
+Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+
+Use "bedrock [command] --help" for more information about a command.
+== bedrock alerts (hidden false)
+What is wrong right now, and what was recently.
+
+Usage:
+  bedrock alerts [flags]
+  bedrock alerts [command]
+
+Available Commands:
+  test        Send a test alert through the email integration.
+
+Flags:
+      --limit int   how many to list, open ones included (default 20)
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+
+Use "bedrock alerts [command] --help" for more information about a command.
+== bedrock alerts test (hidden false)
+Send a test alert through the email integration.
+
+Usage:
+  bedrock alerts test [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock backup (hidden false)
+Back the app's data up to its bucket now. "bedrock" backs up the machine's own state.
+
+Usage:
+  bedrock backup <app> [flags]
+
+Flags:
+      --digest string   apply only if the plan is still the one with this digest; implies --yes
+      --plan            show the plan and change nothing
+      --yes             apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock backups (hidden false)
+List backups, drills and restores, newest first.
+
+Usage:
+  bedrock backups [app] [flags]
+
+Flags:
+      --limit int   how many to list (default 20)
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock daemon (hidden false)
+The host daemon: run it, install it under systemd, or check it.
+
+Usage:
+  bedrock daemon [command]
+
+Available Commands:
+  install     Install this binary as the systemd service and start it.
+  run         Run the daemon in the foreground (what systemd starts).
+  status      Report the service's state and whether the daemon answers.
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+
+Use "bedrock daemon [command] --help" for more information about a command.
+== bedrock daemon install (hidden false)
+Install this binary as the systemd service and start it.
+
+Usage:
+  bedrock daemon install [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock daemon run (hidden false)
+Run the daemon in the foreground (what systemd starts).
+
+Usage:
+  bedrock daemon run [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock daemon status (hidden false)
+Report the service's state and whether the daemon answers.
+
+Usage:
+  bedrock daemon status [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock deploy (hidden false)
+Deploy the app in a source directory: build, start, check, switch the edge, retire the old revision.
+
+Usage:
+  bedrock deploy <source-dir> [flags]
+
+Flags:
+      --digest string                apply only if the plan is still the one with this digest; implies --yes
+      --manifest string              the manifest at the source's root, for a source that holds several apps (default "bedrock.yaml")
+      --plan                         show the plan and change nothing
+      --restore-postgres string      a pg_dump file to load into the app's empty database first
+      --restore-volume stringArray   name=file.tar.gz to unpack into an empty volume first
+      --to string                    send the source to a machine over SSH, such as bedrock@203.0.113.7, and deploy it there ($BEDROCK_SSH replaces ssh)
+      --yes                          apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock dns (hidden false)
+The records behind every host this machine routes, as Cloudflare and the world see them.
+
+Usage:
+  bedrock dns [flags]
+  bedrock dns [command]
+
+Available Commands:
+  audit       Records that point here without a route, records bedrock left behind, routes whose records point elsewhere.
+  point       Make a host's record name this machine, taking it from wherever it points now (moving day).
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+
+Use "bedrock dns [command] --help" for more information about a command.
+== bedrock dns audit (hidden false)
+Records that point here without a route, records bedrock left behind, routes whose records point elsewhere.
+
+Usage:
+  bedrock dns audit [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock dns point (hidden false)
+Make a host's record name this machine, taking it from wherever it points now (moving day).
+
+Usage:
+  bedrock dns point <host> [flags]
+
+Flags:
+      --digest string   apply only if the plan is still the one with this digest; implies --yes
+      --plan            show the plan and change nothing
+      --proxied         put the host behind Cloudflare's proxy
+      --yes             apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock doctor (hidden false)
+Check this machine and say what to fix. Changes nothing.
+
+Usage:
+  bedrock doctor [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock drill (hidden false)
+Prove a backup: restore it beside the app, start the app on it, check, clean up.
+
+Usage:
+  bedrock drill <app> [flags]
+
+Flags:
+      --digest string     apply only if the plan is still the one with this digest; implies --yes
+      --plan              show the plan and change nothing
+      --snapshot string   a snapshot id instead of the latest
+      --yes               apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock exec (hidden false)
+Run a command inside a workload's container.
+
+Usage:
+  bedrock exec <app> [workload] -- <command...> [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock exposure (hidden false)
+What each container may do and what reaches it: user, capabilities, root filesystem, networks, ports, mounts.
+
+Usage:
+  bedrock exposure [app] [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock gc (hidden false)
+Remove containers, images and build cache that no kept revision uses.
+
+Usage:
+  bedrock gc [flags]
+
+Flags:
+      --digest string       apply only if the plan is still the one with this digest; implies --yes
+      --keep-build-cache    leave Docker's build cache alone
+      --keep-cache string   how much build cache to keep, such as 4g or 512m (default 8g)
+      --plan                show the plan and change nothing
+      --yes                 apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock git (hidden false)
+Deploy by pushing: which keys may push which apps, remotes, and GitHub webhooks.
+
+Usage:
+  bedrock git [command]
+
+Available Commands:
+  allow       Let an SSH key deploy an app with git push or bedrock deploy --to. The key comes from the argument or stdin.
+  branch      Choose the branch whose pushes deploy an app (main by default).
+  deny        Stop a key from deploying an app; a key left with no apps is removed.
+  keys        List the keys that may push, and the apps each deploys.
+  remote      Print the git remote that deploys an app.
+  webhook     Deploy an app when GitHub says its branch moved; prints what to paste into GitHub, once.
+  webhooks    List the webhooks and what their last delivery did.
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+
+Use "bedrock git [command] --help" for more information about a command.
+== bedrock git allow (hidden false)
+Let an SSH key deploy an app with git push or bedrock deploy --to. The key comes from the argument or stdin.
+
+Usage:
+  bedrock git allow <app> [public key] [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock git branch (hidden false)
+Choose the branch whose pushes deploy an app (main by default).
+
+Usage:
+  bedrock git branch <app> <branch> [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock git deny (hidden false)
+Stop a key from deploying an app; a key left with no apps is removed.
+
+Usage:
+  bedrock git deny <app> <fingerprint or public key> [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock git hook (hidden true)
+The pre-receive hook of an app's repository.
+
+Usage:
+  bedrock git hook <app> [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock git keys (hidden false)
+List the keys that may push, and the apps each deploys.
+
+Usage:
+  bedrock git keys [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock git remote (hidden false)
+Print the git remote that deploys an app.
+
+Usage:
+  bedrock git remote <app> [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock git serve (hidden true)
+What a push key runs: git receive-pack, upload-pack or a tarball deploy, for its apps only.
+
+Usage:
+  bedrock git serve <apps...> [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock git webhook (hidden false)
+Deploy an app when GitHub says its branch moved; prints what to paste into GitHub, once.
+
+Usage:
+  bedrock git webhook <app> [flags]
+
+Flags:
+      --branch string   the branch whose pushes deploy (default "main")
+      --off             stop deploying on webhooks and forget the secret and key
+      --repo string     the repository: git@github.com:you/app.git, https://..., or file:///path for a test
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock git webhooks (hidden false)
+List the webhooks and what their last delivery did.
+
+Usage:
+  bedrock git webhooks [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock history (hidden false)
+List recent operations, or show one receipt.
+
+Usage:
+  bedrock history [operation-id] [flags]
+
+Flags:
+      --limit int   how many operations to list (default 20)
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock host (hidden false)
+Set up, keep and maintain this machine.
+
+Usage:
+  bedrock host [command]
+
+Available Commands:
+  maintain    Install updates, reboot if allowed and needed, bring everything back and check it.
+  reconcile   Re-apply this machine's profile, repairing whatever drifted.
+  setup       Turn this machine into a bedrock host: Docker, firewall, key-only SSH, updates, swap, registry.
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+
+Use "bedrock host [command] --help" for more information about a command.
+== bedrock host maintain (hidden false)
+Install updates, reboot if allowed and needed, bring everything back and check it.
+
+Usage:
+  bedrock host maintain [flags]
+
+Flags:
+      --digest string   apply only if the plan is still the one with this digest; implies --yes
+      --plan            show the plan and change nothing
+      --reboot          reboot when the machine asks for it
+      --yes             apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock host reconcile (hidden false)
+Re-apply this machine's profile, repairing whatever drifted.
+
+Usage:
+  bedrock host reconcile [flags]
+
+Flags:
+      --digest string   apply only if the plan is still the one with this digest; implies --yes
+      --plan            show the plan and change nothing
+      --yes             apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock host setup (hidden false)
+Turn this machine into a bedrock host: Docker, firewall, key-only SSH, updates, swap, registry.
+
+Usage:
+  bedrock host setup [flags]
+
+Flags:
+      --digest string     apply only if the plan is still the one with this digest; implies --yes
+      --hostname string   the machine's name (default: keep the current one)
+      --plan              show the plan and change nothing
+      --swap int          swap file size in GiB; 0 for none (default 4)
+      --timezone string   IANA timezone, such as America/New_York (default: leave it)
+      --web-from string   who may reach 80 and 443: anyone, or cloudflare for Cloudflare's proxy only, which needs every route to be dns: proxied (default: keep the machine's setting, anyone on a new one)
+      --yes               apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock init (hidden false)
+Write a starting bedrock.yaml for a new app.
+Write a starting bedrock.yaml for a new app.
+
+The file is commented and ready to deploy once the app itself exists.
+Nothing on a machine is touched; this only writes a file.
+
+  bedrock init blog --kind static --host blog.example.com
+  bedrock init api --host api.example.com --postgres
+  bedrock init mailer --kind worker
+  bedrock init nightly --kind cron --schedule "0 4 * * *"
+Usage:
+  bedrock init <app> [flags]
+
+Flags:
+      --dir string        the directory to write the manifest into (default ".")
+      --force             overwrite an existing manifest
+      --host string       the hostname it answers on, for web and static
+      --kind string       what the app is: web, static, worker or cron (default "web")
+      --port int          the port a web app listens on (default 8000)
+      --postgres          give the app a database, and DATABASE_URL to reach it
+      --schedule string   when a cron app runs (default "0 3 * * *")
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock integration (hidden false)
+The credentials bedrock itself uses: storage for backups, email for alerts, Cloudflare for DNS.
+
+Usage:
+  bedrock integration [command]
+
+Available Commands:
+  list        List the integrations, which are set, and when they were last used.
+  remove      Drop an integration's values.
+  set         Type an integration's values in, or pipe field=value lines. Values are sealed and never shown.
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+
+Use "bedrock integration [command] --help" for more information about a command.
+== bedrock integration list (hidden false)
+List the integrations, which are set, and when they were last used.
+
+Usage:
+  bedrock integration list [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock integration remove (hidden false)
+Drop an integration's values.
+
+Usage:
+  bedrock integration remove <name> [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock integration set (hidden false)
+Type an integration's values in, or pipe field=value lines. Values are sealed and never shown.
+Integrations: storage, email, cloudflare, loom. In a terminal each field is asked for; otherwise stdin holds one field=value per line.
+Usage:
+  bedrock integration set <name> [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock jobs (hidden false)
+List recent cron runs and one-off commands.
+
+Usage:
+  bedrock jobs <app> [workload] [flags]
+
+Flags:
+      --limit int   how many runs to list (default 20)
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock kernel (hidden true)
+Exercise the kernel itself.
+
+Usage:
+  bedrock kernel [command]
+
+Available Commands:
+  exercise    Run a fixture operation that writes marker files, to prove journaling and recovery.
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+
+Use "bedrock kernel [command] --help" for more information about a command.
+== bedrock kernel exercise (hidden false)
+Run a fixture operation that writes marker files, to prove journaling and recovery.
+
+Usage:
+  bedrock kernel exercise [flags]
+
+Flags:
+      --digest string          apply only if the plan is still the one with this digest; implies --yes
+      --dir string             where the marker files go (required)
+      --fail-at int            make this step fail (1-based)
+      --plan                   show the plan and change nothing
+      --recovery string        resume or compensate after an interruption (default "resume")
+      --step-duration string   how long each step takes (default "0s")
+      --steps int              how many steps (default 4)
+      --yes                    apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock launch (hidden false)
+Take a repository from nothing to running here.
+Take a repository from nothing to running here.
+
+Fetches the repository, works out what it is, writes the manifest it is
+missing and deploys it. A repository that already has a bedrock.yaml is not
+launched: deploy it instead, because overwriting a manifest somebody wrote
+with a guess is worse than refusing.
+
+  bedrock launch https://github.com/you/site --host site.example.com
+  bedrock launch git@github.com:you/api.git --host api.example.com --postgres
+
+What it can work out on its own is deliberately narrow, because a wrong
+guess becomes a manifest someone has to debug:
+
+  a Dockerfile            a web service built from it
+  public/index.html       a static site from that directory
+  index.html at the root  a static site from the root
+
+Anything else is refused with a suggestion, rather than guessed at. The
+manifest it writes is an ordinary one: read it, change it, commit it.
+Usage:
+  bedrock launch <repository> [flags]
+
+Flags:
+      --app string      the app's name (default: the repository's name)
+      --branch string   the branch to launch (default "main")
+      --digest string   apply only if the plan is still the one with this digest; implies --yes
+      --host string     the hostname it answers on
+      --keep            leave the fetched tree and the manifest bedrock wrote behind after a --plan or a failure, to read them
+      --plan            show the plan and change nothing
+      --port int        the port a web app listens on (default 8000)
+      --postgres        give the app a database, and DATABASE_URL to reach it
+      --yes             apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock logs (hidden false)
+Show a workload's output; the app's only workload when there is one.
+
+Usage:
+  bedrock logs <app> [workload] [flags]
+
+Flags:
+  -f, --follow        keep streaming
+      --tail string   how many lines to start with, or all (default "100")
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock ls (hidden false)
+List the apps on this machine: owner, hosts, repository, last deploy, last backup.
+
+Usage:
+  bedrock ls [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock move (hidden false)
+Move an app, and its data, to another machine.
+Move an app, and its data, to another machine.
+
+A move is two commands, one on each machine, with the backup bucket as the
+channel between them. Both machines must be pointed at the same storage: the
+same bucket prefix and the same backup password. A machine reading its own
+bucket instead of the source's finds nothing there, which looks like an app
+with no data rather than like a failure.
+
+  on the source:  bedrock move out <app> --yes > handoff.json
+  on the target:  bedrock move in <app> --handoff handoff.json
+                  bedrock deploy <source>
+                  bedrock dns point <host>          # once it answers
+  on the source:  bedrock remove <app>              # after a rollback window
+
+The source keeps running and keeps serving throughout. Nothing is torn down
+until you tear it down, which is what makes the window a real one.
+Usage:
+  bedrock move [command]
+
+Available Commands:
+  in          Restore an app's data here from the handoff the source machine wrote.
+  out         Back an app up and write the handoff the target machine reads.
+  secrets     Seal an app's secrets for the target machine, and accept them there.
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+
+Use "bedrock move [command] --help" for more information about a command.
+== bedrock move in (hidden false)
+Restore an app's data here from the handoff the source machine wrote.
+Restore an app's data here from the handoff the source machine wrote.
+
+This brings the data across and stops. Deploying the app is a separate
+step, so the restore can be checked before anything starts serving, and
+so the source keeps answering until you move DNS yourself.
+Usage:
+  bedrock move in <app> [flags]
+
+Flags:
+      --digest string    apply only if the plan is still the one with this digest; implies --yes
+      --handoff string   the handoff written by 'bedrock move out', or - for standard input (default "-")
+      --plan             show the plan and change nothing
+      --yes              apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock move out (hidden false)
+Back an app up and write the handoff the target machine reads.
+Back an app up and write the handoff the target machine reads.
+
+The backup is a maintenance window, so it is planned, asked about and
+applied like any other operation; --digest names its plan. The handoff
+goes to standard output alone and carries no secrets, so it can be
+redirected to a file, read, and copied to the other machine.
+
+The app is left running. A move is only safe because the source is still
+there to go back to.
+Usage:
+  bedrock move out <app> [flags]
+
+Flags:
+      --digest string   apply only if the plan is still the one with this digest; implies --yes
+      --no-backup       use the last good backup instead of taking a fresh one
+      --plan            show the plan and change nothing
+      --yes             apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock move secrets (hidden false)
+Seal an app's secrets for the target machine, and accept them there.
+Seal an app's secrets for the target machine, and accept them there.
+
+A moved app has to arrive with the secrets it left with. Its database comes
+back from a snapshot still holding the role password the source generated, so
+a target that generated its own would be handed a database it cannot open.
+bedrock refuses that restore rather than performing it, which is why this
+step exists.
+
+  on the target:  bedrock secret recipient
+  on the source:  bedrock move secrets <app> --to <age1...> > secrets.age
+  on the target:  bedrock move secrets <app> --accept < secrets.age
+
+Only ciphertext is ever printed, sealed to the target's own key, and it stops
+being readable ten minutes after it is made. The values never appear in a
+terminal, a log or a shell history on either machine.
+Usage:
+  bedrock move secrets <app> [flags]
+
+Flags:
+      --accept      read a sealed bundle from standard input and store it here
+      --to string   the target machine's recipient, from 'bedrock secret recipient' there
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock preview (hidden false)
+Run a branch of an app beside it, behind a sign-in.
+Run a branch of an app beside it, behind a sign-in.
+
+A preview is an ordinary app with a derived name, its own containers and its
+own empty database, deployed from a branch. Pushing the same branch again
+updates it rather than making a second one.
+
+  bedrock preview up https://github.com/you/app --branch new-nav \
+      --domain preview.example.com
+  bedrock preview ls
+  bedrock remove app-pr-new-nav --data
+
+Every preview route is behind the Core's sign-in and there is no way to turn
+that off, so the machine needs the loom integration before any of this works.
+Usage:
+  bedrock preview [command]
+
+Available Commands:
+  ls          List the previews running on this machine.
+  up          Deploy a branch as a preview of the app in it.
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+
+Use "bedrock preview [command] --help" for more information about a command.
+== bedrock preview ls (hidden false)
+List the previews running on this machine.
+
+Usage:
+  bedrock preview ls [flags]
+
+Aliases:
+  ls, list
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock preview up (hidden false)
+Deploy a branch as a preview of the app in it.
+Deploy a branch as a preview of the app in it.
+
+The branch's own bedrock.yaml says which app this is a preview of. The
+preview is derived from it: a name with the branch in it, hostnames under
+the preview domain, every route behind a sign-in, no checks and no backups.
+
+The database starts empty and is built by whatever the app runs to migrate
+itself. Most branches want a schema rather than somebody's real rows.
+
+The preview's hostnames keep their records the way the app's own routes
+say. An app whose records are kept by hand has none for a preview, so
+either --dns direct makes them, or a wildcard under the preview domain
+points at this machine already.
+Usage:
+  bedrock preview up <repository> [flags]
+
+Flags:
+      --branch string     the branch to preview
+      --digest string     apply only if the plan is still the one with this digest; implies --yes
+      --dns string        keep the preview's records this way: direct, proxied or manual (default: as the app's routes say)
+      --domain string     the domain previews answer under, such as preview.example.com
+      --manifest string   the manifest at the branch's root, for a source that holds several apps (default "bedrock.yaml")
+      --plan              show the plan and change nothing
+      --secrets           copy the parent's hand-set secrets so the preview can start (default true)
+      --yes               apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock ps (hidden false)
+List apps, their workloads and what is running.
+
+Usage:
+  bedrock ps [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock psql (hidden false)
+Open psql on the app's database.
+
+Usage:
+  bedrock psql <app> [-- psql arguments] [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock receive (hidden true)
+Deploy the source tree on stdin (what bedrock deploy --to sends).
+
+Usage:
+  bedrock receive <app> [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock remove (hidden false)
+Take an app off this machine. Its volumes, database and secrets stay unless asked.
+
+Usage:
+  bedrock remove <app> [flags]
+
+Flags:
+      --data            also remove the app's volumes and database; only a backup brings them back
+      --digest string   apply only if the plan is still the one with this digest; implies --yes
+      --plan            show the plan and change nothing
+      --secrets         also forget the app's sealed secrets; a preview removed with --data forgets its own
+      --yes             apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock restore (hidden false)
+Bring an app's data back from its bucket onto this machine, before deploying it here.
+
+Usage:
+  bedrock restore <app> [flags]
+
+Flags:
+      --digest string     apply only if the plan is still the one with this digest; implies --yes
+      --plan              show the plan and change nothing
+      --snapshot string   a snapshot id instead of the latest
+      --yes               apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock rollback (hidden false)
+Make the previous revision active again.
+
+Usage:
+  bedrock rollback <app> [flags]
+
+Flags:
+      --digest string   apply only if the plan is still the one with this digest; implies --yes
+      --plan            show the plan and change nothing
+      --to string       a specific revision instead of the previous one
+      --yes             apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock run (hidden false)
+Run a one-off command with a workload's image, environment, secrets and volumes.
+Run a one-off command with a workload's image, environment, secrets and volumes.
+
+--secret gives the command more of the app's secrets by name; their values
+never leave the machine. --stdin hands this command's standard input to
+the command, for a value that must appear in no argument, log or record:
+the command then runs here, not in the daemon, and exits with the
+command's own exit code.
+Usage:
+  bedrock run <app> [workload] -- <command...> [flags]
+
+Flags:
+      --plan                 show what would run and change nothing
+      --secret stringArray   give the command this secret of the app too (repeatable)
+      --stdin                pass standard input to the command; it runs in this process
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock secret (hidden false)
+Keep an app's secrets sealed on this machine.
+
+Usage:
+  bedrock secret [command]
+
+Available Commands:
+  copy        Give another app the same value of a secret, without showing it.
+  export      Seal one secret for another machine; prints only age ciphertext.
+  import      Read a secret sealed for this machine from stdin, without showing it.
+  list        List the names in the current version. Values are never shown.
+  recipient   Print the machine's public encryption recipient, creating its key if needed.
+  remove      Drop a name from the next version.
+  set         Store a value, read from stdin or typed without echo. Never pass it as an argument.
+  versions    List every version and the names it holds.
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+
+Use "bedrock secret [command] --help" for more information about a command.
+== bedrock secret copy (hidden false)
+Give another app the same value of a secret, without showing it.
+Give another app the same value of a secret, without showing it: for
+two apps that must share a credential, such as a worker that pairs with
+the product that made its token. The value never leaves the machine's
+store. Copying the same value again changes nothing.
+Usage:
+  bedrock secret copy <from-app> <NAME> <to-app> [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock secret export (hidden false)
+Seal one secret for another machine; prints only age ciphertext.
+
+Usage:
+  bedrock secret export <from-app> <NAME> <to-app> [flags]
+
+Flags:
+      --recipient string   the receiving machine's public age recipient
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock secret import (hidden false)
+Read a secret sealed for this machine from stdin, without showing it.
+
+Usage:
+  bedrock secret import <app> <NAME> [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock secret list (hidden false)
+List the names in the current version. Values are never shown.
+
+Usage:
+  bedrock secret list <app> [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock secret recipient (hidden false)
+Print the machine's public encryption recipient, creating its key if needed.
+
+Usage:
+  bedrock secret recipient [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock secret remove (hidden false)
+Drop a name from the next version.
+
+Usage:
+  bedrock secret remove <app> <NAME> [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock secret set (hidden false)
+Store a value, read from stdin or typed without echo. Never pass it as an argument.
+
+Usage:
+  bedrock secret set <app> <NAME> [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock secret versions (hidden false)
+List every version and the names it holds.
+
+Usage:
+  bedrock secret versions <app> [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock status (hidden false)
+How the machine and its apps are doing: health, traffic, resources, backups, alerts.
+
+Usage:
+  bedrock status [app] [flags]
+
+Flags:
+      --since duration   the window for traffic and resources (default 24h0m0s)
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock upgrade (hidden false)
+Replace bedrock with a new build and restart the daemon; systemd rolls back if it can't start.
+Replace bedrock with a new build and restart the daemon; systemd rolls back if it can't start.
+
+With --version the build is downloaded from the published release and checked
+against the SHA256SUMS beside it. That proves the two agree and nothing more,
+since whoever can replace one can replace both; pass --sha256 with a checksum
+from reviewed source to pin it.
+
+  bedrock upgrade --version 0.7.4
+  bedrock upgrade /tmp/bedrock-new
+Usage:
+  bedrock upgrade [path-to-new-bedrock] [flags]
+
+Flags:
+      --digest string    apply only if the plan is still the one with this digest; implies --yes
+      --plan             show the plan and change nothing
+      --sha256 string    the expected checksum of that release's build for this machine
+      --version string   a published release to fetch and install, such as 0.7.4
+      --yes              apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock version (hidden false)
+Print the version of this build.
+
+Usage:
+  bedrock version [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock watch (hidden false)
+Public URLs this machine checks from the outside, such as the other machine's sites.
+
+Usage:
+  bedrock watch [flags]
+  bedrock watch [command]
+
+Available Commands:
+  add         Check a URL every minute and alert when it stops answering 200.
+  remove      Stop checking a URL.
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+
+Use "bedrock watch [command] --help" for more information about a command.
+== bedrock watch add (hidden false)
+Check a URL every minute and alert when it stops answering 200.
+
+Usage:
+  bedrock watch add <url> [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock watch remove (hidden false)
+Stop checking a URL.
+
+Usage:
+  bedrock watch remove <url> [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")

@@ -1,0 +1,5 @@
+target loom, resume
+ 1 fetch: fetch snapshot abc12345's manifest and database dump from the app's bucket
+ 2 volumes: restore the volumes the snapshot holds into empty volumes
+ 3 database: start the app's database and load the dump, when the snapshot holds one
+ 4 done: record the restore; the app is ready to deploy

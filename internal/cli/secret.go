@@ -25,7 +25,13 @@ func newSecret(a *app) *cobra.Command {
 		Use:   "secret",
 		Short: "Keep an app's secrets sealed on this machine.",
 	}
-	set := &cobra.Command{
+	cmd.AddCommand(newSecretSet(a), newSecretList(a), newSecretRemove(a), newSecretVersions(a), newSecretCopy(a), newSecretRecipient(a), newSecretExport(a), newSecretImport(a))
+	return cmd
+}
+
+// newSecretSet is bedrock secret set.
+func newSecretSet(a *app) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "set <app> <NAME>",
 		Short: "Store a value, read from stdin or typed without echo. Never pass it as an argument.",
 		Args:  cobra.ExactArgs(2),
@@ -50,7 +56,12 @@ func newSecret(a *app) *cobra.Command {
 			return nil
 		},
 	}
-	list := &cobra.Command{
+	return cmd
+}
+
+// newSecretList is bedrock secret list.
+func newSecretList(a *app) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "list <app>",
 		Short: "List the names in the current version. Values are never shown.",
 		Args:  cobra.ExactArgs(1),
@@ -76,7 +87,12 @@ func newSecret(a *app) *cobra.Command {
 			return nil
 		},
 	}
-	remove := &cobra.Command{
+	return cmd
+}
+
+// newSecretRemove is bedrock secret remove.
+func newSecretRemove(a *app) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "remove <app> <NAME>",
 		Short: "Drop a name from the next version.",
 		Args:  cobra.ExactArgs(2),
@@ -89,7 +105,12 @@ func newSecret(a *app) *cobra.Command {
 			return nil
 		},
 	}
-	versions := &cobra.Command{
+	return cmd
+}
+
+// newSecretVersions is bedrock secret versions.
+func newSecretVersions(a *app) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "versions <app>",
 		Short: "List every version and the names it holds.",
 		Args:  cobra.ExactArgs(1),
@@ -113,7 +134,12 @@ func newSecret(a *app) *cobra.Command {
 			return w.Flush()
 		},
 	}
-	copySecret := &cobra.Command{
+	return cmd
+}
+
+// newSecretCopy is bedrock secret copy.
+func newSecretCopy(a *app) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "copy <from-app> <NAME> <to-app>",
 		Short: "Give another app the same value of a secret, without showing it.",
 		Long: `Give another app the same value of a secret, without showing it: for
@@ -154,7 +180,12 @@ store. Copying the same value again changes nothing.`,
 			return nil
 		},
 	}
-	recipient := &cobra.Command{
+	return cmd
+}
+
+// newSecretRecipient is bedrock secret recipient.
+func newSecretRecipient(a *app) *cobra.Command {
+	cmd := &cobra.Command{
 		Use: "recipient", Short: "Print the machine's public encryption recipient, creating its key if needed.", Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			// Automated provisioning must not print the recovery identity. It
@@ -167,8 +198,13 @@ store. Copying the same value again changes nothing.`,
 			return err
 		},
 	}
+	return cmd
+}
+
+// newSecretExport is bedrock secret export.
+func newSecretExport(a *app) *cobra.Command {
 	var recipientKey string
-	export := &cobra.Command{
+	cmd := &cobra.Command{
 		Use: "export <from-app> <NAME> <to-app>", Short: "Seal one secret for another machine; prints only age ciphertext.", Args: cobra.ExactArgs(3),
 		RunE: func(_ *cobra.Command, args []string) error {
 			value, err := a.secretsStore().Export(args[0], args[1], args[2], recipientKey)
@@ -179,9 +215,14 @@ store. Copying the same value again changes nothing.`,
 			return err
 		},
 	}
-	export.Flags().StringVar(&recipientKey, "recipient", "", "the receiving machine's public age recipient")
-	_ = export.MarkFlagRequired("recipient")
-	importSecret := &cobra.Command{
+	cmd.Flags().StringVar(&recipientKey, "recipient", "", "the receiving machine's public age recipient")
+	_ = cmd.MarkFlagRequired("recipient")
+	return cmd
+}
+
+// newSecretImport is bedrock secret import.
+func newSecretImport(a *app) *cobra.Command {
+	cmd := &cobra.Command{
 		Use: "import <app> <NAME>", Short: "Read a secret sealed for this machine from stdin, without showing it.", Args: cobra.ExactArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			version, err := a.secretsStore().Import(args[0], args[1], os.Stdin)
@@ -192,7 +233,6 @@ store. Copying the same value again changes nothing.`,
 			return nil
 		},
 	}
-	cmd.AddCommand(set, list, remove, versions, copySecret, recipient, export, importSecret)
 	return cmd
 }
 

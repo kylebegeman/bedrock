@@ -151,6 +151,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/_ping":
 		_, _ = io.WriteString(w, "OK")
+	case path == "/images/json":
+		writeJSON(w, http.StatusOK, []any{})
 	case strings.HasPrefix(path, "/images/") && strings.HasSuffix(path, "/json"):
 		ref := strings.TrimSuffix(strings.TrimPrefix(path, "/images/"), "/json")
 		writeJSON(w, http.StatusOK, map[string]any{"Id": "sha256:" + strings.NewReplacer("/", "-", ":", "-", "@", "-").Replace(ref), "Config": map[string]any{"User": ""}})

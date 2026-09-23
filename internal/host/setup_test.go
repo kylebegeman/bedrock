@@ -22,7 +22,7 @@ func profileJSON(t *testing.T, p Profile) json.RawMessage {
 
 // allowEverything makes every mutating command succeed on the fake machine.
 func allowEverything(m *fakeMachine) {
-	for _, prefix := range []string{"apt-get", "hostnamectl", "timedatectl set-timezone", "fallocate", "chmod", "mkswap", "swapon /swapfile", "install", "curl", "systemctl", "docker run", "docker start", "sshd -t", "ufw", "dpkg --print-architecture", "useradd", "chgrp"} {
+	for _, prefix := range []string{"apt-get", "hostnamectl", "timedatectl set-timezone", "fallocate", "chmod", "mkswap", "swapon /swapfile", "install", "curl", "systemctl", "docker run", "docker start", "sshd -t", "ufw", "dpkg --print-architecture", "useradd", "chgrp", "sh"} {
 		m.answers[prefix+" *"] = ""
 	}
 	m.answers["dpkg --print-architecture"] = "amd64"

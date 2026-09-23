@@ -159,6 +159,9 @@ type Point struct {
 	Store     *state.Store
 	Secrets   *secrets.Store
 	Addresses func(ctx context.Context) []string
+	// CloudflareOnly refuses to point a name straight at a machine that
+	// answers only Cloudflare.
+	CloudflareOnly CloudflareOnly
 }
 
 // PointInput says which host, and whether it goes behind the proxy.
@@ -188,6 +191,11 @@ func (p Point) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, err
 	}
 	if in.Proxied {
 		mode = manifest.DNSProxied
+	}
+	if direct, err := p.CloudflareOnly.bypassing(map[string]manifest.DNSMode{in.Host: mode}); err != nil {
+		return nil, err
+	} else if len(direct) > 0 {
+		return nil, fmt.Errorf("%s, so a record naming it straight would reach nothing: point %s with --proxied", onlyCloudflare, in.Host)
 	}
 	if _, err := integration.LoadCloudflare(p.Secrets); err != nil {
 		return nil, fmt.Errorf("pointing a record needs the cloudflare integration: %w", err)

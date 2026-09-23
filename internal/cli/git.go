@@ -35,7 +35,13 @@ func newGit(a *app) *cobra.Command {
 		Use:   "git",
 		Short: "Deploy by pushing: which keys may push which apps, remotes, and GitHub webhooks.",
 	}
-	allow := &cobra.Command{
+	cmd.AddCommand(newGitAllow(a), newGitDeny(a), newGitKeys(a), newGitRemote(a), newGitBranch(a), newGitWebhook(a), newGitWebhooks(a), newGitServe(a), newGitHook(a))
+	return cmd
+}
+
+// newGitAllow is bedrock git allow.
+func newGitAllow(a *app) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "allow <app> [public key]",
 		Short: "Let an SSH key deploy an app with git push or bedrock deploy --to. The key comes from the argument or stdin.",
 		Args:  cobra.MinimumNArgs(1),
@@ -72,7 +78,12 @@ func newGit(a *app) *cobra.Command {
 			return nil
 		},
 	}
-	deny := &cobra.Command{
+	return cmd
+}
+
+// newGitDeny is bedrock git deny.
+func newGitDeny(a *app) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "deny <app> <fingerprint or public key>",
 		Short: "Stop a key from deploying an app; a key left with no apps is removed.",
 		Args:  cobra.MinimumNArgs(2),
@@ -91,7 +102,12 @@ func newGit(a *app) *cobra.Command {
 			return nil
 		},
 	}
-	keys := &cobra.Command{
+	return cmd
+}
+
+// newGitKeys is bedrock git keys.
+func newGitKeys(a *app) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "keys",
 		Short: "List the keys that may push, and the apps each deploys.",
 		Args:  cobra.NoArgs,
@@ -124,7 +140,12 @@ func newGit(a *app) *cobra.Command {
 			return w.Flush()
 		},
 	}
-	remote := &cobra.Command{
+	return cmd
+}
+
+// newGitRemote is bedrock git remote.
+func newGitRemote(a *app) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "remote <app>",
 		Short: "Print the git remote that deploys an app.",
 		Args:  cobra.ExactArgs(1),
@@ -133,7 +154,12 @@ func newGit(a *app) *cobra.Command {
 			return nil
 		},
 	}
-	branch := &cobra.Command{
+	return cmd
+}
+
+// newGitBranch is bedrock git branch.
+func newGitBranch(a *app) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "branch <app> <branch>",
 		Short: "Choose the branch whose pushes deploy an app (main by default).",
 		Args:  cobra.ExactArgs(2),
@@ -152,11 +178,16 @@ func newGit(a *app) *cobra.Command {
 			return nil
 		},
 	}
+	return cmd
+}
+
+// newGitWebhook is bedrock git webhook.
+func newGitWebhook(a *app) *cobra.Command {
 	var (
 		repo, hookBranch string
 		off              bool
 	)
-	webhook := &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "webhook <app>",
 		Short: "Deploy an app when GitHub says its branch moved; prints what to paste into GitHub, once.",
 		Args:  cobra.ExactArgs(1),
@@ -217,10 +248,15 @@ func newGit(a *app) *cobra.Command {
 			return nil
 		},
 	}
-	webhook.Flags().StringVar(&repo, "repo", "", "the repository: git@github.com:you/app.git, https://..., or file:///path for a test")
-	webhook.Flags().StringVar(&hookBranch, "branch", gitdeploy.DefaultBranch, "the branch whose pushes deploy")
-	webhook.Flags().BoolVar(&off, "off", false, "stop deploying on webhooks and forget the secret and key")
-	webhooks := &cobra.Command{
+	cmd.Flags().StringVar(&repo, "repo", "", "the repository: git@github.com:you/app.git, https://..., or file:///path for a test")
+	cmd.Flags().StringVar(&hookBranch, "branch", gitdeploy.DefaultBranch, "the branch whose pushes deploy")
+	cmd.Flags().BoolVar(&off, "off", false, "stop deploying on webhooks and forget the secret and key")
+	return cmd
+}
+
+// newGitWebhooks is bedrock git webhooks.
+func newGitWebhooks(a *app) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "webhooks",
 		Short: "List the webhooks and what their last delivery did.",
 		Args:  cobra.NoArgs,
@@ -253,7 +289,12 @@ func newGit(a *app) *cobra.Command {
 			return w.Flush()
 		},
 	}
-	serve := &cobra.Command{
+	return cmd
+}
+
+// newGitServe is bedrock git serve, what a push key runs.
+func newGitServe(a *app) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:    "serve <apps...>",
 		Short:  "What a push key runs: git receive-pack, upload-pack or a tarball deploy, for its apps only.",
 		Hidden: true,
@@ -287,7 +328,12 @@ func newGit(a *app) *cobra.Command {
 			}
 		},
 	}
-	hook := &cobra.Command{
+	return cmd
+}
+
+// newGitHook is bedrock git hook, an app repository's pre-receive hook.
+func newGitHook(a *app) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:    "hook <app>",
 		Short:  "The pre-receive hook of an app's repository.",
 		Hidden: true,
@@ -299,7 +345,6 @@ func newGit(a *app) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.AddCommand(allow, deny, keys, remote, branch, webhook, webhooks, serve, hook)
 	return cmd
 }
 

@@ -135,152 +135,45 @@ func (b Backup) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 	return b.appPlan(st, rev, &m)
 }
 
+// backingUp is one backup as its plan is built and applied: where it
+// stages, which repository it writes, and the record it keeps. An app's
+// backup and the machine's own share it; only their first two steps differ.
+type backingUp struct {
+	b Backup
+	// owner holds the storage secrets; target names the bucket and tags
+	// the snapshots.
+	owner, target string
+	staging       string
+	bucket        string
+	keep          restic.Keep
+	run           *backupRun
+	summary       *restic.Summary
+	// detail says what a finished run holds.
+	detail func() string
+}
+
 func (b Backup) appPlan(st *integration.Storage, rev *state.Revision, m *manifest.Manifest) (*kernel.Plan, error) {
 	app := rev.App
-	staging := filepath.Join(b.StateDir, "backups", app)
-	bucket := st.Bucket(app)
 	keep := m.KeepPolicy()
-	run := &backupRun{store: b.Store, app: app, kind: state.BackupRunBackup}
-	var summary *restic.Summary
-	plan := &kernel.Plan{Target: app, Recovery: kernel.Resume}
-
-	prepare := "write the manifest"
-	if m.PostgresVersion() != "" {
-		prepare += " and preserve its initialization scripts"
+	x := &backingUp{
+		b: b, owner: app, target: app,
+		staging: filepath.Join(b.StateDir, "backups", app),
+		bucket:  st.Bucket(app),
+		keep:    restic.Keep{Daily: keep.Daily, Weekly: keep.Weekly, Monthly: keep.Monthly},
+		run:     &backupRun{store: b.Store, app: app, kind: state.BackupRunBackup},
 	}
-	plan.Steps = append(plan.Steps, kernel.Step{
-		Name: "prepare", Change: prepare,
-		Apply: func(ctx context.Context, out io.Writer) error {
-			if err := run.begin(ctx); err != nil {
-				return err
-			}
-			if err := resetDir(staging); err != nil {
-				return run.fail(err)
-			}
-			if err := os.WriteFile(filepath.Join(staging, "manifest.json"), append(rev.Manifest, '\n'), 0o600); err != nil {
-				return run.fail(err)
-			}
-			// The volumes mount over these inside the read-only tree, so
-			// the mountpoints have to be there already.
-			for _, v := range m.DataVolumes() {
-				if err := os.MkdirAll(filepath.Join(staging, "volumes", v), 0o700); err != nil {
-					return run.fail(err)
-				}
-			}
-			if m.PostgresVersion() == "" {
-				return nil
-			}
-			// The database's first-run scripts go with it: a restore on a
-			// new machine runs them again before it loads the dump.
-			if init := InitDir(b.StateDir, app); keepsOwners(m) && dirExists(init) {
-				if out, err := exec.CommandContext(ctx, "cp", "-a", init, filepath.Join(staging, initSnapshotDir)).CombinedOutput(); err != nil {
-					return run.fail(fmt.Errorf("copy the database's first-run scripts: %s", strings.TrimSpace(string(out))))
-				}
-			}
-			return nil
-		},
-	})
-	plan.Steps = append(plan.Steps, kernel.Step{
-		Name: "snapshot", Change: fmt.Sprintf("pause writers, dump and snapshot consistent data into bucket %s, then resume (30m limit)", bucket),
-		Apply: func(ctx context.Context, out io.Writer) error {
-			if err := run.begin(ctx); err != nil {
-				return err
-			}
-			e, err := docker.Connect(ctx)
-			if err != nil {
-				return run.fail(err)
-			}
-			defer e.Close()
-			r, _, err := openRepo(b.Secrets, e, app, app, nil)
-			if err != nil {
-				return run.fail(err)
-			}
-			created, err := r.Ensure(ctx)
-			if err != nil {
-				return run.fail(err)
-			}
-			if created {
-				fmt.Fprintf(out, "made bucket %s and its repository\n", bucket)
-			}
-			mounts := []string{restic.DirMount(staging, true)}
-			for _, v := range m.DataVolumes() {
-				mounts = append(mounts, restic.VolumeMount(docker.VolumeName(app, v), v, true))
-			}
-			err = withQuiescedWriters(ctx, e, b.Store.Path(), m, out, func(ctx context.Context) error {
-				if m.PostgresVersion() != "" {
-					values, _, err := b.Secrets.LoadCurrent(app)
-					if err != nil {
-						return err
-					}
-					svc, err := postgresService(m, values, "")
-					if err != nil {
-						return err
-					}
-					size, err := dumpDatabase(ctx, e, svc, filepath.Join(staging, "postgres.dump"))
-					if err != nil {
-						return err
-					}
-					fmt.Fprintf(out, "database dumped: %s\n", HumanBytes(size))
-				}
-				var err error
-				summary, err = r.Backup(ctx, app, mounts, restic.DataRoot)
-				return err
-			})
-			if err != nil {
-				return run.fail(err)
-			}
-			_ = b.Store.RecordIntegrationUse(ctx, integration.StorageName, "backup "+app, time.Now().UTC())
-			fmt.Fprintf(out, "snapshot %s: %d files, %s, %s new\n", short(summary.SnapshotID), summary.TotalFiles, HumanBytes(summary.TotalBytes), HumanBytes(summary.DataAdded))
-			return nil
-		},
-	})
-	plan.Steps = append(plan.Steps, kernel.Step{
-		Name: "retention", Change: fmt.Sprintf("keep %d daily, %d weekly and %d monthly snapshots", keep.Daily, keep.Weekly, keep.Monthly),
-		Apply: func(ctx context.Context, out io.Writer) error {
-			if err := run.begin(ctx); err != nil {
-				return err
-			}
-			e, err := docker.Connect(ctx)
-			if err != nil {
-				return run.fail(err)
-			}
-			defer e.Close()
-			r, _, err := openRepo(b.Secrets, e, app, app, nil)
-			if err != nil {
-				return run.fail(err)
-			}
-			removed, err := r.Forget(ctx, app, restic.Keep{Daily: keep.Daily, Weekly: keep.Weekly, Monthly: keep.Monthly})
-			if err != nil {
-				return run.fail(err)
-			}
-			if summary == nil {
-				// Resumed after the snapshot step: take the newest.
-				latest, err := r.Latest(ctx, app)
-				if err != nil {
-					return run.fail(err)
-				}
-				summary = &restic.Summary{SnapshotID: latest.ID, BackupStart: latest.Time}
-				if latest.Summary != nil {
-					summary.TotalFiles, summary.TotalBytes = latest.Summary.TotalFiles, latest.Summary.TotalBytes
-				}
-			}
-			detail := fmt.Sprintf("%d files, %s", summary.TotalFiles, HumanBytes(summary.TotalBytes))
-			if m.PostgresVersion() != "" {
-				detail = "database and " + detail
-			}
-			if err := run.done(ctx, state.BackupRun{Snapshot: short(summary.SnapshotID), SnapshotAt: summary.BackupStart, Files: summary.TotalFiles, Bytes: summary.TotalBytes, Detail: detail}); err != nil {
-				return err
-			}
-			_ = os.RemoveAll(staging)
-			if removed > 0 {
-				fmt.Fprintf(out, "removed %d old snapshot(s)\n", removed)
-			} else {
-				fmt.Fprintln(out, "nothing old enough to remove")
-			}
-			return nil
-		},
-	})
-	return plan, nil
+	x.detail = func() string {
+		detail := fmt.Sprintf("%d files, %s", x.summary.TotalFiles, HumanBytes(x.summary.TotalBytes))
+		if m.PostgresVersion() != "" {
+			detail = "database and " + detail
+		}
+		return detail
+	}
+	return &kernel.Plan{Target: app, Recovery: kernel.Resume, Steps: []kernel.Step{
+		x.appPrepareStep(rev, m),
+		x.appSnapshotStep(m),
+		x.retentionStep(),
+	}}, nil
 }
 
 // machinePlan backs up what makes this machine itself: the state store,
@@ -289,26 +182,162 @@ func (b Backup) appPlan(st *integration.Storage, rev *state.Revision, m *manifes
 func (b Backup) machinePlan(st *integration.Storage) (*kernel.Plan, error) {
 	hostname := b.Hostname()
 	target := MachineTarget(hostname)
-	staging := filepath.Join(b.StateDir, "backups", "machine")
-	bucket := st.Bucket(target)
-	run := &backupRun{store: b.Store, app: manifest.ReservedApp, kind: state.BackupRunBackup}
-	var summary *restic.Summary
-	plan := &kernel.Plan{Target: "this machine", Recovery: kernel.Resume}
-	plan.Steps = append(plan.Steps, kernel.Step{
-		Name: "prepare", Change: "copy the state store, the sealed secrets and the host profile",
+	x := &backingUp{
+		b: b, owner: manifest.ReservedApp, target: target,
+		staging: filepath.Join(b.StateDir, "backups", "machine"),
+		bucket:  st.Bucket(target),
+		keep:    restic.Keep{Daily: 7, Weekly: 4, Monthly: 6},
+		run:     &backupRun{store: b.Store, app: manifest.ReservedApp, kind: state.BackupRunBackup},
+		detail:  func() string { return "state, secrets and profile" },
+	}
+	return &kernel.Plan{Target: "this machine", Recovery: kernel.Resume, Steps: []kernel.Step{
+		x.machinePrepareStep(hostname),
+		x.machineSnapshotStep(),
+		x.retentionStep(),
+	}}, nil
+}
+
+// repo connects to Docker and opens the backup's repository. The caller
+// closes the engine.
+func (x *backingUp) repo(ctx context.Context) (*docker.Engine, restic.Runner, error) {
+	e, err := docker.Connect(ctx)
+	if err != nil {
+		return nil, restic.Runner{}, err
+	}
+	r, _, err := openRepo(x.b.Secrets, e, x.owner, x.target, nil)
+	if err != nil {
+		e.Close()
+		return nil, restic.Runner{}, err
+	}
+	return e, r, nil
+}
+
+// ensure makes the bucket and its repository the first time.
+func (x *backingUp) ensure(ctx context.Context, r restic.Runner, out io.Writer) error {
+	created, err := r.Ensure(ctx)
+	if err != nil {
+		return err
+	}
+	if created {
+		fmt.Fprintf(out, "made bucket %s and its repository\n", x.bucket)
+	}
+	return nil
+}
+
+func (x *backingUp) appPrepareStep(rev *state.Revision, m *manifest.Manifest) kernel.Step {
+	change := "write the manifest"
+	if m.PostgresVersion() != "" {
+		change += " and preserve its initialization scripts"
+	}
+	return kernel.Step{
+		Name: "prepare", Change: change,
 		Apply: func(ctx context.Context, out io.Writer) error {
-			if err := run.begin(ctx); err != nil {
+			if err := x.run.begin(ctx); err != nil {
 				return err
 			}
-			if err := resetDir(staging); err != nil {
-				return run.fail(err)
+			if err := resetDir(x.staging); err != nil {
+				return x.run.fail(err)
 			}
-			if err := b.Store.BackupTo(ctx, filepath.Join(staging, "state.db")); err != nil {
-				return run.fail(fmt.Errorf("copy the state store: %w", err))
+			if err := os.WriteFile(filepath.Join(x.staging, "manifest.json"), append(rev.Manifest, '\n'), 0o600); err != nil {
+				return x.run.fail(err)
+			}
+			// The volumes mount over these inside the read-only tree, so
+			// the mountpoints have to be there already.
+			for _, v := range m.DataVolumes() {
+				if err := os.MkdirAll(filepath.Join(x.staging, "volumes", v), 0o700); err != nil {
+					return x.run.fail(err)
+				}
+			}
+			if m.PostgresVersion() == "" {
+				return nil
+			}
+			// The database's first-run scripts go with it: a restore on a
+			// new machine runs them again before it loads the dump.
+			if init := InitDir(x.b.StateDir, x.target); keepsOwners(m) && dirExists(init) {
+				if out, err := exec.CommandContext(ctx, "cp", "-a", init, filepath.Join(x.staging, initSnapshotDir)).CombinedOutput(); err != nil {
+					return x.run.fail(fmt.Errorf("copy the database's first-run scripts: %s", strings.TrimSpace(string(out))))
+				}
+			}
+			return nil
+		},
+	}
+}
+
+func (x *backingUp) appSnapshotStep(m *manifest.Manifest) kernel.Step {
+	app := x.target
+	return kernel.Step{
+		Name: "snapshot", Change: fmt.Sprintf("pause writers, dump and snapshot consistent data into bucket %s, then resume (30m limit)", x.bucket),
+		Apply: func(ctx context.Context, out io.Writer) error {
+			if err := x.run.begin(ctx); err != nil {
+				return err
+			}
+			e, r, err := x.repo(ctx)
+			if err != nil {
+				return x.run.fail(err)
+			}
+			defer e.Close()
+			if err := x.ensure(ctx, r, out); err != nil {
+				return x.run.fail(err)
+			}
+			mounts := []string{restic.DirMount(x.staging, true)}
+			for _, v := range m.DataVolumes() {
+				mounts = append(mounts, restic.VolumeMount(docker.VolumeName(app, v), v, true))
+			}
+			err = withQuiescedWriters(ctx, e, x.b.Store.Path(), m, out, func(ctx context.Context) error {
+				if m.PostgresVersion() != "" {
+					if err := x.dump(ctx, e, m, out); err != nil {
+						return err
+					}
+				}
+				var err error
+				x.summary, err = r.Backup(ctx, app, mounts, restic.DataRoot)
+				return err
+			})
+			if err != nil {
+				return x.run.fail(err)
+			}
+			_ = x.b.Store.RecordIntegrationUse(ctx, integration.StorageName, "backup "+app, time.Now().UTC())
+			fmt.Fprintf(out, "snapshot %s: %d files, %s, %s new\n", short(x.summary.SnapshotID), x.summary.TotalFiles, HumanBytes(x.summary.TotalBytes), HumanBytes(x.summary.DataAdded))
+			return nil
+		},
+	}
+}
+
+// dump writes the app's database into the staging tree.
+func (x *backingUp) dump(ctx context.Context, e *docker.Engine, m *manifest.Manifest, out io.Writer) error {
+	values, _, err := x.b.Secrets.LoadCurrent(x.target)
+	if err != nil {
+		return err
+	}
+	svc, err := postgresService(m, values, "")
+	if err != nil {
+		return err
+	}
+	size, err := dumpDatabase(ctx, e, svc, filepath.Join(x.staging, "postgres.dump"))
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "database dumped: %s\n", HumanBytes(size))
+	return nil
+}
+
+func (x *backingUp) machinePrepareStep(hostname string) kernel.Step {
+	b := x.b
+	return kernel.Step{
+		Name: "prepare", Change: "copy the state store, the sealed secrets and the host profile",
+		Apply: func(ctx context.Context, out io.Writer) error {
+			if err := x.run.begin(ctx); err != nil {
+				return err
+			}
+			if err := resetDir(x.staging); err != nil {
+				return x.run.fail(err)
+			}
+			if err := b.Store.BackupTo(ctx, filepath.Join(x.staging, "state.db")); err != nil {
+				return x.run.fail(fmt.Errorf("copy the state store: %w", err))
 			}
 			if secretsDir := filepath.Join(b.StateDir, "secrets"); dirExists(secretsDir) {
-				if out, err := exec.CommandContext(ctx, "cp", "-a", secretsDir, filepath.Join(staging, "secrets")).CombinedOutput(); err != nil {
-					return run.fail(fmt.Errorf("copy the secrets: %s", strings.TrimSpace(string(out))))
+				if out, err := exec.CommandContext(ctx, "cp", "-a", secretsDir, filepath.Join(x.staging, "secrets")).CombinedOutput(); err != nil {
+					return x.run.fail(fmt.Errorf("copy the secrets: %s", strings.TrimSpace(string(out))))
 				}
 			}
 			for _, f := range []string{b.Profile, b.Secrets.KeyPath + ".pub"} {
@@ -316,85 +345,89 @@ func (b Backup) machinePlan(st *integration.Storage) (*kernel.Plan, error) {
 					continue
 				}
 				if data, err := os.ReadFile(f); err == nil {
-					if err := os.WriteFile(filepath.Join(staging, filepath.Base(f)), data, 0o600); err != nil {
-						return run.fail(err)
+					if err := os.WriteFile(filepath.Join(x.staging, filepath.Base(f)), data, 0o600); err != nil {
+						return x.run.fail(err)
 					}
 				}
 			}
 			info, _ := json.MarshalIndent(map[string]any{"hostname": hostname, "bedrock": version.Current().Version, "taken_at": time.Now().UTC()}, "", "  ")
-			if err := os.WriteFile(filepath.Join(staging, "machine.json"), append(info, '\n'), 0o600); err != nil {
-				return run.fail(err)
+			if err := os.WriteFile(filepath.Join(x.staging, "machine.json"), append(info, '\n'), 0o600); err != nil {
+				return x.run.fail(err)
 			}
 			fmt.Fprintln(out, "state, secrets and profile copied")
 			return nil
 		},
-	})
-	plan.Steps = append(plan.Steps, kernel.Step{
-		Name: "snapshot", Change: fmt.Sprintf("snapshot them into bucket %s", bucket),
+	}
+}
+
+func (x *backingUp) machineSnapshotStep() kernel.Step {
+	return kernel.Step{
+		Name: "snapshot", Change: fmt.Sprintf("snapshot them into bucket %s", x.bucket),
 		Apply: func(ctx context.Context, out io.Writer) error {
-			if err := run.begin(ctx); err != nil {
+			if err := x.run.begin(ctx); err != nil {
 				return err
 			}
-			e, err := docker.Connect(ctx)
+			e, r, err := x.repo(ctx)
 			if err != nil {
-				return run.fail(err)
+				return x.run.fail(err)
 			}
 			defer e.Close()
-			r, _, err := openRepo(b.Secrets, e, manifest.ReservedApp, target, nil)
+			if err := x.ensure(ctx, r, out); err != nil {
+				return x.run.fail(err)
+			}
+			x.summary, err = r.Backup(ctx, x.target, []string{restic.DirMount(x.staging, true)}, restic.DataRoot)
 			if err != nil {
-				return run.fail(err)
+				return x.run.fail(err)
 			}
-			if created, err := r.Ensure(ctx); err != nil {
-				return run.fail(err)
-			} else if created {
-				fmt.Fprintf(out, "made bucket %s and its repository\n", bucket)
-			}
-			summary, err = r.Backup(ctx, target, []string{restic.DirMount(staging, true)}, restic.DataRoot)
-			if err != nil {
-				return run.fail(err)
-			}
-			_ = b.Store.RecordIntegrationUse(ctx, integration.StorageName, "backup of the machine", time.Now().UTC())
-			fmt.Fprintf(out, "snapshot %s: %d files, %s\n", short(summary.SnapshotID), summary.TotalFiles, HumanBytes(summary.TotalBytes))
+			_ = x.b.Store.RecordIntegrationUse(ctx, integration.StorageName, "backup of the machine", time.Now().UTC())
+			fmt.Fprintf(out, "snapshot %s: %d files, %s\n", short(x.summary.SnapshotID), x.summary.TotalFiles, HumanBytes(x.summary.TotalBytes))
 			return nil
 		},
-	})
-	plan.Steps = append(plan.Steps, kernel.Step{
-		Name: "retention", Change: "keep 7 daily, 4 weekly and 6 monthly snapshots",
+	}
+}
+
+// retentionStep forgets snapshots the policy no longer keeps, then closes
+// the run record with the snapshot this backup took.
+func (x *backingUp) retentionStep() kernel.Step {
+	return kernel.Step{
+		Name: "retention", Change: fmt.Sprintf("keep %d daily, %d weekly and %d monthly snapshots", x.keep.Daily, x.keep.Weekly, x.keep.Monthly),
 		Apply: func(ctx context.Context, out io.Writer) error {
-			if err := run.begin(ctx); err != nil {
+			if err := x.run.begin(ctx); err != nil {
 				return err
 			}
-			e, err := docker.Connect(ctx)
+			e, r, err := x.repo(ctx)
 			if err != nil {
-				return run.fail(err)
+				return x.run.fail(err)
 			}
 			defer e.Close()
-			r, _, err := openRepo(b.Secrets, e, manifest.ReservedApp, target, nil)
+			removed, err := r.Forget(ctx, x.target, x.keep)
 			if err != nil {
-				return run.fail(err)
+				return x.run.fail(err)
 			}
-			removed, err := r.Forget(ctx, target, restic.Keep{Daily: 7, Weekly: 4, Monthly: 6})
-			if err != nil {
-				return run.fail(err)
-			}
-			if summary == nil {
-				latest, err := r.Latest(ctx, target)
+			if x.summary == nil {
+				// Resumed after the snapshot step: take the newest.
+				latest, err := r.Latest(ctx, x.target)
 				if err != nil {
-					return run.fail(err)
+					return x.run.fail(err)
 				}
-				summary = &restic.Summary{SnapshotID: latest.ID, BackupStart: latest.Time}
+				x.summary = &restic.Summary{SnapshotID: latest.ID, BackupStart: latest.Time}
+				if latest.Summary != nil {
+					x.summary.TotalFiles, x.summary.TotalBytes = latest.Summary.TotalFiles, latest.Summary.TotalBytes
+				}
 			}
-			if err := run.done(ctx, state.BackupRun{Snapshot: short(summary.SnapshotID), SnapshotAt: summary.BackupStart, Files: summary.TotalFiles, Bytes: summary.TotalBytes, Detail: "state, secrets and profile"}); err != nil {
+			s := x.summary
+			if err := x.run.done(ctx, state.BackupRun{Snapshot: short(s.SnapshotID), SnapshotAt: s.BackupStart, Files: s.TotalFiles, Bytes: s.TotalBytes, Detail: x.detail()}); err != nil {
 				return err
 			}
-			_ = os.RemoveAll(staging)
+			_ = os.RemoveAll(x.staging)
 			if removed > 0 {
 				fmt.Fprintf(out, "removed %d old snapshot(s)\n", removed)
+			} else {
+				fmt.Fprintln(out, "nothing old enough to remove")
 			}
 			return nil
 		},
-	})
-	return plan, nil
+	}
 }
 
 // dumpDatabase writes an app's database as a pg_dump custom-format file.

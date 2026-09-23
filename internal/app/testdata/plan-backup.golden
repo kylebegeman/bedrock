@@ -1,0 +1,10 @@
+loom
+target loom, resume
+ 1 prepare: write the manifest and preserve its initialization scripts
+ 2 snapshot: pause writers, dump and snapshot consistent data into bucket lane-loom, then resume (30m limit)
+ 3 retention: keep 7 daily, 4 weekly and 6 monthly snapshots
+bedrock
+target this machine, resume
+ 1 prepare: copy the state store, the sealed secrets and the host profile
+ 2 snapshot: snapshot them into bucket lane-machine-box
+ 3 retention: keep 7 daily, 4 weekly and 6 monthly snapshots

@@ -48,6 +48,18 @@ type RemoveInput struct {
 // Kind implements kernel.Definition.
 func (Remove) Kind() string { return RemoveKind }
 
+// removal is one app being taken off the machine: what its steps share,
+// and each step as a method.
+type removal struct {
+	r        Remove
+	in       RemoveInput
+	revs     []state.Revision
+	m        manifest.Manifest
+	stateDir string
+	// secrets says whether the app's sealed secrets go too.
+	secrets bool
+}
+
 // Plan implements kernel.Definition.
 func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, error) {
 	var in RemoveInput
@@ -73,161 +85,182 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 			described = rev
 		}
 	}
-	var m manifest.Manifest
-	if err := json.Unmarshal(described.Manifest, &m); err != nil {
+	x := &removal{r: r, in: in, revs: revs, stateDir: r.StateDir}
+	if err := json.Unmarshal(described.Manifest, &x.m); err != nil {
 		return nil, fmt.Errorf("revision %s of %s: its manifest doesn't parse: %w", described.ID, in.App, err)
 	}
-	stateDir := r.StateDir
-	if stateDir == "" {
-		stateDir = defaultStateDir
+	if x.stateDir == "" {
+		x.stateDir = defaultStateDir
 	}
-	_, preview := IsPreview(in.App)
-	forgetSecrets := in.Secrets || (in.Data && preview)
-	store := r.Store
+	// A preview's secrets are copies of its parent's; with its data gone
+	// there is nothing left for them to open.
+	x.secrets = in.Secrets || (in.Data && x.m.Preview != nil)
 	plan := &kernel.Plan{Target: in.App, Recovery: kernel.Resume}
-	plan.Steps = append(plan.Steps,
-		kernel.Step{
-			Name: "unroute", Change: "take the app's routes off the edge",
-			Apply: func(ctx context.Context, out io.Writer) error {
-				for _, rev := range revs {
-					if rev.Status == state.RevisionActive || rev.Status == state.RevisionPrevious {
-						if err := store.SetRevisionStatus(ctx, in.App, rev.ID, state.RevisionRetired); err != nil {
-							return err
-						}
-					}
-				}
-				cfg, err := edgeConfig(ctx, store, r.Secrets)
-				if err != nil {
-					return err
-				}
-				admin := edge.NewAdmin()
-				if admin.Answers(ctx) {
-					if err := admin.Load(ctx, cfg); err != nil {
-						return err
-					}
-				}
-				fmt.Fprintln(out, "routes removed")
-				return nil
-			},
-		},
-		kernel.Step{
-			Name: "dns", Change: "remove the DNS records bedrock keeps for the app" + recordsNote(m),
-			Apply: func(ctx context.Context, out io.Writer) error {
-				managed := m.ManagedHosts()
-				if len(managed) == 0 {
-					fmt.Fprintln(out, "the app keeps no records")
-					return nil
-				}
-				var addrs []string
-				if r.Addresses != nil {
-					addrs = r.Addresses(ctx)
-				}
-				mgr, err := DNSManager(r.Secrets, addrs)
-				if err != nil {
-					fmt.Fprintf(out, "records for %v stay: %v\n", sortedKeys(managed), err)
-					return nil
-				}
-				removed, err := mgr.Remove(ctx, in.App, sortedKeys(managed))
-				if err != nil {
-					return err
-				}
-				for _, host := range removed {
-					fmt.Fprintf(out, "%s's record removed\n", host)
-				}
-				return nil
-			},
-		},
-		kernel.Step{
-			Name: "containers", Change: "stop and remove the app's containers and images",
-			Apply: func(ctx context.Context, out io.Writer) error {
-				e, err := docker.Connect(ctx)
-				if err != nil {
-					return err
-				}
-				defer e.Close()
-				owned, err := e.Owned(ctx)
-				if err != nil {
-					return err
-				}
-				for _, c := range owned {
-					if c.Labels[docker.LabelApp] != in.App {
-						continue
-					}
-					workload := c.Labels[docker.LabelWorkload]
-					if workload == postgresWorkload || workload == objectsWorkload {
-						// The data services get time to write everything out.
-						if err := e.Remove(ctx, c.Name, 60*time.Second); err != nil {
-							return err
-						}
-						if !in.Data {
-							fmt.Fprintf(out, "%s stopped; its volume stays\n", c.Name)
-						} else {
-							fmt.Fprintf(out, "%s stopped\n", c.Name)
-						}
-						continue
-					}
-					grace := 10 * time.Second
-					if w, ok := m.Workloads[workload]; ok {
-						grace = w.GraceOr(grace)
-					}
-					if err := e.Remove(ctx, c.Name, grace); err != nil {
-						return err
-					}
-					fmt.Fprintf(out, "%s removed\n", c.Name)
-				}
-				images, err := e.OwnedImages(ctx)
-				if err != nil {
-					return err
-				}
-				for _, img := range images {
-					if img.Labels[docker.LabelApp] == in.App {
-						if err := e.RemoveImage(ctx, img.ID); err != nil {
-							fmt.Fprintf(out, "image %s stays: %v\n", img.Describe(), err)
-						}
-					}
-				}
-				return nil
-			},
-		},
-	)
+	plan.Steps = append(plan.Steps, x.unrouteStep(), x.dnsStep(), x.containersStep())
 	if in.Data {
-		plan.Steps = append(plan.Steps, kernel.Step{
-			Name: "data", Change: "remove the app's volumes, database and object store (no way back except a backup)",
-			Apply: func(ctx context.Context, out io.Writer) error {
-				e, err := docker.Connect(ctx)
+		plan.Steps = append(plan.Steps, x.dataStep())
+	}
+	plan.Steps = append(plan.Steps, x.forgetStep())
+	return plan, nil
+}
+
+func (x *removal) unrouteStep() kernel.Step {
+	return kernel.Step{
+		Name: "unroute", Change: "take the app's routes off the edge",
+		Apply: func(ctx context.Context, out io.Writer) error {
+			for _, rev := range x.revs {
+				if rev.Status == state.RevisionActive || rev.Status == state.RevisionPrevious {
+					if err := x.r.Store.SetRevisionStatus(ctx, x.in.App, rev.ID, state.RevisionRetired); err != nil {
+						return err
+					}
+				}
+			}
+			cfg, err := edgeConfig(ctx, x.r.Store, x.r.Secrets)
+			if err != nil {
+				return err
+			}
+			admin := edge.NewAdmin()
+			if admin.Answers(ctx) {
+				if err := admin.Load(ctx, cfg); err != nil {
+					return err
+				}
+			}
+			fmt.Fprintln(out, "routes removed")
+			return nil
+		},
+	}
+}
+
+func (x *removal) dnsStep() kernel.Step {
+	return kernel.Step{
+		Name: "dns", Change: "remove the DNS records bedrock keeps for the app" + recordsNote(x.m),
+		Apply: func(ctx context.Context, out io.Writer) error {
+			managed := x.m.ManagedHosts()
+			if len(managed) == 0 {
+				fmt.Fprintln(out, "the app keeps no records")
+				return nil
+			}
+			var addrs []string
+			if x.r.Addresses != nil {
+				addrs = x.r.Addresses(ctx)
+			}
+			mgr, err := DNSManager(x.r.Secrets, addrs)
+			if err != nil {
+				fmt.Fprintf(out, "records for %v stay: %v\n", sortedKeys(managed), err)
+				return nil
+			}
+			removed, err := mgr.Remove(ctx, x.in.App, sortedKeys(managed))
+			if err != nil {
+				return err
+			}
+			for _, host := range removed {
+				fmt.Fprintf(out, "%s's record removed\n", host)
+			}
+			return nil
+		},
+	}
+}
+
+func (x *removal) containersStep() kernel.Step {
+	return kernel.Step{
+		Name: "containers", Change: "stop and remove the app's containers and images",
+		Apply: func(ctx context.Context, out io.Writer) error {
+			e, err := docker.Connect(ctx)
+			if err != nil {
+				return err
+			}
+			defer e.Close()
+			owned, err := e.Owned(ctx)
+			if err != nil {
+				return err
+			}
+			for _, c := range owned {
+				if c.Labels[docker.LabelApp] == x.in.App {
+					if err := x.removeContainer(ctx, e, c, out); err != nil {
+						return err
+					}
+				}
+			}
+			images, err := e.OwnedImages(ctx)
+			if err != nil {
+				return err
+			}
+			for _, img := range images {
+				if img.Labels[docker.LabelApp] == x.in.App {
+					if err := e.RemoveImage(ctx, img.ID); err != nil {
+						fmt.Fprintf(out, "image %s stays: %v\n", img.Describe(), err)
+					}
+				}
+			}
+			return nil
+		},
+	}
+}
+
+// removeContainer stops and removes one of the app's containers, giving
+// its data services a minute to write everything out and a workload the
+// grace its manifest asks for.
+func (x *removal) removeContainer(ctx context.Context, e *docker.Engine, c docker.Info, out io.Writer) error {
+	workload := c.Labels[docker.LabelWorkload]
+	if workload == postgresWorkload || workload == objectsWorkload {
+		if err := e.Remove(ctx, c.Name, 60*time.Second); err != nil {
+			return err
+		}
+		if !x.in.Data {
+			fmt.Fprintf(out, "%s stopped; its volume stays\n", c.Name)
+		} else {
+			fmt.Fprintf(out, "%s stopped\n", c.Name)
+		}
+		return nil
+	}
+	grace := 10 * time.Second
+	if w, ok := x.m.Workloads[workload]; ok {
+		grace = w.GraceOr(grace)
+	}
+	if err := e.Remove(ctx, c.Name, grace); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "%s removed\n", c.Name)
+	return nil
+}
+
+func (x *removal) dataStep() kernel.Step {
+	return kernel.Step{
+		Name: "data", Change: "remove the app's volumes, database and object store (no way back except a backup)",
+		Apply: func(ctx context.Context, out io.Writer) error {
+			e, err := docker.Connect(ctx)
+			if err != nil {
+				return err
+			}
+			defer e.Close()
+			names := []string{docker.VolumeName(x.in.App, postgresWorkload)}
+			for _, v := range x.m.DataVolumes() {
+				names = append(names, docker.VolumeName(x.in.App, v))
+			}
+			for _, v := range names {
+				removed, err := e.RemoveVolume(ctx, v)
 				if err != nil {
 					return err
 				}
-				defer e.Close()
-				names := []string{docker.VolumeName(in.App, postgresWorkload)}
-				for _, v := range m.DataVolumes() {
-					names = append(names, docker.VolumeName(in.App, v))
+				if removed {
+					fmt.Fprintf(out, "volume %s removed\n", v)
 				}
-				for _, v := range names {
-					removed, err := e.RemoveVolume(ctx, v)
-					if err != nil {
-						return err
-					}
-					if removed {
-						fmt.Fprintf(out, "volume %s removed\n", v)
-					}
-				}
-				// The copy of the database's first-run scripts goes too.
-				if err := os.RemoveAll(filepath.Dir(InitDir(stateDir, in.App))); err != nil {
-					return err
-				}
-				return nil
-			},
-		})
+			}
+			// The copy of the database's first-run scripts goes too.
+			return os.RemoveAll(filepath.Dir(InitDir(x.stateDir, x.in.App)))
+		},
 	}
+}
+
+func (x *removal) forgetStep() kernel.Step {
 	change := "remove the app's network and forget it"
 	switch {
-	case in.Secrets:
+	case x.in.Secrets:
 		change += ", and its secrets"
-	case forgetSecrets:
+	case x.secrets:
 		change += ", and the secrets it was given as a preview"
 	}
-	plan.Steps = append(plan.Steps, kernel.Step{
+	return kernel.Step{
 		Name: "forget", Change: change,
 		Apply: func(ctx context.Context, out io.Writer) error {
 			e, err := docker.Connect(ctx)
@@ -235,20 +268,19 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 				return err
 			}
 			defer e.Close()
-			if err := edge.Leave(ctx, e, in.App); err != nil {
+			if err := edge.Leave(ctx, e, x.in.App); err != nil {
 				return err
 			}
-			if err := e.RemoveNetwork(ctx, docker.AppNetwork(in.App)); err != nil {
+			if err := e.RemoveNetwork(ctx, docker.AppNetwork(x.in.App)); err != nil {
 				return err
 			}
-			if err := forgetApp(ctx, store, r.Secrets, stateDir, in.App, forgetSecrets, out); err != nil {
+			if err := forgetApp(ctx, x.r.Store, x.r.Secrets, x.stateDir, x.in.App, x.secrets, out); err != nil {
 				return err
 			}
-			fmt.Fprintf(out, "%s forgotten\n", in.App)
+			fmt.Fprintf(out, "%s forgotten\n", x.in.App)
 			return nil
 		},
-	})
-	return plan, nil
+	}
 }
 
 // forgetApp drops what the machine keeps about an app beside its

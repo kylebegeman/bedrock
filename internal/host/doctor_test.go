@@ -79,11 +79,7 @@ func TestDoctorWarnsAboutPendingReboots(t *testing.T) {
 }
 
 func TestDoctorNeverSuggestsLockingYourselfOut(t *testing.T) {
-	f := Facts{Firewall: struct {
-		Installed bool     `json:"installed"`
-		Active    bool     `json:"active"`
-		Allowed   []string `json:"allowed,omitempty"`
-	}{Installed: true, Active: true, Allowed: []string{"80/tcp"}}}
+	f := Facts{Firewall: FirewallFacts{Installed: true, Active: true, Allowed: []string{"80/tcp"}}}
 	r := byName(Diagnose(f))
 	if r["firewall"].Verdict != Fail || r["firewall"].Fix != "ufw allow OpenSSH, before anything else" {
 		t.Fatalf("firewall: %+v", r["firewall"])

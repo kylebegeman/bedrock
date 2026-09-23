@@ -1,5 +1,6 @@
 // Package cloudflare is the little of Cloudflare's API bedrock needs: find
-// a zone, and list, make, change and remove DNS records in it.
+// a zone, list, make, change and remove DNS records in it, and read the
+// address ranges Cloudflare's proxy connects from.
 package cloudflare
 
 import (
@@ -84,7 +85,9 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.Token)
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -211,4 +214,28 @@ func (c *Client) Verify(ctx context.Context) ([]string, error) {
 		names = append(names, z.Name)
 	}
 	return names, nil
+}
+
+// Ranges are the addresses Cloudflare's proxy connects to an origin from.
+type Ranges struct {
+	IPv4 []string `json:"ipv4_cidrs"`
+	IPv6 []string `json:"ipv6_cidrs"`
+}
+
+// All returns every range, IPv4 first.
+func (r Ranges) All() []string {
+	return append(append([]string(nil), r.IPv4...), r.IPv6...)
+}
+
+// IPs reads Cloudflare's published ranges. The list is public: it needs
+// no token, so a client made with New("") can ask.
+func (c *Client) IPs(ctx context.Context) (Ranges, error) {
+	var r Ranges
+	if _, err := c.do(ctx, http.MethodGet, "/ips", nil, &r); err != nil {
+		return Ranges{}, err
+	}
+	if len(r.IPv4) == 0 {
+		return Ranges{}, errors.New("cloudflare: the address list has no IPv4 ranges")
+	}
+	return r, nil
 }

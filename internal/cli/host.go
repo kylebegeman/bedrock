@@ -70,6 +70,14 @@ func newHost(a *app) *cobra.Command {
 			if profile.Hostname == "" {
 				profile.Hostname, _ = os.Hostname()
 			}
+			// Who may reach the web is kept unless it is given: running
+			// setup again must not quietly open a machine that was closed
+			// to everyone but Cloudflare.
+			if !cmd.Flags().Changed("web-from") {
+				if current, err := host.LoadProfile(host.RealEnv()); err == nil {
+					profile.WebFrom = current.WebFrom
+				}
+			}
 			if err := profile.Validate(); err != nil {
 				return err
 			}
@@ -79,6 +87,7 @@ func newHost(a *app) *cobra.Command {
 	setup.Flags().StringVar(&profile.Hostname, "hostname", "", "the machine's name (default: keep the current one)")
 	setup.Flags().IntVar(&profile.SwapGiB, "swap", 4, "swap file size in GiB; 0 for none")
 	setup.Flags().StringVar(&profile.Timezone, "timezone", "", "IANA timezone, such as America/New_York (default: leave it)")
+	setup.Flags().StringVar(&profile.WebFrom, "web-from", "", "who may reach 80 and 443: anyone, or cloudflare for Cloudflare's proxy only, which needs every route to be dns: proxied (default: keep the machine's setting, anyone on a new one)")
 	a.mutatingFlags(setup, &planOnly)
 
 	var reconcilePlan bool

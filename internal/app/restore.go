@@ -39,6 +39,18 @@ type RestoreInput struct {
 // Kind implements kernel.Definition.
 func (RestoreDef) Kind() string { return RestoreKind }
 
+// restoring is one restore being planned: what its steps share, and each
+// step as a method.
+type restoring struct {
+	r        RestoreDef
+	app      string
+	asked    string // the snapshot asked for: an id, or latest
+	staging  string
+	run      *backupRun
+	m        *manifest.Manifest
+	snapshot *restic.Snapshot
+}
+
 // Plan implements kernel.Definition.
 func (r RestoreDef) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, error) {
 	var in RestoreInput
@@ -59,98 +71,132 @@ func (r RestoreDef) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 	} else if rev != nil {
 		return nil, fmt.Errorf("%s is deployed on this machine; a restore is for a machine that doesn't run it yet (bedrock remove %s --data first), or run bedrock drill %s to test the backup", in.App, in.App, in.App)
 	}
-	app := in.App
-	staging := filepath.Join(r.StateDir, "restore", app)
-	run := &backupRun{store: r.Store, app: app, kind: state.BackupRunRestore}
-	var (
-		m        *manifest.Manifest
-		snapshot *restic.Snapshot
-	)
-	loadStaged := func() (*manifest.Manifest, error) {
-		if m != nil {
-			return m, nil
-		}
-		data, err := os.ReadFile(filepath.Join(staging, "manifest.json"))
-		if err != nil {
-			return nil, fmt.Errorf("the fetched manifest is missing: %w", err)
-		}
-		var parsed manifest.Manifest
-		if err := json.Unmarshal(data, &parsed); err != nil {
-			return nil, err
-		}
-		if err := parsed.Validate(); err != nil {
-			return nil, fmt.Errorf("snapshot manifest: %w", err)
-		}
-		if parsed.App != app {
-			return nil, fmt.Errorf("snapshot belongs to %s, not %s", parsed.App, app)
-		}
-		if err := requireRestoreSecrets(r.Secrets, &parsed); err != nil {
-			return nil, err
-		}
-		m = &parsed
-		return m, nil
-	}
-	plan := &kernel.Plan{Target: app, Recovery: kernel.Resume}
-	add := func(st kernel.Step) { plan.Steps = append(plan.Steps, st) }
+	x := &restoring{r: r, app: in.App, asked: in.Snapshot, staging: filepath.Join(r.StateDir, "restore", in.App),
+		run: &backupRun{store: r.Store, app: in.App, kind: state.BackupRunRestore}}
+	// Recovery must use the same snapshot as fetch, even if a newer backup
+	// appeared while the daemon was down, so every step after it reads the
+	// one fetch pinned, and adopts the backup run again.
+	return &kernel.Plan{Target: in.App, Recovery: kernel.Resume, Steps: []kernel.Step{
+		x.fetchStep(),
+		x.pinned(x.volumesStep()),
+		x.pinned(x.databaseStep()),
+		x.pinned(x.doneStep()),
+	}}, nil
+}
 
-	add(kernel.Step{
-		Name: "fetch", Change: fmt.Sprintf("fetch snapshot %s's manifest and database dump from the app's bucket", in.Snapshot),
+// id is the snapshot the restore reads: the one fetch found, or the one
+// asked for.
+func (x *restoring) id() string {
+	if x.snapshot != nil {
+		return x.snapshot.ID
+	}
+	return x.asked
+}
+
+// manifest is the app's manifest as the snapshot holds it, read once from
+// what fetch staged and checked before anything is restored.
+func (x *restoring) manifest() (*manifest.Manifest, error) {
+	if x.m != nil {
+		return x.m, nil
+	}
+	data, err := os.ReadFile(filepath.Join(x.staging, "manifest.json"))
+	if err != nil {
+		return nil, fmt.Errorf("the fetched manifest is missing: %w", err)
+	}
+	var parsed manifest.Manifest
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return nil, err
+	}
+	if err := parsed.Validate(); err != nil {
+		return nil, fmt.Errorf("snapshot manifest: %w", err)
+	}
+	if parsed.App != x.app {
+		return nil, fmt.Errorf("snapshot belongs to %s, not %s", parsed.App, x.app)
+	}
+	if err := requireRestoreSecrets(x.r.Secrets, &parsed); err != nil {
+		return nil, err
+	}
+	x.m = &parsed
+	return x.m, nil
+}
+
+// pinned wraps a step after fetch: it adopts the backup run and reads the
+// snapshot fetch pinned before doing anything.
+func (x *restoring) pinned(step kernel.Step) kernel.Step {
+	apply := step.Apply
+	step.Apply = func(ctx context.Context, out io.Writer) error {
+		if err := x.run.begin(ctx); err != nil {
+			return err
+		}
+		var err error
+		x.snapshot, err = readRestoreSnapshot(x.staging)
+		if err != nil {
+			return x.run.fail(err)
+		}
+		return apply(ctx, out)
+	}
+	return step
+}
+
+func (x *restoring) fetchStep() kernel.Step {
+	return kernel.Step{
+		Name: "fetch", Change: fmt.Sprintf("fetch snapshot %s's manifest and database dump from the app's bucket", x.asked),
 		Apply: func(ctx context.Context, out io.Writer) error {
-			if err := run.begin(ctx); err != nil {
+			if err := x.run.begin(ctx); err != nil {
 				return err
 			}
 			e, err := docker.Connect(ctx)
 			if err != nil {
-				return run.fail(err)
+				return x.run.fail(err)
 			}
 			defer e.Close()
-			rs, _, err := openRepo(r.Secrets, e, app, app, nil)
+			rs, _, err := openRepo(x.r.Secrets, e, x.app, x.app, nil)
 			if err != nil {
-				return run.fail(err)
+				return x.run.fail(err)
 			}
-			if in.Snapshot == "latest" {
-				snapshot, err = rs.Latest(ctx, app)
+			if x.asked == "latest" {
+				x.snapshot, err = rs.Latest(ctx, x.app)
 				if errors.Is(err, restic.ErrNoRepository) {
-					return run.fail(fmt.Errorf("no backups of %s in the storage this machine is set up with", app))
+					return x.run.fail(fmt.Errorf("no backups of %s in the storage this machine is set up with", x.app))
 				}
 				if err != nil {
-					return run.fail(err)
+					return x.run.fail(err)
 				}
 			}
-			if err := resetDir(staging); err != nil {
-				return run.fail(err)
+			if err := resetDir(x.staging); err != nil {
+				return x.run.fail(err)
 			}
-			id := in.Snapshot
-			if snapshot != nil {
-				id = snapshot.ID
+			id := x.id()
+			if _, err := rs.Restore(ctx, id, x.app, []string{restic.DirMount(x.staging, false)}, restic.DataRoot+"/manifest.json", restic.DataRoot+"/postgres.dump", restic.DataRoot+"/"+initSnapshotDir); err != nil {
+				return x.run.fail(err)
 			}
-			if _, err := rs.Restore(ctx, id, app, []string{restic.DirMount(staging, false)}, restic.DataRoot+"/manifest.json", restic.DataRoot+"/postgres.dump", restic.DataRoot+"/"+initSnapshotDir); err != nil {
-				return run.fail(err)
-			}
-			mf, err := loadStaged()
+			mf, err := x.manifest()
 			if err != nil {
-				return run.fail(err)
+				return x.run.fail(err)
 			}
-			if snapshot == nil {
-				snapshot = &restic.Snapshot{ID: id, ShortID: short(id)}
+			if x.snapshot == nil {
+				x.snapshot = &restic.Snapshot{ID: id, ShortID: short(id)}
 			}
-			if err := writeRestoreSnapshot(staging, snapshot); err != nil {
-				return run.fail(err)
+			if err := writeRestoreSnapshot(x.staging, x.snapshot); err != nil {
+				return x.run.fail(err)
 			}
 			when := ""
-			if !snapshot.Time.IsZero() {
-				when = " from " + snapshot.Time.Local().Format("2006-01-02 15:04")
+			if !x.snapshot.Time.IsZero() {
+				when = " from " + x.snapshot.Time.Local().Format("2006-01-02 15:04")
 			}
 			fmt.Fprintf(out, "snapshot %s%s: %s\n", short(id), when, describeData(mf))
 			return nil
 		},
-	})
-	add(kernel.Step{
+	}
+}
+
+func (x *restoring) volumesStep() kernel.Step {
+	return kernel.Step{
 		Name: "volumes", Change: "restore the volumes the snapshot holds into empty volumes",
 		Apply: func(ctx context.Context, out io.Writer) error {
-			mf, err := loadStaged()
+			mf, err := x.manifest()
 			if err != nil {
-				return run.fail(err)
+				return x.run.fail(err)
 			}
 			if len(mf.DataVolumes()) == 0 {
 				fmt.Fprintln(out, "no volumes")
@@ -158,120 +204,103 @@ func (r RestoreDef) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 			}
 			e, err := docker.Connect(ctx)
 			if err != nil {
-				return run.fail(err)
+				return x.run.fail(err)
 			}
 			defer e.Close()
 			var mounts, includes []string
 			for _, v := range mf.DataVolumes() {
-				vol := docker.VolumeName(app, v)
+				vol := docker.VolumeName(x.app, v)
 				if err := e.EnsureVolume(ctx, vol); err != nil {
-					return run.fail(err)
+					return x.run.fail(err)
 				}
 				empty, err := e.VolumeEmpty(ctx, vol)
 				if err != nil {
-					return run.fail(err)
+					return x.run.fail(err)
 				}
 				if !empty {
-					return run.fail(fmt.Errorf("volume %s already has files; a restore is for an empty volume", v))
+					return x.run.fail(fmt.Errorf("volume %s already has files; a restore is for an empty volume", v))
 				}
 				mounts = append(mounts, restic.VolumeMount(vol, v, false))
 				includes = append(includes, restic.VolumePath(v))
 			}
-			rs, _, err := openRepo(r.Secrets, e, app, app, nil)
+			rs, _, err := openRepo(x.r.Secrets, e, x.app, x.app, nil)
 			if err != nil {
-				return run.fail(err)
+				return x.run.fail(err)
 			}
-			id := in.Snapshot
-			if snapshot != nil {
-				id = snapshot.ID
-			}
-			sum, err := rs.Restore(ctx, id, app, mounts, includes...)
+			sum, err := rs.Restore(ctx, x.id(), x.app, mounts, includes...)
 			if err != nil {
-				return run.fail(err)
+				return x.run.fail(err)
 			}
 			fmt.Fprintf(out, "%d volume(s) restored: %d files, %s\n", len(mounts), sum.FilesRestored, HumanBytes(sum.BytesRestored))
 			return nil
 		},
-	})
-	add(kernel.Step{
+	}
+}
+
+func (x *restoring) databaseStep() kernel.Step {
+	return kernel.Step{
 		Name: "database", Change: "start the app's database and load the dump, when the snapshot holds one",
 		Apply: func(ctx context.Context, out io.Writer) error {
-			mf, err := loadStaged()
+			mf, err := x.manifest()
 			if err != nil {
-				return run.fail(err)
+				return x.run.fail(err)
 			}
-			version := mf.PostgresVersion()
-			if version == "" {
+			if mf.PostgresVersion() == "" {
 				fmt.Fprintln(out, "no database")
 				return nil
 			}
-			dump := filepath.Join(staging, "postgres.dump")
+			dump := filepath.Join(x.staging, "postgres.dump")
 			if _, err := os.Stat(dump); err != nil {
-				return run.fail(errors.New("the snapshot holds no postgres.dump"))
+				return x.run.fail(errors.New("the snapshot holds no postgres.dump"))
 			}
 			e, err := docker.Connect(ctx)
 			if err != nil {
-				return run.fail(err)
+				return x.run.fail(err)
 			}
 			defer e.Close()
-			if err := e.EnsureNetwork(ctx, docker.AppNetwork(app)); err != nil {
-				return run.fail(err)
+			if err := e.EnsureNetwork(ctx, docker.AppNetwork(x.app)); err != nil {
+				return x.run.fail(err)
 			}
-			// Original credentials were required before touching any volumes.
-			// Only constants and derived values may be filled in here.
-			if err := ensureAppSecrets(r.Secrets, mf, out); err != nil {
-				return run.fail(err)
+			// Original credentials were required before touching any
+			// volumes. Only constants and derived values may be filled in.
+			if err := ensureAppSecrets(x.r.Secrets, mf, out); err != nil {
+				return x.run.fail(err)
 			}
-			initDir, err := restoreInit(staging, r.StateDir, app)
+			initDir, err := restoreInit(x.staging, x.r.StateDir, x.app)
 			if err != nil {
-				return run.fail(err)
+				return x.run.fail(err)
 			}
 			if keepsOwners(mf) && initDir == "" {
-				return run.fail(errors.New("the snapshot holds no database init scripts"))
+				return x.run.fail(errors.New("the snapshot holds no database init scripts"))
 			}
-			if err := ensurePostgres(ctx, e, r.Secrets, mf, initDir, dump, out); err != nil {
-				return run.fail(err)
+			if err := ensurePostgres(ctx, e, x.r.Secrets, mf, initDir, dump, out); err != nil {
+				return x.run.fail(err)
 			}
 			return nil
 		},
-	})
-	add(kernel.Step{
+	}
+}
+
+func (x *restoring) doneStep() kernel.Step {
+	return kernel.Step{
 		Name: "done", Change: "record the restore; the app is ready to deploy",
 		Apply: func(ctx context.Context, out io.Writer) error {
 			result := state.BackupRun{Detail: "data restored; deploy the app to run it"}
-			if snapshot != nil {
-				result.Snapshot, result.SnapshotAt = snapshot.ShortID, snapshot.Time
+			if x.snapshot != nil {
+				result.Snapshot, result.SnapshotAt = x.snapshot.ShortID, x.snapshot.Time
 			} else {
-				result.Snapshot = short(in.Snapshot)
+				result.Snapshot = short(x.asked)
 			}
-			if err := run.done(ctx, result); err != nil {
+			if err := x.run.done(ctx, result); err != nil {
 				return err
 			}
-			_ = os.RemoveAll(staging)
-			fmt.Fprintf(out, "%s's data is on this machine; deploy it with bedrock deploy <its source directory>\n", app)
+			if err := os.RemoveAll(x.staging); err != nil {
+				fmt.Fprintf(out, "the staged snapshot at %s stays: %v\n", x.staging, err)
+			}
+			fmt.Fprintf(out, "%s's data is on this machine; deploy it with bedrock deploy <its source directory>\n", x.app)
 			return nil
 		},
-	})
-	// Recovery must use the same snapshot as fetch, even if a newer backup
-	// appeared while the daemon was down. Re-adopt the backup run as well.
-	for i := range plan.Steps {
-		if plan.Steps[i].Name == "fetch" {
-			continue
-		}
-		apply := plan.Steps[i].Apply
-		plan.Steps[i].Apply = func(ctx context.Context, out io.Writer) error {
-			if err := run.begin(ctx); err != nil {
-				return err
-			}
-			var err error
-			snapshot, err = readRestoreSnapshot(staging)
-			if err != nil {
-				return run.fail(err)
-			}
-			return apply(ctx, out)
-		}
 	}
-	return plan, nil
 }
 
 func writeRestoreSnapshot(staging string, snapshot *restic.Snapshot) error {

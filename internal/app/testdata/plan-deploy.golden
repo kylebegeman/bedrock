@@ -1,0 +1,16 @@
+target loom, resume
+ 1 record: record a new revision of loom (revision 20260922-120000; commit 0123456789ab)
+ 2 edge: run the edge, the app's own network and the one it shares with the edge alone
+ 3 dns: confirm core.example.com, runner.example.com point at this machine
+ 4 inherit: copy parent's secrets to loom, which runs its code
+ 5 secrets: make the secrets the manifest asks for: the database's password, the object store's root user, 2 generated, 3 derived
+ 6 data: keep the app's data: postgres 17, object store, volume core-data (restore database from /restore/pg.dump; files from /restore/files.tar.gz)
+ 7 build-core-api: build core-api's image from ., for core-api, product, schema (target server)
+ 8 pull-objects-setup: use image quay.io/minio/mc:latest for objects-setup
+ 9 build-runner: build runner from . (target runner-runtime)
+10 release: run objects-setup, schema, once each, before anything new starts
+11 start: start 3 container(s) (revision 20260922-120000; secrets: DATABASE_URL, LOOM_CORE_API_DATABASE_URL)
+12 ready: wait until every workload answers
+13 switch: route the edge to the new revision
+14 certificates: wait for certificates for core.example.com, runner.example.com
+15 retire: stop the revision this one replaces

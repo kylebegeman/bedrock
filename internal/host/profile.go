@@ -17,7 +17,14 @@ type Profile struct {
 	// Timezone is an IANA name such as America/New_York. Empty leaves the
 	// machine's setting alone.
 	Timezone string `json:"timezone,omitempty"`
+	// WebFrom is who may reach 80 and 443: WebFromAnyone (empty means the
+	// same) or WebFromCloudflare.
+	WebFrom string `json:"web_from,omitempty"`
 }
+
+// CloudflareOnly reports whether the machine takes the web only from
+// Cloudflare's proxy.
+func (p Profile) CloudflareOnly() bool { return p.WebFrom == WebFromCloudflare }
 
 // ProfilePath is where the profile lives on the machine.
 const ProfilePath = "/etc/bedrock/host.json"
@@ -31,6 +38,11 @@ func (p Profile) Validate() error {
 	}
 	if p.SwapGiB < 0 || p.SwapGiB > 64 {
 		return errors.New("swap must be 0 to 64 GiB")
+	}
+	switch p.WebFrom {
+	case "", WebFromAnyone, WebFromCloudflare:
+	default:
+		return fmt.Errorf("web from %q: it is %s or %s", p.WebFrom, WebFromAnyone, WebFromCloudflare)
 	}
 	return nil
 }

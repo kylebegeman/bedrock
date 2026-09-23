@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -20,69 +21,86 @@ func newDNS(a *app) *cobra.Command {
 		Short: "The records behind every host this machine routes, as Cloudflare and the world see them.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := cmd.Context()
-			store, err := a.openState()
-			if err != nil {
-				return err
-			}
-			defer store.Close()
-			routes, err := apps.Routes(ctx, store)
-			if err != nil {
-				return err
-			}
-			if len(routes) == 0 {
-				fmt.Fprintln(a.stdout, "no hosts routed yet")
-				return nil
-			}
-			addrs := host.Addresses(ctx, host.RealEnv())
-			mgr, cfErr := apps.DNSManager(a.secretsStore(), addrs)
-			var statuses []dns.Status
-			if cfErr == nil {
-				if statuses, err = mgr.Look(ctx, routes); err != nil {
-					return err
-				}
-			} else {
-				// Without the integration, what the world resolves.
-				for _, r := range routes {
-					st := dns.Status{Host: r.Host, App: r.App, Mode: string(r.Mode)}
-					if st.Mode == "" {
-						st.Mode = "manual"
-					}
-					ok, pointsAt, err := edge.Resolves(ctx, r.Host, addrs)
-					switch {
-					case err != nil:
-						st.Verdict = err.Error()
-					case ok:
-						st.Verdict, st.Record = "resolves here", strings.Join(pointsAt, " ")
-					default:
-						st.Verdict, st.Record = "resolves elsewhere", strings.Join(pointsAt, " ")
-					}
-					statuses = append(statuses, st)
-				}
-			}
-			if a.json {
-				return json.NewEncoder(a.stdout).Encode(statuses)
-			}
-			w := tabwriter.NewWriter(a.stdout, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(w, "HOST\tAPP\tRECORD KEPT BY\tPOINTS AT\tVERDICT")
-			for _, st := range statuses {
-				kept := "you (manual)"
-				switch st.Mode {
-				case "direct":
-					kept = "bedrock, direct"
-				case "proxied":
-					kept = "bedrock, proxied"
-				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", st.Host, st.App, kept, orDash(st.Record), st.Verdict)
-			}
-			w.Flush()
-			if cfErr != nil {
-				fmt.Fprintf(a.stdout, "(what public DNS answers; set the cloudflare integration to see and keep the records themselves)\n")
-			}
-			return nil
+			return a.showDNS(cmd.Context())
 		},
 	}
-	audit := &cobra.Command{
+	cmd.AddCommand(newDNSAudit(a), newDNSPoint(a))
+	return cmd
+}
+
+// showDNS explains every routed host: what Cloudflare keeps for it when
+// the integration is set, what public DNS answers when it is not.
+func (a *app) showDNS(ctx context.Context) error {
+	store, err := a.openState()
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	routes, err := apps.Routes(ctx, store)
+	if err != nil {
+		return err
+	}
+	if len(routes) == 0 {
+		fmt.Fprintln(a.stdout, "no hosts routed yet")
+		return nil
+	}
+	addrs := host.Addresses(ctx, host.RealEnv())
+	mgr, cfErr := apps.DNSManager(a.secretsStore(), addrs)
+	var statuses []dns.Status
+	if cfErr == nil {
+		if statuses, err = mgr.Look(ctx, routes); err != nil {
+			return err
+		}
+	} else {
+		statuses = resolvedStatuses(ctx, routes, addrs)
+	}
+	if a.json {
+		return json.NewEncoder(a.stdout).Encode(statuses)
+	}
+	w := tabwriter.NewWriter(a.stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "HOST\tAPP\tRECORD KEPT BY\tPOINTS AT\tVERDICT")
+	for _, st := range statuses {
+		kept := "you (manual)"
+		switch st.Mode {
+		case "direct":
+			kept = "bedrock, direct"
+		case "proxied":
+			kept = "bedrock, proxied"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", st.Host, st.App, kept, orDash(st.Record), st.Verdict)
+	}
+	w.Flush()
+	if cfErr != nil {
+		fmt.Fprintf(a.stdout, "(what public DNS answers; set the cloudflare integration to see and keep the records themselves)\n")
+	}
+	return nil
+}
+
+// resolvedStatuses is what the world resolves for each route, for a
+// machine without the cloudflare integration.
+func resolvedStatuses(ctx context.Context, routes []dns.Route, addrs []string) []dns.Status {
+	var statuses []dns.Status
+	for _, r := range routes {
+		st := dns.Status{Host: r.Host, App: r.App, Mode: string(r.Mode)}
+		if st.Mode == "" {
+			st.Mode = "manual"
+		}
+		ok, pointsAt, err := edge.Resolves(ctx, r.Host, addrs)
+		switch {
+		case err != nil:
+			st.Verdict = err.Error()
+		case ok:
+			st.Verdict, st.Record = "resolves here", strings.Join(pointsAt, " ")
+		default:
+			st.Verdict, st.Record = "resolves elsewhere", strings.Join(pointsAt, " ")
+		}
+		statuses = append(statuses, st)
+	}
+	return statuses
+}
+
+func newDNSAudit(a *app) *cobra.Command {
+	return &cobra.Command{
 		Use:   "audit",
 		Short: "Records that point here without a route, records bedrock left behind, routes whose records point elsewhere.",
 		Args:  cobra.NoArgs,
@@ -124,6 +142,9 @@ func newDNS(a *app) *cobra.Command {
 			return w.Flush()
 		},
 	}
+}
+
+func newDNSPoint(a *app) *cobra.Command {
 	var (
 		planOnly bool
 		proxied  bool
@@ -138,6 +159,5 @@ func newDNS(a *app) *cobra.Command {
 	}
 	point.Flags().BoolVar(&proxied, "proxied", false, "put the host behind Cloudflare's proxy")
 	a.mutatingFlags(point, &planOnly)
-	cmd.AddCommand(audit, point)
-	return cmd
+	return point
 }

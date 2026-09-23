@@ -33,12 +33,11 @@ type Facts struct {
 		Compose   bool   `json:"compose"`
 		Buildx    bool   `json:"buildx"`
 	} `json:"docker"`
-	Firewall struct {
-		Installed bool     `json:"installed"`
-		Active    bool     `json:"active"`
-		Allowed   []string `json:"allowed,omitempty"`
-	} `json:"firewall"`
-	SSH struct {
+	Firewall FirewallFacts `json:"firewall"`
+	// WebFrom is who the machine's profile lets reach 80 and 443; empty
+	// when the machine has no profile.
+	WebFrom string `json:"web_from,omitempty"`
+	SSH     struct {
 		PasswordAuth bool   `json:"password_auth"`
 		RootLogin    string `json:"root_login"`
 		RootKeys     int    `json:"root_keys"`
@@ -60,6 +59,21 @@ type Facts struct {
 	PushUser bool `json:"push_user"`
 }
 
+// FirewallFacts are what ufw says.
+type FirewallFacts struct {
+	Installed bool `json:"installed"`
+	Active    bool `json:"active"`
+	// Allowed are the ports anyone may reach over IPv4.
+	Allowed []string `json:"allowed,omitempty"`
+	// Rules are every rule ufw lists, sources included.
+	Rules []FirewallRule `json:"rules,omitempty"`
+	// IPv6 is whether ufw filters IPv6 too.
+	IPv6 bool `json:"ipv6"`
+	// WebGuard is what stands between Docker's published web ports and
+	// the internet, which ufw's rules do not reach.
+	WebGuard WebGuard `json:"web_guard"`
+}
+
 // RegistryContainer is the local image registry every build lands in.
 const RegistryContainer = "bedrock-registry"
 
@@ -67,6 +81,16 @@ const RegistryContainer = "bedrock-registry"
 // missing; the facts just stay zero.
 func Gather(ctx context.Context, env Env, socket string) Facts {
 	var f Facts
+	f.gatherSystem(ctx, env)
+	f.gatherDocker(ctx, env)
+	f.gatherFirewall(ctx, env)
+	f.gatherSSH(ctx, env)
+	f.gatherUpkeep(ctx, env, socket)
+	return f
+}
+
+// gatherSystem reads what the machine is: its system, size and swap.
+func (f *Facts) gatherSystem(ctx context.Context, env Env) {
 	f.Privileged = env.Privileged
 	f.Systemd = env.Exists("/run/systemd/system")
 	if release, err := env.ReadFile("/etc/os-release"); err == nil {
@@ -104,7 +128,10 @@ func Gather(ctx context.Context, env Env, socket string) Facts {
 			f.SwapBytes += n
 		}
 	}
+}
 
+// gatherDocker reads Docker, the registry and the edge.
+func (f *Facts) gatherDocker(ctx context.Context, env Env) {
 	if _, err := env.Run(ctx, "docker", "--version"); err == nil {
 		f.Docker.Installed = true
 		if v, err := env.Run(ctx, "docker", "version", "--format", "{{.Server.Version}}"); err == nil && v != "" {
@@ -122,13 +149,28 @@ func Gather(ctx context.Context, env Env, socket string) Facts {
 			f.EdgeRunning = strings.TrimSpace(state) == "true"
 		}
 	}
+}
 
+// gatherFirewall reads ufw's rules and who the profile lets reach the web.
+func (f *Facts) gatherFirewall(ctx context.Context, env Env) {
 	if out, err := env.Run(ctx, "ufw", "status"); err == nil {
 		f.Firewall.Installed = true
 		f.Firewall.Active = strings.Contains(out, "Status: active")
-		f.Firewall.Allowed = parseUFWAllowed(out)
+		f.Firewall.Rules = parseUFW(out)
+		f.Firewall.Allowed = openPorts(f.Firewall.Rules)
+		f.Firewall.IPv6 = ufwIPv6(env)
 	}
+	f.Firewall.WebGuard = gatherWebGuard(ctx, env)
+	if p, err := LoadProfile(env); err == nil {
+		f.WebFrom = p.WebFrom
+		if f.WebFrom == "" {
+			f.WebFrom = WebFromAnyone
+		}
+	}
+}
 
+// gatherSSH reads how the machine takes SSH logins.
+func (f *Facts) gatherSSH(ctx context.Context, env Env) {
 	if out, err := env.Run(ctx, "sshd", "-T"); err == nil {
 		kv := parseSSHDConfig(out)
 		f.SSH.PasswordAuth = kv["passwordauthentication"] != "no"
@@ -141,7 +183,11 @@ func Gather(ctx context.Context, env Env, socket string) Facts {
 			}
 		}
 	}
+}
 
+// gatherUpkeep reads updates, time, logs, the push user, fail2ban and
+// whether the daemon answers on its socket.
+func (f *Facts) gatherUpkeep(ctx context.Context, env Env, socket string) {
 	f.RebootRequired = env.Exists("/var/run/reboot-required")
 	f.UpdatesPending = -1
 	if out, err := env.Run(ctx, "apt-get", "-s", "-o", "Debug::NoLocking=true", "upgrade"); err == nil {
@@ -174,7 +220,6 @@ func Gather(ctx context.Context, env Env, socket string) Facts {
 			f.DaemonAnswers = true
 		}
 	}
-	return f
 }
 
 // parseKeyValues reads KEY=value lines, unquoting values.
@@ -203,22 +248,6 @@ func parseSSHDConfig(text string) map[string]string {
 		}
 	}
 	return kv
-}
-
-// parseUFWAllowed pulls the allowed rules' targets from `ufw status`.
-func parseUFWAllowed(text string) []string {
-	var allowed []string
-	seen := map[string]bool{}
-	for _, line := range strings.Split(text, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 3 && fields[1] == "ALLOW" && !strings.Contains(fields[0], "(v6)") {
-			if !seen[fields[0]] {
-				seen[fields[0]] = true
-				allowed = append(allowed, fields[0])
-			}
-		}
-	}
-	return allowed
 }
 
 // Allows reports whether the firewall allows a port such as "22/tcp",

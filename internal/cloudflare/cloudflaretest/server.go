@@ -40,9 +40,12 @@ type zone struct {
 // Server serves the API under /client/v4.
 type Server struct {
 	Token string
-	mu    sync.Mutex
-	zones []zone
-	recs  map[string]*Record
+	// IPv4 and IPv6 are the proxy's ranges, which /ips lists without a
+	// token as the real API does.
+	IPv4, IPv6 []string
+	mu         sync.Mutex
+	zones      []zone
+	recs       map[string]*Record
 }
 
 // New returns a server with the given zones and token.
@@ -139,6 +142,13 @@ func page[T any](items []T, r *http.Request) ([]T, map[string]int) {
 
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.TrimPrefix(r.URL.Path, "/client/v4") == "/ips" && r.Method == http.MethodGet {
+		s.mu.Lock()
+		ranges := map[string]any{"ipv4_cidrs": s.IPv4, "ipv6_cidrs": s.IPv6, "etag": "test"}
+		s.mu.Unlock()
+		write(w, http.StatusOK, ranges, nil)
+		return
+	}
 	if r.Header.Get("Authorization") != "Bearer "+s.Token {
 		write(w, http.StatusForbidden, nil, nil, apiError{10000, "Authentication error"})
 		return

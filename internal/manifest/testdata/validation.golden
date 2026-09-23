@@ -1,0 +1,65 @@
+app: "Bad" must be lowercase letters, digits and hyphens, up to 40 characters
+workloads.job.schedule: expected exactly 5 fields, found 1: [never]
+workloads.job: a cron workload has no routes or port
+workloads.job.timeout: "forever" isn't a duration such as 30m
+workloads.rel: a release workload runs once per deploy; it has no routes, port or schedule
+workloads.site: a static workload needs dir, the directory to serve
+workloads.site: a static workload has dir only, no image, build or port
+workloads.site.routes[0].port: a static workload serves on its own port only
+workloads.web: give either image or build
+workloads.web: dir is for static workloads
+workloads.web: order is for release workloads
+workloads.web.grace: "20m" must be a duration from 1s to 10m
+workloads.web.resources.pids: must be 16 or more
+workloads.web.aliases: "Bad" must be lowercase letters, digits and hyphens
+workloads.web.health: give a path or a command, not both
+workloads.web.health.command: an argument is empty
+workloads.web.health.timeout: "soon" isn't a duration such as 90s
+workloads.web.mounts[0]: volume "nowhere" isn't declared under data.volumes
+workloads.web.mounts[0]: path must be absolute
+workloads.web: a web workload needs port, the container port it listens on
+workloads.web.routes[0]: host "not a host" isn't a hostname
+workloads.web.routes[0]: path "nope" must start with / and is a prefix, without wildcards
+workloads.web.routes[0].dns: "sideways" isn't direct or proxied
+workloads.web.routes[0].auth: "magic" isn't loom
+workloads.web.routes[0].port: must be a port number
+workloads.web.routes[2]: a.com / is already routed to web
+workloads.web.user: "Nope!" must be a user, uid, or user:group
+workloads.web.capabilities: "bad cap" isn't a capability name such as NET_BIND_SERVICE
+workloads.web.tmpfs: "relative" must be an absolute path
+workloads.web.env: "bad" must be an UPPER_CASE name
+workloads.web: KEY is both a secret and a plain env value
+workloads.web.secrets: "lower" must be an UPPER_CASE name
+workloads.web.resources.memory: "lots" must look like 512m or 2g
+workloads.web.resources.cpus: must be 0 to 64
+workloads.web.health.path: must start with /
+workloads.what: kind "blob" isn't one of web, static, worker, cron, release
+routes: a.com has dns "" on one route and "direct" on another; use one
+data.volumes: "Bad" must be lowercase letters, digits and hyphens
+data.volumes: "postgres" is bedrock's own volume for the database; pick another name
+data.postgres.version: "9" isn't a supported major version (15 to 18)
+data.postgres.user: "Bad User" must be lowercase letters, digits and underscores
+data.postgres.init: must be inside the source
+data.postgres.env: "bad" must be an UPPER_CASE name
+data.postgres.secrets: "lower" must be an UPPER_CASE name
+secrets.generate.BOTH: "nope" must be hex:N, base64:N, base64url:N or value:TEXT
+secrets: BOTH is both generated and derived
+secrets.generate: "lower" must be an UPPER_CASE name
+secrets.generate.lower: hex: wants 8 to 256 random bytes, not "1"
+secrets.derive.BOTH: has an unmatched { or }
+secrets.derive: "lower2" must be an UPPER_CASE name
+secrets.derive.lower2: {nope nope} isn't a secret's name, {sha256:NAME}, {postgres} or {objects}
+backup.schedule: expected exactly 5 fields, found 1: [never]
+backup.drill: expected exactly 5 fields, found 1: [never]
+backup.keep: counts can't be negative
+backup.verify: sql is required
+preview.of: "Bad" must name the app this previews
+preview.branch: must name the branch, on one line
+workloads.job.routes[0]: a preview's routes are all behind a sign-in (auth: loom)
+workloads.site.routes[0]: a preview's routes are all behind a sign-in (auth: loom)
+workloads.web.routes[0]: a preview's routes are all behind a sign-in (auth: loom)
+workloads.web.routes[1]: a preview's routes are all behind a sign-in (auth: loom)
+workloads.web.routes[2]: a preview's routes are all behind a sign-in (auth: loom)
+checks[0]: url must start with https:// or http://
+checks[0]: status must be an HTTP status
+checks[0].within: "soon" isn't a duration such as 5s

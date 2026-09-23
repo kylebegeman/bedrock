@@ -6,9 +6,11 @@ package manifest
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -43,6 +45,16 @@ type Manifest struct {
 	// them in: generated once and kept, or derived from others at every
 	// deploy.
 	Secrets *Secrets `yaml:"secrets,omitempty" json:"secrets,omitempty"`
+	// Preview marks the app as a branch's preview of another app. bedrock
+	// preview up writes it into the manifest it derives; nobody writes it
+	// by hand. It is how a preview is known, whatever its name.
+	Preview *Preview `yaml:"preview,omitempty" json:"preview,omitempty"`
+}
+
+// Preview says which app, and which branch of it, an app previews.
+type Preview struct {
+	Of     string `yaml:"of" json:"of"`
+	Branch string `yaml:"branch" json:"branch"`
 }
 
 // Secrets bedrock makes for an app.
@@ -421,200 +433,246 @@ func (m *Manifest) Validate() error {
 		names[name] = name
 	}
 	for _, name := range m.WorkloadNames() {
-		w := m.Workloads[name]
-		at := "workloads." + name
-		if !namePattern.MatchString(name) {
-			fail("%s: the name must be lowercase letters, digits and hyphens", at)
+		m.validateWorkload(name, claimed, names, fail)
+	}
+	m.validateDNSModes(fail)
+	m.validateData(fail)
+	m.validateSecrets(fail)
+	m.validateBackup(fail)
+	m.validatePreview(fail)
+	m.validateChecks(fail)
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "\n"))
+	}
+	return nil
+}
+
+// validateWorkload checks one workload. claimed maps each host and path
+// to the workload routing it, names each name and alias to its workload.
+func (m *Manifest) validateWorkload(name string, claimed, names map[string]string, fail func(format string, args ...any)) {
+	w := m.Workloads[name]
+	at := "workloads." + name
+	validateShape(at, name, w, fail)
+	m.validateNames(at, name, w, names, fail)
+	validateRoutes(at, name, w, claimed, fail)
+	validateIsolation(at, w, fail)
+}
+
+// validateShape checks what a workload is: its kind and what the kind
+// allows, its schedule, timeouts, grace and bounds.
+func validateShape(at, name string, w Workload, fail func(format string, args ...any)) {
+	if !namePattern.MatchString(name) {
+		fail("%s: the name must be lowercase letters, digits and hyphens", at)
+	}
+	switch w.Kind {
+	case Web, Worker, Cron, Release:
+		if (w.Image == "") == (w.Build == nil) {
+			fail("%s: give either image or build", at)
 		}
-		switch w.Kind {
-		case Web, Worker, Cron, Release:
-			if (w.Image == "") == (w.Build == nil) {
-				fail("%s: give either image or build", at)
-			}
-			if w.Dir != "" {
-				fail("%s: dir is for static workloads", at)
-			}
-		case Static:
-			if w.Dir == "" {
-				fail("%s: a static workload needs dir, the directory to serve", at)
-			}
-			if w.Image != "" || w.Build != nil || w.Port != 0 {
-				fail("%s: a static workload has dir only, no image, build or port", at)
-			}
-		case "":
-			fail("%s: kind is required: web, static, worker, cron or release", at)
-		default:
-			fail("%s: kind %q isn't one of web, static, worker, cron, release", at, w.Kind)
+		if w.Dir != "" {
+			fail("%s: dir is for static workloads", at)
 		}
-		if w.Kind == Release {
-			if len(w.Routes) > 0 || w.Port != 0 || w.Schedule != "" {
-				fail("%s: a release workload runs once per deploy; it has no routes, port or schedule", at)
-			}
-		} else if w.Order != 0 {
-			fail("%s: order is for release workloads", at)
+	case Static:
+		if w.Dir == "" {
+			fail("%s: a static workload needs dir, the directory to serve", at)
 		}
-		if w.Kind == Cron {
-			if w.Schedule == "" {
-				fail("%s: a cron workload needs schedule, five fields such as \"0 3 * * *\"", at)
-			} else if _, err := ParseSchedule(w.Schedule); err != nil {
-				fail("%s.schedule: %v", at, err)
-			}
-			if len(w.Routes) > 0 || w.Port != 0 {
-				fail("%s: a cron workload has no routes or port", at)
-			}
-			if w.Timeout != "" {
-				if _, err := time.ParseDuration(w.Timeout); err != nil {
-					fail("%s.timeout: %q isn't a duration such as 30m", at, w.Timeout)
-				}
-			}
-		} else if w.Schedule != "" {
-			fail("%s: schedule is for cron workloads", at)
-		} else if w.Timeout != "" && w.Kind != Release {
-			fail("%s: timeout is for cron and release workloads", at)
-		} else if w.Timeout != "" {
+		if w.Image != "" || w.Build != nil || w.Port != 0 {
+			fail("%s: a static workload has dir only, no image, build or port", at)
+		}
+	case "":
+		fail("%s: kind is required: web, static, worker, cron or release", at)
+	default:
+		fail("%s: kind %q isn't one of web, static, worker, cron, release", at, w.Kind)
+	}
+	if w.Kind == Release {
+		if len(w.Routes) > 0 || w.Port != 0 || w.Schedule != "" {
+			fail("%s: a release workload runs once per deploy; it has no routes, port or schedule", at)
+		}
+	} else if w.Order != 0 {
+		fail("%s: order is for release workloads", at)
+	}
+	if w.Kind == Cron {
+		if w.Schedule == "" {
+			fail("%s: a cron workload needs schedule, five fields such as \"0 3 * * *\"", at)
+		} else if _, err := ParseSchedule(w.Schedule); err != nil {
+			fail("%s.schedule: %v", at, err)
+		}
+		if len(w.Routes) > 0 || w.Port != 0 {
+			fail("%s: a cron workload has no routes or port", at)
+		}
+		if w.Timeout != "" {
 			if _, err := time.ParseDuration(w.Timeout); err != nil {
-				fail("%s.timeout: %q isn't a duration such as 10m", at, w.Timeout)
+				fail("%s.timeout: %q isn't a duration such as 30m", at, w.Timeout)
 			}
 		}
-		if w.Singleton && w.Kind != Web && w.Kind != Worker {
-			fail("%s: singleton is for web and worker workloads", at)
-		}
-		if w.Grace != "" {
-			if d, err := time.ParseDuration(w.Grace); err != nil || d < time.Second || d > 10*time.Minute {
-				fail("%s.grace: %q must be a duration from 1s to 10m", at, w.Grace)
-			}
-		}
-		if w.Resources.Pids != 0 && (w.Resources.Pids < 16 || w.Resources.Pids > 1<<20) {
-			fail("%s.resources.pids: must be 16 or more", at)
-		}
-		for _, a := range w.Aliases {
-			if !namePattern.MatchString(a) {
-				fail("%s.aliases: %q must be lowercase letters, digits and hyphens", at, a)
-			}
-			if other, taken := names[a]; taken && other != name {
-				fail("%s.aliases: %q is already %s's name", at, a, other)
-			}
-			names[a] = name
-		}
-		if h := w.Health; h != nil && len(h.Command) > 0 {
-			if h.Path != "" {
-				fail("%s.health: give a path or a command, not both", at)
-			}
-			for _, c := range h.Command {
-				if c == "" {
-					fail("%s.health.command: an argument is empty", at)
-				}
-			}
-		}
-		if h := w.Health; h != nil && h.Timeout != "" {
-			if d, err := time.ParseDuration(h.Timeout); err != nil || d <= 0 {
-				fail("%s.health.timeout: %q isn't a duration such as 90s", at, h.Timeout)
-			}
-		}
-		for i, mt := range w.Mounts {
-			ma := fmt.Sprintf("%s.mounts[%d]", at, i)
-			if m.Data == nil || m.Data.Volumes == nil {
-				fail("%s: volume %q isn't declared under data.volumes", ma, mt.Volume)
-			} else if _, ok := m.Data.Volumes[mt.Volume]; !ok {
-				fail("%s: volume %q isn't declared under data.volumes", ma, mt.Volume)
-			}
-			if !strings.HasPrefix(mt.Path, "/") {
-				fail("%s: path must be absolute", ma)
-			}
-		}
-		if w.Kind == Web {
-			if w.Port < 1 || w.Port > 65535 {
-				fail("%s: a web workload needs port, the container port it listens on", at)
-			}
-			if len(w.Routes) == 0 {
-				fail("%s: a web workload needs at least one route", at)
-			}
-		}
-		if w.Kind == Static && len(w.Routes) == 0 {
-			fail("%s: a static workload needs at least one route", at)
-		}
-		if w.Kind == Worker && len(w.Routes) > 0 {
-			fail("%s: a worker has no routes", at)
-		}
-		for i, r := range w.Routes {
-			ra := fmt.Sprintf("%s.routes[%d]", at, i)
-			if !hostPattern.MatchString(r.Host) {
-				fail("%s: host %q isn't a hostname", ra, r.Host)
-			}
-			path := r.Path
-			if path == "" {
-				path = "/"
-			}
-			if !strings.HasPrefix(path, "/") || strings.Contains(path, "*") {
-				fail("%s: path %q must start with / and is a prefix, without wildcards", ra, r.Path)
-			}
-			key := r.Host + " " + path
-			if other, taken := claimed[key]; taken {
-				fail("%s: %s %s is already routed to %s", ra, r.Host, path, other)
-			}
-			claimed[key] = name
-			switch r.DNS {
-			case DNSManual, DNSDirect, DNSProxied:
-			default:
-				fail("%s.dns: %q isn't direct or proxied", ra, r.DNS)
-			}
-			switch r.Auth {
-			case AuthNone, AuthLoom:
-			default:
-				fail("%s.auth: %q isn't loom", ra, r.Auth)
-			}
-			if r.Port != 0 && (r.Port < 1 || r.Port > 65535) {
-				fail("%s.port: must be a port number", ra)
-			}
-			if r.Port != 0 && w.Kind == Static {
-				fail("%s.port: a static workload serves on its own port only", ra)
-			}
-		}
-		if w.User != "" && !userPattern.MatchString(w.User) {
-			fail("%s.user: %q must be a user, uid, or user:group", at, w.User)
-		}
-		for _, c := range w.Capabilities {
-			if !capPattern.MatchString(strings.TrimPrefix(strings.ToUpper(c), "CAP_")) {
-				fail("%s.capabilities: %q isn't a capability name such as NET_BIND_SERVICE", at, c)
-			}
-		}
-		if w.Privileged && len(w.Capabilities) > 0 {
-			fail("%s: a privileged workload keeps every capability already; drop capabilities", at)
-		}
-		for _, t := range w.Tmpfs {
-			if !strings.HasPrefix(t, "/") {
-				fail("%s.tmpfs: %q must be an absolute path", at, t)
-			}
-		}
-		for k := range w.Env {
-			if !envPattern.MatchString(k) {
-				fail("%s.env: %q must be an UPPER_CASE name", at, k)
-			}
-		}
-		for _, s := range w.Secrets {
-			if !envPattern.MatchString(s) {
-				fail("%s.secrets: %q must be an UPPER_CASE name", at, s)
-			}
-			if _, both := w.Env[s]; both {
-				fail("%s: %s is both a secret and a plain env value", at, s)
-			}
-		}
-		if w.Resources.Memory != "" && !sizePattern.MatchString(w.Resources.Memory) {
-			fail("%s.resources.memory: %q must look like 512m or 2g", at, w.Resources.Memory)
-		}
-		if w.Resources.CPUs < 0 || w.Resources.CPUs > 64 {
-			fail("%s.resources.cpus: must be 0 to 64", at)
-		}
-		if w.Health != nil && w.Health.Path != "" && !strings.HasPrefix(w.Health.Path, "/") {
-			fail("%s.health.path: must start with /", at)
-		}
-		if w.Build != nil && (strings.HasPrefix(w.Build.Context, "/") || strings.Contains(w.Build.Context, "..")) {
-			fail("%s.build.context: must be inside the source", at)
-		}
-		if w.Dir != "" && (strings.HasPrefix(w.Dir, "/") || strings.Contains(w.Dir, "..")) {
-			fail("%s.dir: must be inside the source", at)
+	} else if w.Schedule != "" {
+		fail("%s: schedule is for cron workloads", at)
+	} else if w.Timeout != "" && w.Kind != Release {
+		fail("%s: timeout is for cron and release workloads", at)
+	} else if w.Timeout != "" {
+		if _, err := time.ParseDuration(w.Timeout); err != nil {
+			fail("%s.timeout: %q isn't a duration such as 10m", at, w.Timeout)
 		}
 	}
+	if w.Singleton && w.Kind != Web && w.Kind != Worker {
+		fail("%s: singleton is for web and worker workloads", at)
+	}
+	if w.Grace != "" {
+		if d, err := time.ParseDuration(w.Grace); err != nil || d < time.Second || d > 10*time.Minute {
+			fail("%s.grace: %q must be a duration from 1s to 10m", at, w.Grace)
+		}
+	}
+	if w.Resources.Pids != 0 && (w.Resources.Pids < 16 || w.Resources.Pids > 1<<20) {
+		fail("%s.resources.pids: must be 16 or more", at)
+	}
+}
+
+// validateNames checks a workload's aliases, health command and mounts,
+// and that its routes suit its kind.
+func (m *Manifest) validateNames(at, name string, w Workload, names map[string]string, fail func(format string, args ...any)) {
+	for _, a := range w.Aliases {
+		if !namePattern.MatchString(a) {
+			fail("%s.aliases: %q must be lowercase letters, digits and hyphens", at, a)
+		}
+		if other, taken := names[a]; taken && other != name {
+			fail("%s.aliases: %q is already %s's name", at, a, other)
+		}
+		names[a] = name
+	}
+	if h := w.Health; h != nil && len(h.Command) > 0 {
+		if h.Path != "" {
+			fail("%s.health: give a path or a command, not both", at)
+		}
+		for _, c := range h.Command {
+			if c == "" {
+				fail("%s.health.command: an argument is empty", at)
+			}
+		}
+	}
+	if h := w.Health; h != nil && h.Timeout != "" {
+		if d, err := time.ParseDuration(h.Timeout); err != nil || d <= 0 {
+			fail("%s.health.timeout: %q isn't a duration such as 90s", at, h.Timeout)
+		}
+	}
+	for i, mt := range w.Mounts {
+		ma := fmt.Sprintf("%s.mounts[%d]", at, i)
+		if m.Data == nil || m.Data.Volumes == nil {
+			fail("%s: volume %q isn't declared under data.volumes", ma, mt.Volume)
+		} else if _, ok := m.Data.Volumes[mt.Volume]; !ok {
+			fail("%s: volume %q isn't declared under data.volumes", ma, mt.Volume)
+		}
+		if !strings.HasPrefix(mt.Path, "/") {
+			fail("%s: path must be absolute", ma)
+		}
+	}
+	if w.Kind == Web {
+		if w.Port < 1 || w.Port > 65535 {
+			fail("%s: a web workload needs port, the container port it listens on", at)
+		}
+		if len(w.Routes) == 0 {
+			fail("%s: a web workload needs at least one route", at)
+		}
+	}
+	if w.Kind == Static && len(w.Routes) == 0 {
+		fail("%s: a static workload needs at least one route", at)
+	}
+	if w.Kind == Worker && len(w.Routes) > 0 {
+		fail("%s: a worker has no routes", at)
+	}
+}
+
+// validateRoutes checks a workload's routes, and that no host and path
+// is routed twice.
+func validateRoutes(at, name string, w Workload, claimed map[string]string, fail func(format string, args ...any)) {
+	for i, r := range w.Routes {
+		ra := fmt.Sprintf("%s.routes[%d]", at, i)
+		if !hostPattern.MatchString(r.Host) {
+			fail("%s: host %q isn't a hostname", ra, r.Host)
+		}
+		path := r.Path
+		if path == "" {
+			path = "/"
+		}
+		if !strings.HasPrefix(path, "/") || strings.Contains(path, "*") {
+			fail("%s: path %q must start with / and is a prefix, without wildcards", ra, r.Path)
+		}
+		key := r.Host + " " + path
+		if other, taken := claimed[key]; taken {
+			fail("%s: %s %s is already routed to %s", ra, r.Host, path, other)
+		}
+		claimed[key] = name
+		switch r.DNS {
+		case DNSManual, DNSDirect, DNSProxied:
+		default:
+			fail("%s.dns: %q isn't direct or proxied", ra, r.DNS)
+		}
+		switch r.Auth {
+		case AuthNone, AuthLoom:
+		default:
+			fail("%s.auth: %q isn't loom", ra, r.Auth)
+		}
+		if r.Port != 0 && (r.Port < 1 || r.Port > 65535) {
+			fail("%s.port: must be a port number", ra)
+		}
+		if r.Port != 0 && w.Kind == Static {
+			fail("%s.port: a static workload serves on its own port only", ra)
+		}
+	}
+}
+
+// validateIsolation checks what a workload may do and what it is given:
+// its user, capabilities, writable paths, environment, secrets and
+// resources, and that what it builds or serves is inside the source.
+func validateIsolation(at string, w Workload, fail func(format string, args ...any)) {
+	if w.User != "" && !userPattern.MatchString(w.User) {
+		fail("%s.user: %q must be a user, uid, or user:group", at, w.User)
+	}
+	for _, c := range w.Capabilities {
+		if !capPattern.MatchString(strings.TrimPrefix(strings.ToUpper(c), "CAP_")) {
+			fail("%s.capabilities: %q isn't a capability name such as NET_BIND_SERVICE", at, c)
+		}
+	}
+	if w.Privileged && len(w.Capabilities) > 0 {
+		fail("%s: a privileged workload keeps every capability already; drop capabilities", at)
+	}
+	for _, t := range w.Tmpfs {
+		if !strings.HasPrefix(t, "/") {
+			fail("%s.tmpfs: %q must be an absolute path", at, t)
+		}
+	}
+	for _, k := range sortedKeys(w.Env) {
+		if !envPattern.MatchString(k) {
+			fail("%s.env: %q must be an UPPER_CASE name", at, k)
+		}
+	}
+	for _, s := range w.Secrets {
+		if !envPattern.MatchString(s) {
+			fail("%s.secrets: %q must be an UPPER_CASE name", at, s)
+		}
+		if _, both := w.Env[s]; both {
+			fail("%s: %s is both a secret and a plain env value", at, s)
+		}
+	}
+	if w.Resources.Memory != "" && !sizePattern.MatchString(w.Resources.Memory) {
+		fail("%s.resources.memory: %q must look like 512m or 2g", at, w.Resources.Memory)
+	}
+	if w.Resources.CPUs < 0 || w.Resources.CPUs > 64 {
+		fail("%s.resources.cpus: must be 0 to 64", at)
+	}
+	if w.Health != nil && w.Health.Path != "" && !strings.HasPrefix(w.Health.Path, "/") {
+		fail("%s.health.path: must start with /", at)
+	}
+	if w.Build != nil && (strings.HasPrefix(w.Build.Context, "/") || strings.Contains(w.Build.Context, "..")) {
+		fail("%s.build.context: must be inside the source", at)
+	}
+	if w.Dir != "" && (strings.HasPrefix(w.Dir, "/") || strings.Contains(w.Dir, "..")) {
+		fail("%s.dir: must be inside the source", at)
+	}
+}
+
+// validateDNSModes checks that every route to a host keeps its record
+// the same way.
+func (m *Manifest) validateDNSModes(fail func(format string, args ...any)) {
 	modes := map[string]DNSMode{}
 	for _, name := range m.WorkloadNames() {
 		for _, r := range m.Workloads[name].Routes {
@@ -624,8 +682,12 @@ func (m *Manifest) Validate() error {
 			modes[r.Host] = r.DNS
 		}
 	}
+}
+
+// validateData checks the app's volumes and database.
+func (m *Manifest) validateData(fail func(format string, args ...any)) {
 	if m.Data != nil {
-		for name := range m.Data.Volumes {
+		for _, name := range sortedKeys(m.Data.Volumes) {
 			if !namePattern.MatchString(name) {
 				fail("data.volumes: %q must be lowercase letters, digits and hyphens", name)
 			}
@@ -639,15 +701,15 @@ func (m *Manifest) Validate() error {
 			default:
 				fail("data.postgres.version: %q isn't a supported major version (15 to 18)", pg.Version)
 			}
-			for field, v := range map[string]string{"user": pg.User, "database": pg.Database} {
-				if v != "" && !pgIdentPattern.MatchString(v) {
-					fail("data.postgres.%s: %q must be lowercase letters, digits and underscores", field, v)
+			for _, f := range []struct{ field, v string }{{"user", pg.User}, {"database", pg.Database}} {
+				if f.v != "" && !pgIdentPattern.MatchString(f.v) {
+					fail("data.postgres.%s: %q must be lowercase letters, digits and underscores", f.field, f.v)
 				}
 			}
 			if pg.Init != "" && (strings.HasPrefix(pg.Init, "/") || strings.Contains(pg.Init, "..")) {
 				fail("data.postgres.init: must be inside the source")
 			}
-			for k := range pg.Env {
+			for _, k := range sortedKeys(pg.Env) {
 				if !envPattern.MatchString(k) {
 					fail("data.postgres.env: %q must be an UPPER_CASE name", k)
 				}
@@ -659,8 +721,13 @@ func (m *Manifest) Validate() error {
 			}
 		}
 	}
+}
+
+// validateSecrets checks the secrets bedrock makes and derives.
+func (m *Manifest) validateSecrets(fail func(format string, args ...any)) {
 	if sec := m.Secrets; sec != nil {
-		for name, format := range sec.Generate {
+		for _, name := range sortedKeys(sec.Generate) {
+			format := sec.Generate[name]
 			if !envPattern.MatchString(name) {
 				fail("secrets.generate: %q must be an UPPER_CASE name", name)
 			}
@@ -671,7 +738,8 @@ func (m *Manifest) Validate() error {
 				fail("secrets: %s is both generated and derived", name)
 			}
 		}
-		for name, tmpl := range sec.Derive {
+		for _, name := range sortedKeys(sec.Derive) {
+			tmpl := sec.Derive[name]
 			if !envPattern.MatchString(name) {
 				fail("secrets.derive: %q must be an UPPER_CASE name", name)
 			}
@@ -680,6 +748,10 @@ func (m *Manifest) Validate() error {
 			}
 		}
 	}
+}
+
+// validateBackup checks the backup policy.
+func (m *Manifest) validateBackup(fail func(format string, args ...any)) {
 	if b := m.Backup; b != nil {
 		if !m.HasData() && !b.Off {
 			fail("backup: the app keeps no data to back up; declare data first")
@@ -714,6 +786,33 @@ func (m *Manifest) Validate() error {
 			}
 		}
 	}
+}
+
+// validatePreview checks a preview's mark, and that none of its routes
+// is open.
+func (m *Manifest) validatePreview(fail func(format string, args ...any)) {
+	if p := m.Preview; p != nil {
+		if !namePattern.MatchString(p.Of) || p.Of == m.App {
+			fail("preview.of: %q must name the app this previews", p.Of)
+		}
+		if strings.TrimSpace(p.Branch) == "" || strings.ContainsAny(p.Branch, "\r\n") {
+			fail("preview.branch: must name the branch, on one line")
+		}
+		// A preview runs its parent's secrets at a hostname anyone can work
+		// out from a branch name; one route left open would serve that to
+		// everybody.
+		for _, name := range m.WorkloadNames() {
+			for i, r := range m.Workloads[name].Routes {
+				if !r.Auth.Guarded() {
+					fail("workloads.%s.routes[%d]: a preview's routes are all behind a sign-in (auth: loom)", name, i)
+				}
+			}
+		}
+	}
+}
+
+// validateChecks checks the checks run after a deploy.
+func (m *Manifest) validateChecks(fail func(format string, args ...any)) {
 	for i, c := range m.Checks {
 		if !strings.HasPrefix(c.URL, "https://") && !strings.HasPrefix(c.URL, "http://") {
 			fail("checks[%d]: url must start with https:// or http://", i)
@@ -727,10 +826,12 @@ func (m *Manifest) Validate() error {
 			}
 		}
 	}
-	if len(errs) > 0 {
-		return errors.New(strings.Join(errs, "\n"))
-	}
-	return nil
+}
+
+// sortedKeys is a map's keys in order, so validation reports problems in
+// the same order every time.
+func sortedKeys[V any](m map[string]V) []string {
+	return slices.Sorted(maps.Keys(m))
 }
 
 // WorkloadNames returns the workload names in a stable order.

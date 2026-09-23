@@ -181,3 +181,20 @@ func TestDataVolumesMountsAndCron(t *testing.T) {
 		}
 	}
 }
+
+func TestAPreviewCannotLeaveARouteOpen(t *testing.T) {
+	open := "app: site-pr-nav\npreview: {of: site, branch: nav}\nworkloads:\n  web:\n    kind: web\n    image: x\n    port: 80\n    routes: [{host: nav.site.preview.example.com}]\n"
+	if _, err := Parse([]byte(open)); err == nil || !strings.Contains(err.Error(), "a preview's routes are all behind a sign-in") {
+		t.Fatalf("an open preview route: %v", err)
+	}
+	guarded := strings.Replace(open, "routes: [{host: nav.site.preview.example.com}]", "routes: [{host: nav.site.preview.example.com, auth: loom}]", 1)
+	if _, err := Parse([]byte(guarded)); err != nil {
+		t.Fatalf("a guarded preview: %v", err)
+	}
+	for _, bad := range []string{"preview: {of: site-pr-nav, branch: nav}", "preview: {of: site, branch: \"\"}", "preview: {of: Not An App, branch: nav}"} {
+		input := strings.Replace(guarded, "preview: {of: site, branch: nav}", bad, 1)
+		if _, err := Parse([]byte(input)); err == nil {
+			t.Fatalf("accepted %s", bad)
+		}
+	}
+}

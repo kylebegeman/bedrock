@@ -24,6 +24,7 @@ import (
 	"github.com/kylebegeman/bedrock/internal/gitdeploy"
 	"github.com/kylebegeman/bedrock/internal/host"
 	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/manifest"
 	"github.com/kylebegeman/bedrock/internal/secrets"
 	"github.com/kylebegeman/bedrock/internal/signals"
 	"github.com/kylebegeman/bedrock/internal/state"
@@ -54,7 +55,16 @@ func Registry(store *state.Store, sec *secrets.Store, socket, stateDir string) k
 	env := host.RealEnv()
 	reg := kernel.Registry{}
 	reg.Add(kernel.Exercise{})
-	reg.Add(host.Setup{Env: env, Socket: socket, EnsureEdge: func(ctx context.Context, out io.Writer) error {
+	cloudflareOnly := app.CloudflareOnly(func() (bool, error) {
+		p, err := host.LoadProfile(env)
+		if errors.Is(err, host.ErrNoProfile) {
+			return false, nil
+		}
+		return p.CloudflareOnly(), err
+	})
+	reg.Add(host.Setup{Env: env, Socket: socket, Routes: func(ctx context.Context) ([]host.Route, error) {
+		return routesOf(ctx, store)
+	}, EnsureEdge: func(ctx context.Context, out io.Writer) error {
 		e, err := docker.Connect(ctx)
 		if err != nil {
 			return err
@@ -71,18 +81,31 @@ func Registry(store *state.Store, sec *secrets.Store, socket, stateDir string) k
 	}})
 	reg.Add(host.Maintain{Env: env, Socket: socket})
 	reg.Add(host.Upgrade{Env: env, Socket: socket})
-	deploy := app.Deploy{Store: store, Secrets: sec, StateDir: stateDir, Addresses: func(ctx context.Context) []string { return host.Addresses(ctx, env) }}
+	deploy := app.Deploy{Store: store, Secrets: sec, StateDir: stateDir, Addresses: func(ctx context.Context) []string { return host.Addresses(ctx, env) }, CloudflareOnly: cloudflareOnly}
 	reg.Add(deploy)
 	reg.Add(app.Rollback{Deploy: deploy})
 	reg.Add(app.GC{Store: store})
 	reg.Add(app.RunDefinition{Jobs: app.NewJobs(store, sec)})
 	addresses := func(ctx context.Context) []string { return host.Addresses(ctx, env) }
 	reg.Add(app.Remove{Store: store, Secrets: sec, Addresses: addresses, StateDir: stateDir})
-	reg.Add(app.Point{Store: store, Secrets: sec, Addresses: addresses})
+	reg.Add(app.Point{Store: store, Secrets: sec, Addresses: addresses, CloudflareOnly: cloudflareOnly})
 	reg.Add(app.Backup{Store: store, Secrets: sec, StateDir: stateDir, Hostname: hostname, Profile: host.ProfilePath})
 	reg.Add(app.Drill{Store: store, Secrets: sec, StateDir: stateDir})
 	reg.Add(app.RestoreDef{Store: store, Secrets: sec, StateDir: stateDir})
 	return reg
+}
+
+// routesOf lists what the machine's apps route, as host setup needs it.
+func routesOf(ctx context.Context, store *state.Store) ([]host.Route, error) {
+	routes, err := app.Routes(ctx, store)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]host.Route, 0, len(routes))
+	for _, r := range routes {
+		out = append(out, host.Route{App: r.App, Host: r.Host, Mode: string(r.Mode), Proxied: r.Mode == manifest.DNSProxied})
+	}
+	return out, nil
 }
 
 func hostname() string {
@@ -95,26 +118,8 @@ func hostname() string {
 
 // Run serves until ctx ends. Log lines go to logw.
 func Run(ctx context.Context, cfg Config, logw io.Writer) error {
-	if cfg.StateDir == "" {
-		cfg.StateDir = DefaultStateDir
-	}
-	if cfg.Socket == "" {
-		cfg.Socket = DefaultSocket
-	}
-	if cfg.Owner == "" {
-		host, _ := os.Hostname()
-		cfg.Owner = fmt.Sprintf("%s-%d", host, os.Getpid())
-	}
-	if cfg.SweepInterval <= 0 {
-		cfg.SweepInterval = 5 * time.Second
-	}
-	// Many loops log; one line at a time, whatever logw is.
-	var logMu sync.Mutex
-	logf := func(format string, args ...any) {
-		logMu.Lock()
-		defer logMu.Unlock()
-		fmt.Fprintf(logw, format+"\n", args...)
-	}
+	cfg = cfg.withDefaults()
+	logf := lineLogger(logw)
 	// A build whose version says "-broken" is the lane's fixture for a bad
 	// upgrade: it must fail to start so systemd rolls the binary back.
 	if strings.Contains(version.Current().Version, "-broken") {
@@ -138,8 +143,66 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	sec := secrets.DefaultStore(cfg.StateDir)
 	engine := kernel.New(store, Registry(store, sec, cfg.Socket, cfg.StateDir), cfg.Owner)
 	logf("bedrock daemon %s, state %s, owner %s", version.Current().Version, store.Path(), cfg.Owner)
+	d := &daemon{cfg: cfg, logf: logf, store: store, sec: sec, api: &api.Server{Engine: engine, Store: store}, machine: hostname()}
 
-	apiServer := &api.Server{Engine: engine, Store: store}
+	if err := d.recoverOperations(ctx); err != nil {
+		return err
+	}
+	// The edge gets the configuration this build of bedrock makes for the
+	// active revisions, in case the shape changed since the last deploy;
+	// an edge an older bedrock made is replaced, keeping its routes.
+	if err := app.UpgradeEdge(ctx, store, sec, logWriter{logf}); err != nil {
+		logf("edge: %v", err)
+	}
+	d.startLoops(ctx)
+	receiver, stopHooks := d.serveHooks()
+	defer stopHooks()
+	return d.serveAPI(ctx, receiver)
+}
+
+// withDefaults fills in what a Config leaves out.
+func (cfg Config) withDefaults() Config {
+	if cfg.StateDir == "" {
+		cfg.StateDir = DefaultStateDir
+	}
+	if cfg.Socket == "" {
+		cfg.Socket = DefaultSocket
+	}
+	if cfg.Owner == "" {
+		host, _ := os.Hostname()
+		cfg.Owner = fmt.Sprintf("%s-%d", host, os.Getpid())
+	}
+	if cfg.SweepInterval <= 0 {
+		cfg.SweepInterval = 5 * time.Second
+	}
+	return cfg
+}
+
+// lineLogger writes whole lines to w, one at a time: many loops log.
+func lineLogger(w io.Writer) func(string, ...any) {
+	var mu sync.Mutex
+	return func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		fmt.Fprintf(w, format+"\n", args...)
+	}
+}
+
+// daemon is a running daemon: what its loops and servers share.
+type daemon struct {
+	cfg     Config
+	logf    func(string, ...any)
+	store   *state.Store
+	sec     *secrets.Store
+	api     *api.Server
+	machine string
+}
+
+// recoverOperations finishes what a previous daemon left mid-way with an
+// expired lease, then keeps sweeping: a lease still live at start belongs
+// to a daemon that died moments ago, and is picked up when it expires.
+func (d *daemon) recoverOperations(ctx context.Context) error {
+	logf := d.logf
 	recoveryLog := func(ev kernel.Event) {
 		switch ev.Type {
 		case kernel.EventResumed:
@@ -150,42 +213,34 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 			}
 		}
 	}
-	// Whatever a previous daemon left mid-way with an expired lease is
-	// finished first. A lease that is still live at this point belongs to
-	// a daemon that died moments ago; the sweep below picks it up when it
-	// expires.
-	if recovered, err := apiServer.Recover(ctx, recoveryLog); err != nil {
+	if recovered, err := d.api.Recover(ctx, recoveryLog); err != nil {
 		return fmt.Errorf("recover: %w", err)
 	} else if recovered > 0 {
 		logf("recovered %d interrupted operation(s)", recovered)
 	}
-	go every(ctx, cfg.SweepInterval, false, func(time.Time) {
+	go every(ctx, d.cfg.SweepInterval, false, func(time.Time) {
 		guarded(logf, "recovery sweep", func() {
-			if n, err := apiServer.Recover(ctx, recoveryLog); err != nil && ctx.Err() == nil {
+			if n, err := d.api.Recover(ctx, recoveryLog); err != nil && ctx.Err() == nil {
 				logf("recovery sweep: %v", err)
 			} else if n > 0 {
 				logf("recovered %d interrupted operation(s)", n)
 			}
 		})
 	})
+	return nil
+}
 
-	// The edge gets the configuration this build of bedrock makes for the
-	// active revisions, in case the shape changed since the last deploy;
-	// an edge an older bedrock made is replaced, keeping its routes.
-	if err := app.UpgradeEdge(ctx, store, sec, logWriter{logf}); err != nil {
-		logf("edge: %v", err)
-	}
-
-	// Cron workloads run on the daemon's clock, outside the operation lock.
-	jobs := app.NewJobs(store, sec)
+// startLoops starts what runs on the daemon's own clocks: cron workloads,
+// outside the operation lock; watching; signals; and scheduled backups,
+// drills and collection.
+func (d *daemon) startLoops(ctx context.Context) {
+	logf := d.logf
+	jobs := app.NewJobs(d.store, d.sec)
 	go every(ctx, 30*time.Second, false, func(now time.Time) {
 		guarded(logf, "cron", func() { jobs.Tick(ctx, now, logf) })
 	})
-
-	// Watching, signals and scheduled backups run on their own clocks.
-	machine := hostname()
-	watcher := &watch.Watcher{Store: store, Notifier: watch.EmailNotifier{Secrets: sec, Store: store}, Hostname: machine, Log: logf}
-	prober := watch.NewProber(store)
+	watcher := &watch.Watcher{Store: d.store, Notifier: watch.EmailNotifier{Secrets: d.sec, Store: d.store}, Hostname: d.machine, Log: logf}
+	prober := watch.NewProber(d.store)
 	go every(ctx, time.Minute, true, func(time.Time) {
 		guarded(logf, "watch", func() {
 			if err := watcher.Round(ctx, prober.Observe(ctx)); err != nil && ctx.Err() == nil {
@@ -193,7 +248,7 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 			}
 		})
 	})
-	sampler := signals.NewSampler(store)
+	sampler := signals.NewSampler(d.store)
 	sampler.Log = logf
 	go every(ctx, time.Minute, true, func(time.Time) {
 		guarded(logf, "signals", func() {
@@ -202,49 +257,59 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 			}
 		})
 	})
-	scheduler := &Scheduler{Store: store, Secrets: sec, Server: apiServer, Log: logf, Started: time.Now().UTC()}
+	scheduler := &Scheduler{Store: d.store, Secrets: d.sec, Server: d.api, Log: logf, Started: time.Now().UTC()}
 	go every(ctx, 30*time.Second, false, func(now time.Time) {
 		guarded(logf, "schedule", func() { scheduler.Tick(ctx, now) })
 	})
+}
 
-	// GitHub's webhooks reach the daemon through the edge, on a socket in
-	// the directory the two share.
+// serveHooks answers GitHub's webhooks, which reach the daemon through the
+// edge on a socket in the directory the two share. It returns the
+// receiver, to wait for its deploys at shutdown, and what closes the
+// server. A socket that can't be opened is logged, and webhooks wait.
+func (d *daemon) serveHooks() (*gitdeploy.Receiver, func()) {
 	receiver := &gitdeploy.Receiver{
-		Store: store, Secrets: sec,
-		Deploy: gitdeploy.InProcess(apiServer.RunLocked),
+		Store: d.store, Secrets: d.sec,
+		Deploy: gitdeploy.InProcess(d.api.RunLocked),
 		Notify: func(ctx context.Context, subject, body string) {
-			if err := (watch.EmailNotifier{Secrets: sec, Store: store}).Notify(ctx, watch.Notice{Subject: machine + ": " + subject, Body: body}); err != nil {
-				logf("webhooks: telling you about %s failed: %v", subject, err)
+			if err := (watch.EmailNotifier{Secrets: d.sec, Store: d.store}).Notify(ctx, watch.Notice{Subject: d.machine + ": " + subject, Body: body}); err != nil {
+				d.logf("webhooks: telling you about %s failed: %v", subject, err)
 			}
 		},
-		Log:        logf,
-		SourcesDir: filepath.Join(cfg.StateDir, "sources"),
-		BuildsDir:  filepath.Join(cfg.StateDir, "builds"),
+		Log:        d.logf,
+		SourcesDir: filepath.Join(d.cfg.StateDir, "sources"),
+		BuildsDir:  filepath.Join(d.cfg.StateDir, "builds"),
 	}
-	if hooks, err := listenHooks(); err != nil {
-		logf("webhooks: %v", err)
-	} else {
-		// The edge puts this on the internet, so every read is bounded.
-		hookServer := &http.Server{Handler: receiver, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: time.Minute}
-		go func() { _ = hookServer.Serve(hooks) }()
-		defer hookServer.Close()
+	hooks, err := listenHooks()
+	if err != nil {
+		d.logf("webhooks: %v", err)
+		return receiver, func() {}
 	}
+	// The edge puts this on the internet, so every read is bounded.
+	hookServer := &http.Server{Handler: receiver, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: time.Minute}
+	go func() { _ = hookServer.Serve(hooks) }()
+	return receiver, func() { hookServer.Close() }
+}
 
-	listener, err := api.Listen(cfg.Socket)
+// serveAPI serves the API on the daemon's socket, tells systemd it is
+// ready and keeps its watchdog fed, and shuts down when ctx ends: the API
+// first, then the deploys webhooks started, given a while to finish.
+func (d *daemon) serveAPI(ctx context.Context, receiver *gitdeploy.Receiver) error {
+	listener, err := api.Listen(d.cfg.Socket)
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Handler: apiServer.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	server := &http.Server{Handler: d.api.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
-	logf("listening on %s", cfg.Socket)
+	d.logf("listening on %s", d.cfg.Socket)
 
 	notifier := notifierFromEnv()
 	notifier.ready()
 	watchdog := notifier.watchdog(ctx, func() bool {
 		// Feed the watchdog only while the store answers; a wedged daemon
 		// gets restarted by systemd instead of lingering.
-		_, err := store.List(ctx, 1)
+		_, err := d.store.List(ctx, 1)
 		return err == nil
 	})
 
@@ -265,7 +330,7 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	waitCtx, cancelWait := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelWait()
 	receiver.Wait(waitCtx)
-	logf("stopped")
+	d.logf("stopped")
 	return nil
 }
 

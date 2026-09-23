@@ -1,0 +1,20 @@
+{"app":"loom"}
+target loom, resume
+ 1 unroute: take the app's routes off the edge
+ 2 dns: remove the DNS records bedrock keeps for the app (none)
+ 3 containers: stop and remove the app's containers and images
+ 4 forget: remove the app's network and forget it
+{"app":"loom","data":true}
+target loom, resume
+ 1 unroute: take the app's routes off the edge
+ 2 dns: remove the DNS records bedrock keeps for the app (none)
+ 3 containers: stop and remove the app's containers and images
+ 4 data: remove the app's volumes, database and object store (no way back except a backup)
+ 5 forget: remove the app's network and forget it
+{"app":"loom","data":true,"secrets":true}
+target loom, resume
+ 1 unroute: take the app's routes off the edge
+ 2 dns: remove the DNS records bedrock keeps for the app (none)
+ 3 containers: stop and remove the app's containers and images
+ 4 data: remove the app's volumes, database and object store (no way back except a backup)
+ 5 forget: remove the app's network and forget it, and its secrets

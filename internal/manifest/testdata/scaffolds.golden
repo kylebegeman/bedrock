@@ -1,0 +1,324 @@
+=== {App:acme Kind:web Host:acme.example.com Port:0 Schedule: Postgres:false Dir: Existing:false}
+# acme, as bedrock deploys it.
+#
+# Anything left out takes its default, and the defaults are the safe
+# ones: a read-only root, no capabilities, a non-root user. Run
+# `bedrock deploy` from the directory holding this file.
+app: acme
+description: What this app is
+owner: personal
+
+workloads:
+  web:
+    kind: web
+    # Built from ./Dockerfile. To deploy an image that is already
+    # published, drop `build` and give `image: registry/name:tag`.
+    build:
+      context: .
+    # The port the process listens on inside the container.
+    port: 8000
+    routes:
+      - host: acme.example.com
+    # Until this answers 200 the new revision is never given traffic,
+    # and a deploy that cannot pass it rolls back on its own.
+    health:
+      path: /healthz
+    resources:
+      memory: 512m
+
+# Checked after the deploy. A failure here rolls the deploy back.
+checks:
+  - url: https://acme.example.com/
+=== {App:acme Kind:web Host:acme.example.com Port:3000 Schedule: Postgres:true Dir: Existing:false}
+# acme, as bedrock deploys it.
+#
+# Anything left out takes its default, and the defaults are the safe
+# ones: a read-only root, no capabilities, a non-root user. Run
+# `bedrock deploy` from the directory holding this file.
+app: acme
+description: What this app is
+owner: personal
+
+workloads:
+  web:
+    kind: web
+    # Built from ./Dockerfile. To deploy an image that is already
+    # published, drop `build` and give `image: registry/name:tag`.
+    build:
+      context: .
+    # The port the process listens on inside the container.
+    port: 3000
+    routes:
+      - host: acme.example.com
+    # Until this answers 200 the new revision is never given traffic,
+    # and a deploy that cannot pass it rolls back on its own.
+    health:
+      path: /healthz
+    resources:
+      memory: 512m
+
+  # A release workload runs once per deploy, after the database is up
+  # and before the new revision starts. This is where migrations go.
+  # It is commented out because only you know the command; a release
+  # step that runs the wrong thing runs it on every single deploy.
+  #
+  # migrate:
+  #   kind: release
+  #   order: 1
+  #   build:
+  #     context: .
+  #   command: [./app, migrate]
+  #   timeout: 5m
+
+data:
+  # Every workload above is given DATABASE_URL pointing here, so
+  # nothing else needs declaring to use it. bedrock generates the
+  # password, seals it, and never writes it to a log or a receipt.
+  postgres:
+    version: "17"
+
+backup:
+  # An app with data is backed up nightly by default, with a weekly
+  # drill that restores it somewhere safe to prove it opens.
+  #
+  # A verify query makes a backup prove it holds real rows before it
+  # counts. Point it at a table that is never legitimately empty.
+  #
+  # verify:
+  #   sql: select count(*) from users
+  #   at_least: 1
+
+# Checked after the deploy. A failure here rolls the deploy back.
+checks:
+  - url: https://acme.example.com/
+=== {App:acme Kind:static Host:acme.example.com Port:0 Schedule: Postgres:false Dir: Existing:false}
+# acme, as bedrock deploys it.
+#
+# Anything left out takes its default, and the defaults are the safe
+# ones: a read-only root, no capabilities, a non-root user. Run
+# `bedrock deploy` from the directory holding this file.
+app: acme
+description: What this app is
+owner: personal
+
+workloads:
+  # A static workload serves files straight from the source. It has
+  # no image and no port; the edge serves the directory itself.
+  pages:
+    kind: static
+    dir: public
+    routes:
+      - host: acme.example.com
+
+# Checked after the deploy. A failure here rolls the deploy back.
+checks:
+  - url: https://acme.example.com/
+=== {App:acme Kind:static Host:acme.example.com Port:0 Schedule: Postgres:true Dir:dist Existing:false}
+# acme, as bedrock deploys it.
+#
+# Anything left out takes its default, and the defaults are the safe
+# ones: a read-only root, no capabilities, a non-root user. Run
+# `bedrock deploy` from the directory holding this file.
+app: acme
+description: What this app is
+owner: personal
+
+workloads:
+  # A static workload serves files straight from the source. It has
+  # no image and no port; the edge serves the directory itself.
+  pages:
+    kind: static
+    dir: dist
+    routes:
+      - host: acme.example.com
+
+  # A release workload runs once per deploy, after the database is up
+  # and before the new revision starts. This is where migrations go.
+  # It is commented out because only you know the command; a release
+  # step that runs the wrong thing runs it on every single deploy.
+  #
+  # migrate:
+  #   kind: release
+  #   order: 1
+  #   build:
+  #     context: .
+  #   command: [./app, migrate]
+  #   timeout: 5m
+
+data:
+  # Every workload above is given DATABASE_URL pointing here, so
+  # nothing else needs declaring to use it. bedrock generates the
+  # password, seals it, and never writes it to a log or a receipt.
+  postgres:
+    version: "17"
+
+backup:
+  # An app with data is backed up nightly by default, with a weekly
+  # drill that restores it somewhere safe to prove it opens.
+  #
+  # A verify query makes a backup prove it holds real rows before it
+  # counts. Point it at a table that is never legitimately empty.
+  #
+  # verify:
+  #   sql: select count(*) from users
+  #   at_least: 1
+
+# Checked after the deploy. A failure here rolls the deploy back.
+checks:
+  - url: https://acme.example.com/
+=== {App:acme Kind:worker Host: Port:0 Schedule: Postgres:false Dir: Existing:false}
+# acme, as bedrock deploys it.
+#
+# Anything left out takes its default, and the defaults are the safe
+# ones: a read-only root, no capabilities, a non-root user. Run
+# `bedrock deploy` from the directory holding this file.
+app: acme
+description: What this app is
+owner: personal
+
+workloads:
+  # A worker runs without listening, so it has no port and no routes.
+  worker:
+    kind: worker
+    build:
+      context: .
+    # Without a command the image's own CMD runs.
+    # command: [./app, worker]
+    #
+    # singleton keeps the old copy from overlapping the new one
+    # during a deploy, for work that must not run twice at once.
+    # singleton: true
+    resources:
+      memory: 512m
+=== {App:acme Kind:worker Host: Port:0 Schedule: Postgres:true Dir: Existing:false}
+# acme, as bedrock deploys it.
+#
+# Anything left out takes its default, and the defaults are the safe
+# ones: a read-only root, no capabilities, a non-root user. Run
+# `bedrock deploy` from the directory holding this file.
+app: acme
+description: What this app is
+owner: personal
+
+workloads:
+  # A worker runs without listening, so it has no port and no routes.
+  worker:
+    kind: worker
+    build:
+      context: .
+    # Without a command the image's own CMD runs.
+    # command: [./app, worker]
+    #
+    # singleton keeps the old copy from overlapping the new one
+    # during a deploy, for work that must not run twice at once.
+    # singleton: true
+    resources:
+      memory: 512m
+
+  # A release workload runs once per deploy, after the database is up
+  # and before the new revision starts. This is where migrations go.
+  # It is commented out because only you know the command; a release
+  # step that runs the wrong thing runs it on every single deploy.
+  #
+  # migrate:
+  #   kind: release
+  #   order: 1
+  #   build:
+  #     context: .
+  #   command: [./app, migrate]
+  #   timeout: 5m
+
+data:
+  # Every workload above is given DATABASE_URL pointing here, so
+  # nothing else needs declaring to use it. bedrock generates the
+  # password, seals it, and never writes it to a log or a receipt.
+  postgres:
+    version: "17"
+
+backup:
+  # An app with data is backed up nightly by default, with a weekly
+  # drill that restores it somewhere safe to prove it opens.
+  #
+  # A verify query makes a backup prove it holds real rows before it
+  # counts. Point it at a table that is never legitimately empty.
+  #
+  # verify:
+  #   sql: select count(*) from users
+  #   at_least: 1
+=== {App:acme Kind:cron Host: Port:0 Schedule: Postgres:false Dir: Existing:false}
+# acme, as bedrock deploys it.
+#
+# Anything left out takes its default, and the defaults are the safe
+# ones: a read-only root, no capabilities, a non-root user. Run
+# `bedrock deploy` from the directory holding this file.
+app: acme
+description: What this app is
+owner: personal
+
+workloads:
+  # A cron workload runs its command on a schedule and exits. It is
+  # never given traffic, so it has no port and no routes.
+  job:
+    kind: cron
+    build:
+      context: .
+    schedule: "0 3 * * *"
+    # A run that outlives its timeout is stopped and recorded failed.
+    timeout: 30m
+    # command: [./app, nightly]
+    resources:
+      memory: 512m
+=== {App:acme Kind:cron Host: Port:0 Schedule:*/15 * * * * Postgres:true Dir: Existing:false}
+# acme, as bedrock deploys it.
+#
+# Anything left out takes its default, and the defaults are the safe
+# ones: a read-only root, no capabilities, a non-root user. Run
+# `bedrock deploy` from the directory holding this file.
+app: acme
+description: What this app is
+owner: personal
+
+workloads:
+  # A cron workload runs its command on a schedule and exits. It is
+  # never given traffic, so it has no port and no routes.
+  job:
+    kind: cron
+    build:
+      context: .
+    schedule: "*/15 * * * *"
+    # A run that outlives its timeout is stopped and recorded failed.
+    timeout: 30m
+    # command: [./app, nightly]
+    resources:
+      memory: 512m
+
+  # A release workload runs once per deploy, after the database is up
+  # and before the new revision starts. This is where migrations go.
+  # It is commented out because only you know the command; a release
+  # step that runs the wrong thing runs it on every single deploy.
+  #
+  # migrate:
+  #   kind: release
+  #   order: 1
+  #   build:
+  #     context: .
+  #   command: [./app, migrate]
+  #   timeout: 5m
+
+data:
+  # Every workload above is given DATABASE_URL pointing here, so
+  # nothing else needs declaring to use it. bedrock generates the
+  # password, seals it, and never writes it to a log or a receipt.
+  postgres:
+    version: "17"
+
+backup:
+  # An app with data is backed up nightly by default, with a weekly
+  # drill that restores it somewhere safe to prove it opens.
+  #
+  # A verify query makes a backup prove it holds real rows before it
+  # counts. Point it at a table that is never legitimately empty.
+  #
+  # verify:
+  #   sql: select count(*) from users
+  #   at_least: 1

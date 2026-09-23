@@ -1,0 +1,37 @@
+fresh
+  pass system: Ubuntu 24.04.4 LTS on x86_64
+  pass systemd: running
+  pass privileges: root
+  pass cpu: 4 cpus
+  pass memory: 15.6 GiB
+  pass disk: 181.2 GiB free
+  warn swap: none (fix: run bedrock host setup adds a swap file)
+  fail docker: not installed (fix: run bedrock host setup)
+  fail registry: no local image registry (fix: run bedrock host setup)
+  fail firewall: ufw inactive (fix: run bedrock host setup)
+  fail ssh: password login on (fix: run bedrock host setup turns it off)
+  warn fail2ban: not active (fix: run bedrock host setup)
+  warn updates: 2 package(s) can be upgraded (fix: bedrock host maintain)
+  warn security updates: automatic security updates off (fix: run bedrock host setup)
+  pass time: synchronized, Etc/UTC
+  warn logs: journal unbounded (fix: run bedrock host setup caps it)
+  fail daemon: not answering (fix: bedrock daemon install)
+set-up
+  pass system: Ubuntu 24.04.4 LTS on x86_64
+  pass systemd: running
+  pass privileges: root
+  pass cpu: 4 cpus
+  pass memory: 15.6 GiB
+  pass disk: 181.2 GiB free
+  pass swap: 4.0 GiB
+  pass docker: running, 29.5.2
+  pass registry: running on 127.0.0.1:5000
+  pass edge: running on 80 and 443
+  pass firewall: active: ssh, 80, 443
+  pass ssh: key-only, 1 root key(s)
+  pass fail2ban: active
+  pass updates: up to date
+  pass security updates: automatic
+  pass time: synchronized, Etc/UTC
+  pass logs: journal capped at 500M
+  fail daemon: not answering (fix: bedrock daemon install)
