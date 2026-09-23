@@ -6,7 +6,7 @@
 # sends a working tree from this Mac.
 #
 # Needs the apps prove-m4.sh and prove-m5.sh leave behind, and begamin's
-# repository on this Mac ($1, default ~/Developer/active/begamin). It is
+# repository on this Mac ($1, or LANE_BEGAMIN_REPO in hostinger.env). It is
 # cloned into a temporary directory and a lane manifest committed there;
 # nothing is pushed anywhere but the box. Cloudflare's API is a lane
 # fixture (fakeflare) the proof starts on the box; on the real machines the
@@ -14,21 +14,28 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-begamin_repo="${1:-$HOME/Developer/active/begamin}"
 # shellcheck source=/dev/null
 . "$here/hostinger.env"
+: "${LANE_DOMAIN:?set LANE_DOMAIN in lane/hostinger.env; see hostinger.env.example}"
+: "${LANE_ZONE:?set LANE_ZONE in lane/hostinger.env; see hostinger.env.example}"
+: "${LANE_SITE_URL:?set LANE_SITE_URL in lane/hostinger.env; see hostinger.env.example}"
+export LANE_DOMAIN LANE_ZONE LANE_SITE_URL
+begamin_repo="${1:-${LANE_BEGAMIN_REPO:?pass the begamin repository, or set LANE_BEGAMIN_REPO in lane/hostinger.env}}"
+LANE_ZONE_ID="zone-${LANE_ZONE//./-}" # the stand-in's id for the zone
 ssh_opts=(-i "$KEY" -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes
   -o UserKnownHostsFile="$here/known_hosts" -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
 box="root@$HOST"
 run() { ssh "${ssh_opts[@]}" "$box" "$@"; }
 put() { scp -q "${ssh_opts[@]}" "$1" "$box:$2"; }
 fetch() { curl -sS --max-time 30 "$@"; }
+# The fixtures name lane.example.com; the box answers for $LANE_DOMAIN.
+localize() { run "sed -i 's/lane\\.example\\.com/$LANE_DOMAIN/g' $*"; }
 quiet() { grep -v '^  \.\.\.  ' | grep -v '^remote:   \.\.\.  ' ; }
 fail() { echo "M6 NOT proven: $*" >&2; exit 1; }
 # cf <method> <path> [json] talks to the Cloudflare stand-in on the box.
 cf() { run "curl -s -X $1 -H \"Authorization: Bearer \$(cat /root/.lane-cloudflare-token)\" -H 'Content-Type: application/json' http://127.0.0.1:8788/client/v4$2 ${3:+-d '$3'}"; }
 # records prints the stand-in's A records as name content comment.
-records() { cf GET "/zones/zone-begam-in/dns_records?per_page=100" | python3 -c 'import json,sys; [print(r["name"], r["content"], r.get("comment","")) for r in json.load(sys.stdin)["result"]]'; }
+records() { cf GET "/zones/$LANE_ZONE_ID/dns_records?per_page=100" | python3 -c 'import json,sys; [print(r["name"], r["content"], r.get("comment","")) for r in json.load(sys.stdin)["result"]]'; }
 
 work="$(mktemp -d)"
 push_key="$work/push-key"
@@ -52,17 +59,18 @@ echo "== lane fixture: a stand-in for Cloudflare's API; the token stays on the b
 run "set -e
 [ -s /root/.lane-cloudflare-token ] || { umask 077; head -c 24 /dev/urandom | base64 | tr -d '/+=' > /root/.lane-cloudflare-token; }
 docker rm -f lane-cloudflare >/dev/null 2>&1 || true
-docker run -d --name lane-cloudflare -p 127.0.0.1:8788:8788 -e FAKEFLARE_TOKEN=\"\$(cat /root/.lane-cloudflare-token)\" -e FAKEFLARE_ZONES=begam.in -v /srv/lane/bin/fakeflare:/fakeflare:ro alpine:3.21 /fakeflare >/dev/null
+docker run -d --name lane-cloudflare -p 127.0.0.1:8788:8788 -e FAKEFLARE_TOKEN=\"\$(cat /root/.lane-cloudflare-token)\" -e FAKEFLARE_ZONES=$LANE_ZONE -v /srv/lane/bin/fakeflare:/fakeflare:ro alpine:3.21 /fakeflare >/dev/null
 sleep 1
 printf 'token=%s\napi=http://127.0.0.1:8788/client/v4\n' \"\$(cat /root/.lane-cloudflare-token)\" | bedrock integration set cloudflare"
-cf POST /zones/zone-begam-in/dns_records "{\"type\":\"A\",\"name\":\"*.lane.begam.in\",\"content\":\"$HOST\"}" >/dev/null
-cf POST /zones/zone-begam-in/dns_records "{\"type\":\"A\",\"name\":\"stale.lane.begam.in\",\"content\":\"$HOST\"}" >/dev/null
-cf POST /zones/zone-begam-in/dns_records '{"type":"A","name":"moved.lane.begam.in","content":"198.51.100.7","comment":"bedrock: hello on old-box"}' >/dev/null
+cf POST /zones/$LANE_ZONE_ID/dns_records "{\"type\":\"A\",\"name\":\"*.$LANE_DOMAIN\",\"content\":\"$HOST\"}" >/dev/null
+cf POST /zones/$LANE_ZONE_ID/dns_records "{\"type\":\"A\",\"name\":\"stale.$LANE_DOMAIN\",\"content\":\"$HOST\"}" >/dev/null
+cf POST "/zones/$LANE_ZONE_ID/dns_records" "{\"type\":\"A\",\"name\":\"moved.$LANE_DOMAIN\",\"content\":\"198.51.100.7\",\"comment\":\"bedrock: hello on old-box\"}" >/dev/null
 echo "-- the zone the stand-in serves:"; records
 
 echo "== every app redeployed under isolation"
 run 'rm -rf /srv/lane/hello /srv/lane/site'
 (cd "$here/fixtures" && COPYFILE_DISABLE=1 tar czf - hello site) | run 'tar xzf - -C /srv/lane 2>/dev/null'
+localize /srv/lane/hello/bedrock.yaml /srv/lane/site/bedrock.yaml
 run "sed -i 's|    resources:\n      memory: 1g|&|' /srv/lane/dragon-writer/bedrock.yaml; grep -q 'tmpfs:' /srv/lane/dragon-writer/bedrock.yaml || sed -i 's|^    mounts:|    tmpfs: [/app/.next/cache]\n    mounts:|' /srv/lane/dragon-writer/bedrock.yaml; grep -B1 -A1 tmpfs /srv/lane/dragon-writer/bedrock.yaml"
 for a in site hello dragon-writer; do
   run "bedrock deploy /srv/lane/$a --yes" | quiet | grep -E "running as|volume .* belongs|succeeded|failed"
@@ -73,9 +81,9 @@ echo "== git push deploys begamin, and its records appear"
 run 'rm -rf /var/lib/bedrock-git/begamin.git'
 run "bedrock git allow begamin '$(cat "$push_key.pub")'" | head -1
 git clone -q --no-hardlinks "$begamin_repo" "$work/begamin"
-cat > "$work/begamin/bedrock.yaml" <<'EOF'
+cat > "$work/begamin/bedrock.yaml" <<EOF
 app: begamin
-description: Kyle's private API
+description: A private API
 owner: personal
 repo: github.com/kylebegeman/begamin
 workloads:
@@ -85,15 +93,15 @@ workloads:
       context: .
     port: 8484
     routes:
-      - host: api.lane.begam.in
+      - host: api.$LANE_DOMAIN
         dns: direct
-      - host: go.lane.begam.in
+      - host: go.$LANE_DOMAIN
         dns: direct
     env:
       NODE_ENV: production
-      HOST_API: api.lane.begam.in
-      HOST_GO: go.lane.begam.in
-      PUBLIC_SITE_URL: https://kylebegeman.com
+      HOST_API: api.$LANE_DOMAIN
+      HOST_GO: go.$LANE_DOMAIN
+      PUBLIC_SITE_URL: $LANE_SITE_URL
     secrets: [IP_HASH_SALT]
     health:
       path: /healthz
@@ -105,23 +113,23 @@ data:
     data:
       description: The SQLite database
 checks:
-  - url: https://api.lane.begam.in/healthz
+  - url: https://api.$LANE_DOMAIN/healthz
 EOF
 g() { git -C "$work/begamin" -c user.name=lane -c user.email=lane@bedrock "$@"; }
 g add bedrock.yaml && g commit -q -m "lane: deploy with bedrock"
 g remote add bedrock "bedrock@$HOST:begamin.git"
 GIT_SSH_COMMAND="$push_ssh" g push bedrock HEAD:main 2>&1 | quiet | tail -8
 commit=$(g rev-parse --short=12 HEAD)
-echo "-- from the outside: $(fetch -o /dev/null -w '%{http_code}' https://api.lane.begam.in/healthz) at https://api.lane.begam.in/healthz"
+echo "-- from the outside: $(fetch -o /dev/null -w '%{http_code}' https://api.$LANE_DOMAIN/healthz) at https://api.$LANE_DOMAIN/healthz"
 running_commit() { run 'bedrock ls --json' | python3 -c 'import json,sys; print(next(a.get("commit","") for a in json.load(sys.stdin)["apps"] if a["name"]=="begamin"))'; }
 [[ "$(running_commit)" == "$commit" ]] || fail "the running revision doesn't record the pushed commit $commit"
 echo "-- begamin runs commit $commit"
-echo "-- the records:"; records | grep -E "^(api|go)\.lane" || fail "no records for begamin"
-records | grep -q "^api.lane.begam.in $HOST bedrock: begamin on" || fail "api's record isn't bedrock's"
+echo "-- the records:"; records | grep -E "^(api|go)\.${LANE_DOMAIN//./\\.}" || fail "no records for begamin"
+records | grep -q "^api.$LANE_DOMAIN $HOST bedrock: begamin on" || fail "api's record isn't bedrock's"
 
 echo "== a push whose deploy fails is refused, and the running revision stays"
 before=$(run 'bedrock ps' | awk '$1=="begamin" {print $3}')
-sed -i.bak 's|  - url: https://api.lane.begam.in/healthz|  - url: https://api.lane.begam.in/not-a-page|' "$work/begamin/bedrock.yaml" && rm -f "$work/begamin/bedrock.yaml.bak"
+sed -i.bak "s|  - url: https://api.$LANE_DOMAIN/healthz|  - url: https://api.$LANE_DOMAIN/not-a-page|" "$work/begamin/bedrock.yaml" && rm -f "$work/begamin/bedrock.yaml.bak"
 g commit -q -am "lane: a check that fails"
 if GIT_SSH_COMMAND="$push_ssh" g push bedrock HEAD:main >"$work/refused.log" 2>&1; then fail "a failing deploy was accepted"; fi
 grep -E "fail |the push is refused|declined" "$work/refused.log" | head -4
@@ -182,32 +190,32 @@ run 'bedrock exposure' | tail -8
 
 echo "== begamin removed: its records go with it"
 run 'bedrock remove begamin --yes' | quiet | grep -E "record|forgotten"
-records | grep -E "^(api|go)\.lane" && fail "begamin's records survived its removal"
-echo "-- no records for api or go.lane.begam.in; https://api.lane.begam.in/healthz answers $(fetch -o /dev/null -w '%{http_code}' https://api.lane.begam.in/healthz 2>/dev/null || true)"
+records | grep -E "^(api|go)\.${LANE_DOMAIN//./\\.}" && fail "begamin's records survived its removal"
+echo "-- no records for api or go.$LANE_DOMAIN; https://api.$LANE_DOMAIN/healthz answers $(fetch -o /dev/null -w '%{http_code}' https://api.$LANE_DOMAIN/healthz 2>/dev/null || true)"
 run 'docker network ls --format "{{.Name}}"' | grep -q '^bedrock.edge.begamin$' && fail "begamin's edge network survived"
 
 echo "== pushed again, begamin comes back with its records and its data"
 g commit -q --allow-empty -m "lane: deploy again"
 GIT_SSH_COMMAND="$push_ssh" g push bedrock HEAD:main 2>&1 | quiet | grep -E "made|succeeded|live"
-records | grep -E "^(api|go)\.lane"
-echo "-- from the outside: $(fetch -o /dev/null -w '%{http_code}' https://api.lane.begam.in/healthz) at https://api.lane.begam.in/healthz"
+records | grep -E "^(api|go)\.${LANE_DOMAIN//./\\.}"
+echo "-- from the outside: $(fetch -o /dev/null -w '%{http_code}' https://api.$LANE_DOMAIN/healthz) at https://api.$LANE_DOMAIN/healthz"
 run "bedrock run begamin web -- sh -c 'ls /var/lib/begamin'" | quiet | grep -E '^ +\| ' | head -3
 
 echo "== a name at another machine stops a deploy until it is pointed here"
-run "sed -i 's|      - host: hello.lane.begam.in|      - host: hello.lane.begam.in\n      - host: moved.lane.begam.in\n        dns: direct|' /srv/lane/hello/bedrock.yaml"
+run "sed -i 's|      - host: hello.$LANE_DOMAIN|      - host: hello.$LANE_DOMAIN\n      - host: moved.$LANE_DOMAIN\n        dns: direct|' /srv/lane/hello/bedrock.yaml"
 run 'bedrock deploy /srv/lane/hello --yes' 2>&1 | quiet | grep -E "fail dns|points elsewhere" | head -2 || true
 run 'bedrock ps' | grep -q "hello  *web" || fail "hello stopped running"
-run 'bedrock dns point moved.lane.begam.in --yes' | quiet | grep -E "updated|points here"
+run "bedrock dns point moved.$LANE_DOMAIN --yes" | quiet | grep -E "updated|points here"
 run 'bedrock deploy /srv/lane/hello --yes' | quiet | grep -E "moved|succeeded|failed"
-echo "-- from the outside: $(fetch https://moved.lane.begam.in/)"
+echo "-- from the outside: $(fetch https://moved.$LANE_DOMAIN/)"
 echo "-- and when hello stops routing it, the record goes at retire:"
-run "sed -i '/moved.lane.begam.in/,+1d' /srv/lane/hello/bedrock.yaml && bedrock deploy /srv/lane/hello --yes" | quiet | grep -E "record removed|succeeded|failed"
-records | grep -q "^moved.lane.begam.in" && fail "moved.lane.begam.in's record survived hello dropping it"
+run "sed -i '/moved.$LANE_DOMAIN/,+1d' /srv/lane/hello/bedrock.yaml && bedrock deploy /srv/lane/hello --yes" | quiet | grep -E "record removed|succeeded|failed"
+records | grep -q "^moved.$LANE_DOMAIN" && fail "moved.$LANE_DOMAIN's record survived hello dropping it"
 
 echo "== bedrock dns, and its audit"
 run 'bedrock dns'
 run 'bedrock dns audit'
-run 'bedrock dns audit --json' | python3 -c 'import json,sys; f=json.load(sys.stdin); assert any(x["host"]=="stale.lane.begam.in" for x in f), f; print("the audit found stale.lane.begam.in, which points here with nothing routed")'
+run 'bedrock dns audit --json' | python3 -c 'import json,os,sys; d=os.environ["LANE_DOMAIN"]; f=json.load(sys.stdin); assert any(x["host"]=="stale."+d for x in f), f; print("the audit found stale."+d+", which points here with nothing routed")'
 
 echo "== a GitHub-style webhook deploys a push (the secret stays on the box)"
 run 'rm -rf /srv/lane/upstream && mkdir -p /srv/lane/upstream && git init -q --bare --initial-branch=main /srv/lane/upstream/begamin.git'
@@ -221,7 +229,7 @@ import hmac, hashlib, json, urllib.request
 secret = open('/root/.lane-webhook-secret').read().strip()
 body = json.dumps({'ref': 'refs/heads/main', 'after': '$hooked'}).encode()
 def post(sig):
-    req = urllib.request.Request('https://api.lane.begam.in/_bedrock/hook', data=body, method='POST', headers={'Content-Type': 'application/json', 'X-GitHub-Event': 'push', 'X-Hub-Signature-256': sig})
+    req = urllib.request.Request('https://api.$LANE_DOMAIN/_bedrock/hook', data=body, method='POST', headers={'Content-Type': 'application/json', 'X-GitHub-Event': 'push', 'X-Hub-Signature-256': sig})
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
             return r.status, r.read().decode().strip()

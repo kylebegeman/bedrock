@@ -55,49 +55,39 @@ func DNSProblem(host string, pointsAt, machineAddrs []string) string {
 // certificate for host: one that names the host and isn't Caddy's own
 // local authority's.
 func CertificateReady(ctx context.Context, host, addr string) (bool, string) {
-	dialer := &tls.Dialer{
-		NetDialer: &net.Dialer{Timeout: 5 * time.Second},
-		Config:    &tls.Config{ServerName: host, InsecureSkipVerify: true}, //nolint:gosec // we inspect the certificate ourselves
-	}
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return false, err.Error()
-	}
-	defer conn.Close()
-	certs := conn.(*tls.Conn).ConnectionState().PeerCertificates
-	if len(certs) == 0 {
-		return false, "no certificate"
-	}
-	leaf := certs[0]
-	if strings.Contains(leaf.Issuer.CommonName, "Caddy Local Authority") {
-		return false, "only Caddy's local certificate so far"
-	}
-	if err := leaf.VerifyHostname(host); err != nil {
-		return false, "the certificate is for " + strings.Join(leaf.DNSNames, ", ")
-	}
-	if time.Now().After(leaf.NotAfter) {
-		return false, "the certificate expired " + leaf.NotAfter.Format(time.DateOnly)
-	}
-	return true, "issued by " + leaf.Issuer.CommonName
+	ready, why, _, _ := Certificate(ctx, host, addr)
+	return ready, why
 }
 
-// CertificateExpiry returns when the certificate the edge serves for host
-// runs out, and whether one could be read at all.
-func CertificateExpiry(ctx context.Context, host, addr string) (time.Time, bool) {
+// Certificate looks once at what the edge at addr serves for host: whether
+// it is a real certificate for the host (why not, otherwise), and when it
+// runs out. found is false when nothing could be read at all, which the
+// edge's own condition covers.
+func Certificate(ctx context.Context, host, addr string) (ready bool, why string, expiry time.Time, found bool) {
 	dialer := &tls.Dialer{
 		NetDialer: &net.Dialer{Timeout: 5 * time.Second},
 		Config:    &tls.Config{ServerName: host, InsecureSkipVerify: true}, //nolint:gosec // we inspect the certificate ourselves
 	}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
-		return time.Time{}, false
+		return false, err.Error(), time.Time{}, false
 	}
 	defer conn.Close()
 	certs := conn.(*tls.Conn).ConnectionState().PeerCertificates
 	if len(certs) == 0 {
-		return time.Time{}, false
+		return false, "no certificate", time.Time{}, false
 	}
-	return certs[0].NotAfter, true
+	leaf := certs[0]
+	expiry = leaf.NotAfter
+	switch {
+	case strings.Contains(leaf.Issuer.CommonName, "Caddy Local Authority"):
+		return false, "only Caddy's local certificate so far", expiry, true
+	case leaf.VerifyHostname(host) != nil:
+		return false, "the certificate is for " + strings.Join(leaf.DNSNames, ", "), expiry, true
+	case time.Now().After(leaf.NotAfter):
+		return false, "the certificate expired " + leaf.NotAfter.Format(time.DateOnly), expiry, true
+	}
+	return true, "issued by " + leaf.Issuer.CommonName, expiry, true
 }
 
 // WaitCertificate polls until the edge serves a real certificate for

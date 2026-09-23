@@ -150,6 +150,12 @@ func (a *plainOrLogin) Next(fromServer []byte, more bool) ([]byte, error) {
 	return nil, fmt.Errorf("unexpected server challenge %q", fromServer)
 }
 
+// headerLine keeps a header's value to one line: a line break in an
+// address or a subject would start a header of the sender's choosing.
+func headerLine(s string) string {
+	return strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
+}
+
 func loopback(host string) bool {
 	if host == "localhost" {
 		return true
@@ -167,9 +173,13 @@ func clientName() string {
 
 func (m Message) render() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "From: %s\r\n", m.From)
-	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(m.To, ", "))
-	fmt.Fprintf(&b, "Subject: %s\r\n", strings.ReplaceAll(strings.ReplaceAll(m.Subject, "\r", " "), "\n", " "))
+	fmt.Fprintf(&b, "From: %s\r\n", headerLine(m.From))
+	to := make([]string, 0, len(m.To))
+	for _, addr := range m.To {
+		to = append(to, headerLine(addr))
+	}
+	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(to, ", "))
+	fmt.Fprintf(&b, "Subject: %s\r\n", headerLine(m.Subject))
 	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
 	fmt.Fprintf(&b, "Message-ID: <%d.%s@%s>\r\n", time.Now().UnixNano(), "bedrock", clientName())
 	b.WriteString("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")

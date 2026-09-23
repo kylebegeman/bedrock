@@ -80,10 +80,12 @@ func PruneBuildCache(ctx context.Context, age time.Duration, keep int64) (int64,
 	if keep > 0 {
 		// Docker renamed --keep-storage to --reserved-space; a daemon old
 		// enough to reject the new name still answers to the old one.
-		if err := prune("--reserved-space", fmt.Sprintf("%d", keep)); err != nil {
-			if err2 := prune("--keep-storage", fmt.Sprintf("%d", keep)); err2 != nil {
-				return reclaimed, err
-			}
+		err := prune("--reserved-space", fmt.Sprintf("%d", keep))
+		if err != nil && strings.Contains(err.Error(), "unknown flag") {
+			err = prune("--keep-storage", fmt.Sprintf("%d", keep))
+		}
+		if err != nil {
+			return reclaimed, err
 		}
 	}
 	return reclaimed, nil

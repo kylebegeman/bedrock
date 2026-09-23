@@ -119,6 +119,7 @@ type StepView struct {
 	Index    int              `json:"index"`
 	Name     string           `json:"name"`
 	Change   string           `json:"change,omitempty"`
+	Note     string           `json:"note,omitempty"`
 	Status   state.StepStatus `json:"status"`
 	Attempts int              `json:"attempts,omitempty"`
 	Error    string           `json:"error,omitempty"`
@@ -177,15 +178,6 @@ func New(store *state.Store, registry Registry, owner string, opts ...Option) *E
 		opt(e)
 	}
 	return e
-}
-
-// Kinds lists the registered operation kinds.
-func (e *Engine) Kinds() []string {
-	kinds := make([]string, 0, len(e.registry))
-	for k := range e.registry {
-		kinds = append(kinds, k)
-	}
-	return kinds
 }
 
 // PlanOnly builds and shows a plan without recording or applying anything.
@@ -281,12 +273,14 @@ func (e *Engine) RunExpecting(ctx context.Context, kind string, input json.RawMe
 }
 
 // Recover finds operations left applying by a daemon that died and finishes
-// them as their plan asks. It returns how many it handled.
+// them as their plan asks. It returns how many it handled; one another
+// owner claimed first is left to that owner and not counted.
 func (e *Engine) Recover(ctx context.Context, emit func(Event)) (int, error) {
 	orphans, err := e.store.Orphaned(ctx, e.now())
 	if err != nil {
 		return 0, err
 	}
+	handled := 0
 	for _, orphan := range orphans {
 		now := e.now()
 		op, err := e.store.Claim(ctx, orphan.ID, e.owner, now, now.Add(e.leaseTTL))
@@ -296,6 +290,7 @@ func (e *Engine) Recover(ctx context.Context, emit func(Event)) (int, error) {
 		if err != nil {
 			return 0, err
 		}
+		handled++
 		plan, view, planErr := e.plan(ctx, op.Kind, op.Input)
 		switch {
 		case planErr != nil:
@@ -321,7 +316,7 @@ func (e *Engine) Recover(ctx context.Context, emit func(Event)) (int, error) {
 			return 0, err
 		}
 	}
-	return len(orphans), nil
+	return handled, nil
 }
 
 func describeRecovery(r Recovery) string {
@@ -354,6 +349,9 @@ func (e *Engine) apply(ctx context.Context, op *state.Operation, plan *Plan, vie
 	steps, err := e.store.Steps(ctx, op.ID)
 	if err != nil {
 		return nil, err
+	}
+	if reason := journalFits(op.ID, steps, plan); reason != "" {
+		return e.finishWithReceipt(ctx, op.ID, state.Failed, reason, emit)
 	}
 	for i, st := range plan.Steps {
 		if steps[i].Status == state.StepSucceeded {
@@ -398,6 +396,9 @@ func (e *Engine) compensate(ctx context.Context, op *state.Operation, plan *Plan
 	if err != nil {
 		return nil, err
 	}
+	if reason := journalFits(op.ID, steps, plan); reason != "" {
+		return e.finishWithReceipt(ctx, op.ID, state.Failed, reason, emit)
+	}
 	for i := len(plan.Steps) - 1; i >= 0; i-- {
 		if steps[i].Status != state.StepSucceeded || plan.Steps[i].Undo == nil {
 			continue
@@ -424,6 +425,22 @@ func (e *Engine) compensate(ctx context.Context, op *state.Operation, plan *Plan
 		}
 	}
 	return e.finishWithReceipt(ctx, op.ID, state.Compensated, reason, emit)
+}
+
+// journalFits says why an operation's journal can't be applied against a
+// plan, or "" when the two describe the same steps. A recovered plan is
+// checked by digest before it gets here, so a mismatch means the journal
+// itself lost or gained rows; the operation ends rather than the daemon.
+func journalFits(id string, steps []state.Step, plan *Plan) string {
+	if len(steps) != len(plan.Steps) {
+		return fmt.Sprintf("the journal of %s holds %d step(s) for a plan of %d; it can't be applied", id, len(steps), len(plan.Steps))
+	}
+	for i, st := range steps {
+		if st.Name != plan.Steps[i].Name {
+			return fmt.Sprintf("the journal of %s names step %d %q where the plan says %q; it can't be applied", id, i+1, st.Name, plan.Steps[i].Name)
+		}
+	}
+	return ""
 }
 
 func (e *Engine) finish(ctx context.Context, id string, status state.OperationStatus, reason string, emit func(Event)) error {
@@ -509,7 +526,7 @@ func buildReceipt(op *state.Operation, steps []state.Step) *Receipt {
 	for _, st := range steps {
 		sv := StepView{Index: st.Index, Name: st.Name, Status: st.Status, Attempts: st.Attempts, Error: st.Error}
 		if st.Index < len(view.Steps) {
-			sv.Change = view.Steps[st.Index].Change
+			sv.Change, sv.Note = view.Steps[st.Index].Change, view.Steps[st.Index].Note
 		}
 		if !st.StartedAt.IsZero() && !st.FinishedAt.IsZero() {
 			sv.Duration = st.FinishedAt.Sub(st.StartedAt)

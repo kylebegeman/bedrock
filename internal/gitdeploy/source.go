@@ -21,9 +21,15 @@ import (
 // MaxSource bounds an uploaded or exported source tree.
 const MaxSource int64 = 2 << 30
 
+// BuildDir names the directory one deploy's source is written to, under
+// the app's own, so PruneBuilds can keep the newest few.
+func BuildDir(root, app, label string) string {
+	return filepath.Join(root, app, fmt.Sprintf("%s-%d", label, time.Now().UnixMilli()))
+}
+
 // NewBuildDir makes the directory one deploy's source is written to.
 func NewBuildDir(root, app, label string) (string, error) {
-	dir := filepath.Join(root, app, fmt.Sprintf("%s-%d", label, time.Now().UnixMilli()))
+	dir := BuildDir(root, app, label)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}

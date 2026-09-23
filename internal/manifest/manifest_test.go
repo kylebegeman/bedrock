@@ -85,6 +85,8 @@ func TestValidationNamesTheProblem(t *testing.T) {
 		"app: a\nworkloads:\n  w:\n    kind: static\n    dir: ../etc\n    routes: [{host: a.com}]\n":                                                "must be inside the source",
 		"app: a\nworkloads:\n  w:\n    kind: worker\n    image: x\nchecks:\n  - url: ftp://x\n":                                                     "url must start with https://",
 		"app: a\nworkloads:\n  w:\n    kind: worker\n    image: x\n    colour: blue\n":                                                              "field colour not found",
+		"app: a\nworkloads:\n  w:\n    kind: worker\n    image: x\n    health: {command: [true], timeout: soon}\n":                                  `health.timeout: "soon" isn't a duration`,
+		"app: a\nworkloads:\n  w:\n    kind: worker\n    image: x\nchecks:\n  - url: https://x\n    within: 5\n":                                    `within: "5" isn't a duration`,
 	}
 	for input, want := range cases {
 		_, err := Parse([]byte(input))
@@ -109,12 +111,12 @@ func TestWorkloadForPicksTheLongestPrefix(t *testing.T) {
 	}
 	cases := map[string]string{"/": "site", "/about": "site", "/thebatteredbaker": "bakery", "/thebatteredbaker/": "bakery", "/thebatteredbaker/menu": "bakery", "/thebatteredbakery": "site"}
 	for path, want := range cases {
-		name, _, ok := m.WorkloadFor("kylebegeman.com", path)
+		name, _, _, ok := m.RouteFor("kylebegeman.com", path)
 		if !ok || name != want {
 			t.Errorf("%s: got %q (%v), want %q", path, name, ok, want)
 		}
 	}
-	if _, _, ok := m.WorkloadFor("other.com", "/"); ok {
+	if _, _, _, ok := m.RouteFor("other.com", "/"); ok {
 		t.Fatal("an unrouted host must not match")
 	}
 }

@@ -47,7 +47,7 @@ func (a *app) operate(ctx context.Context, kind string, input any, planOnly bool
 			return errors.New("this would change the machine; add --yes to apply it without a prompt, or --plan to only look")
 		}
 		r.Plan(view)
-		fmt.Fprint(a.stdout, "Apply? [y/N] ")
+		fmt.Fprint(a.narrateTo(), "Apply? [y/N] ")
 		answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 		if s := strings.ToLower(strings.TrimSpace(answer)); s != "y" && s != "yes" {
 			return errors.New("not applied")
@@ -123,8 +123,9 @@ func newHistory(a *app) *cobra.Command {
 
 func newKernel(a *app) *cobra.Command {
 	kernelCmd := &cobra.Command{
-		Use:   "kernel",
-		Short: "Exercise the kernel itself.",
+		Use:    "kernel",
+		Short:  "Exercise the kernel itself.",
+		Hidden: true, // a fixture for the lane, not a command for a person
 	}
 	var (
 		in       kernel.ExerciseInput

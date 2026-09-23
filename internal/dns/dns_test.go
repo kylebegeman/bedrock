@@ -12,7 +12,7 @@ import (
 	"github.com/kylebegeman/bedrock/internal/manifest"
 )
 
-const here = "187.127.249.208"
+const here = "203.0.113.10"
 
 func setup(t *testing.T) (*Manager, *cloudflaretest.Server) {
 	t.Helper()
@@ -21,7 +21,7 @@ func setup(t *testing.T) (*Manager, *cloudflaretest.Server) {
 	t.Cleanup(srv.Close)
 	cf := cloudflare.New("t0ken")
 	cf.Base = srv.URL + "/client/v4"
-	return &Manager{CF: cf, Hostname: "bedrock-lane", Addresses: []string{here, "2a02:4780:75:de40::1"}}, fake
+	return &Manager{CF: cf, Hostname: "bedrock-lane", Addresses: []string{here, "2001:db8::1"}}, fake
 }
 
 func TestRecordsAreMadeKeptUpdatedAndRemoved(t *testing.T) {
@@ -55,9 +55,9 @@ func TestRecordsAreMadeKeptUpdatedAndRemoved(t *testing.T) {
 func TestARecordElsewhereIsNeverTakenSilently(t *testing.T) {
 	ctx := context.Background()
 	m, fake := setup(t)
-	fake.Seed(cloudflaretest.Record{Type: "A", Name: "dragonwriter.begam.in", Content: "15.204.243.222", Comment: "bedrock: dragon-writer on braintreelabs"})
+	fake.Seed(cloudflaretest.Record{Type: "A", Name: "dragonwriter.begam.in", Content: "198.51.100.20", Comment: "bedrock: dragon-writer on braintreelabs"})
 	_, err := m.Ensure(ctx, "dragon-writer", "dragonwriter.begam.in", manifest.DNSDirect, false)
-	if !errors.Is(err, ErrElsewhere) || !strings.Contains(err.Error(), "15.204.243.222 (dragon-writer on braintreelabs)") || !strings.Contains(err.Error(), "bedrock dns point dragonwriter.begam.in") {
+	if !errors.Is(err, ErrElsewhere) || !strings.Contains(err.Error(), "198.51.100.20 (dragon-writer on braintreelabs)") || !strings.Contains(err.Error(), "bedrock dns point dragonwriter.begam.in") {
 		t.Fatalf("%v", err)
 	}
 	// The other machine's record must not be removed by this machine.
@@ -146,5 +146,32 @@ func TestDepthBelowTheZone(t *testing.T) {
 		if got := (Outcome{Host: host, Zone: "begam.in"}).Depth(); got != want {
 			t.Errorf("%s: depth %d, want %d", host, got, want)
 		}
+	}
+}
+
+func TestARecordPointedElsewhereByHandStaysWhenTheAppLeaves(t *testing.T) {
+	ctx := context.Background()
+	m, fake := setup(t)
+	// bedrock's own comment is still on it, but someone moved it since.
+	fake.Seed(cloudflaretest.Record{Type: "A", Name: "site.begam.in", Content: "203.0.113.9", Comment: "bedrock: site on bedrock-lane"})
+	removed, err := m.Remove(ctx, "site", []string{"site.begam.in"})
+	if err != nil || len(removed) != 0 {
+		t.Fatalf("removed %v %v", removed, err)
+	}
+	if recs := fake.Records(); len(recs) != 1 {
+		t.Fatalf("the moved record went: %+v", recs)
+	}
+}
+
+func TestPointingSaysWhatItTookOutOfTheWay(t *testing.T) {
+	ctx := context.Background()
+	m, fake := setup(t)
+	fake.Seed(cloudflaretest.Record{Type: "CNAME", Name: "www.begam.in", Content: "begam.in"})
+	out, err := m.Ensure(ctx, "site", "www.begam.in", manifest.DNSDirect, true)
+	if err != nil || out.Action != "made" || strings.Join(out.Removed, ",") != "CNAME begam.in" {
+		t.Fatalf("%+v %v", out, err)
+	}
+	if !strings.Contains(out.String(), "removed CNAME begam.in") {
+		t.Fatalf("the outcome doesn't say: %s", out)
 	}
 }

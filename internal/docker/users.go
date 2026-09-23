@@ -68,10 +68,16 @@ var (
 
 // imageAccounts reads an image's /etc/passwd and /etc/group by copying
 // them out of a container that is never started. An image without them
-// (scratch, distroless) has no names to look up.
+// (scratch, distroless) has no names to look up. The answer is kept by
+// the image's ID, not its reference: a tag that moves is another image.
 func (e *Engine) imageAccounts(ctx context.Context, image string) (*accounts, error) {
+	inspected, err := e.cli.ImageInspect(ctx, image)
+	if err != nil {
+		return nil, fmt.Errorf("read the users of %s: %w", image, err)
+	}
+	key := inspected.ID
 	accountsMu.Lock()
-	if a, ok := accountsCache[image]; ok {
+	if a, ok := accountsCache[key]; ok {
 		accountsMu.Unlock()
 		return a, nil
 	}
@@ -123,7 +129,7 @@ func (e *Engine) imageAccounts(ctx context.Context, image string) (*accounts, er
 		}
 	}
 	accountsMu.Lock()
-	accountsCache[image] = a
+	accountsCache[key] = a
 	accountsMu.Unlock()
 	return a, nil
 }

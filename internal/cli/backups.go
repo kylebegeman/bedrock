@@ -1,0 +1,106 @@
+package cli
+
+import (
+	"encoding/json"
+	"fmt"
+	"text/tabwriter"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	apps "github.com/kylebegeman/bedrock/internal/app"
+)
+
+func newBackup(a *app) *cobra.Command {
+	var planOnly bool
+	cmd := &cobra.Command{
+		Use:   "backup <app>",
+		Short: "Back the app's data up to its bucket now. \"bedrock\" backs up the machine's own state.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.operate(cmd.Context(), apps.BackupKind, apps.BackupInput{App: args[0]}, planOnly)
+		},
+	}
+	a.mutatingFlags(cmd, &planOnly)
+	return cmd
+}
+
+func newDrill(a *app) *cobra.Command {
+	var (
+		planOnly bool
+		snapshot string
+	)
+	cmd := &cobra.Command{
+		Use:   "drill <app>",
+		Short: "Prove a backup: restore it beside the app, start the app on it, check, clean up.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.operate(cmd.Context(), apps.DrillKind, apps.DrillInput{App: args[0], Snapshot: snapshot}, planOnly)
+		},
+	}
+	cmd.Flags().StringVar(&snapshot, "snapshot", "", "a snapshot id instead of the latest")
+	a.mutatingFlags(cmd, &planOnly)
+	return cmd
+}
+
+func newRestore(a *app) *cobra.Command {
+	var (
+		planOnly bool
+		snapshot string
+	)
+	cmd := &cobra.Command{
+		Use:   "restore <app>",
+		Short: "Bring an app's data back from its bucket onto this machine, before deploying it here.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.operate(cmd.Context(), apps.RestoreKind, apps.RestoreInput{App: args[0], Snapshot: snapshot}, planOnly)
+		},
+	}
+	cmd.Flags().StringVar(&snapshot, "snapshot", "", "a snapshot id instead of the latest")
+	a.mutatingFlags(cmd, &planOnly)
+	return cmd
+}
+
+func newBackups(a *app) *cobra.Command {
+	var limit int
+	cmd := &cobra.Command{
+		Use:   "backups [app]",
+		Short: "List backups, drills and restores, newest first.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := a.openState()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+			runs, err := store.BackupRuns(cmd.Context(), optional(args, 0), "", limit)
+			if err != nil {
+				return err
+			}
+			if a.json {
+				return json.NewEncoder(a.stdout).Encode(runs)
+			}
+			if len(runs) == 0 {
+				fmt.Fprintln(a.stdout, "no backups yet")
+				return nil
+			}
+			w := tabwriter.NewWriter(a.stdout, 0, 4, 2, ' ', 0)
+			fmt.Fprintln(w, "APP\tKIND\tSTARTED\tTOOK\tRESULT\tSNAPSHOT\tDETAIL")
+			for _, r := range runs {
+				result, took, detail := "running", "", r.Detail
+				if r.Finished() {
+					took = r.FinishedAt.Sub(r.StartedAt).Round(time.Second).String()
+					if r.OK {
+						result = "ok"
+					} else {
+						result, detail = "FAILED", r.Error
+					}
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.App, r.Kind, r.StartedAt.Local().Format("2006-01-02 15:04:05"), took, result, orDash(r.Snapshot), detail)
+			}
+			return w.Flush()
+		},
+	}
+	cmd.Flags().IntVar(&limit, "limit", 20, "how many to list")
+	return cmd
+}

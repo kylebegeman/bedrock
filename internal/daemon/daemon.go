@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -48,17 +49,8 @@ const DefaultSocket = "/run/bedrock/bedrock.sock"
 const DefaultStateDir = "/var/lib/bedrock"
 
 // Registry returns the operation kinds the daemon knows, for the machine
-// this process runs on.
-func Registry(store *state.Store, sec *secrets.Store, socket string) kernel.Registry {
-	return registry(store, sec, socket, DefaultStateDir)
-}
-
-// RegistryIn is Registry for a state directory other than the default.
-func RegistryIn(store *state.Store, sec *secrets.Store, socket, stateDir string) kernel.Registry {
-	return registry(store, sec, socket, stateDir)
-}
-
-func registry(store *state.Store, sec *secrets.Store, socket, stateDir string) kernel.Registry {
+// this process runs on, keeping its state in stateDir.
+func Registry(store *state.Store, sec *secrets.Store, socket, stateDir string) kernel.Registry {
 	env := host.RealEnv()
 	reg := kernel.Registry{}
 	reg.Add(kernel.Exercise{})
@@ -78,7 +70,7 @@ func registry(store *state.Store, sec *secrets.Store, socket, stateDir string) k
 		return app.ReloadEdge(ctx, store, sec)
 	}})
 	reg.Add(host.Maintain{Env: env, Socket: socket})
-	reg.Add(host.Upgrade{Env: env})
+	reg.Add(host.Upgrade{Env: env, Socket: socket})
 	deploy := app.Deploy{Store: store, Secrets: sec, StateDir: stateDir, Addresses: func(ctx context.Context) []string { return host.Addresses(ctx, env) }}
 	reg.Add(deploy)
 	reg.Add(app.Rollback{Deploy: deploy})
@@ -87,7 +79,7 @@ func registry(store *state.Store, sec *secrets.Store, socket, stateDir string) k
 	addresses := func(ctx context.Context) []string { return host.Addresses(ctx, env) }
 	reg.Add(app.Remove{Store: store, Secrets: sec, Addresses: addresses, StateDir: stateDir})
 	reg.Add(app.Point{Store: store, Secrets: sec, Addresses: addresses})
-	reg.Add(app.Backup{Store: store, Secrets: sec, StateDir: stateDir, Hostname: hostname})
+	reg.Add(app.Backup{Store: store, Secrets: sec, StateDir: stateDir, Hostname: hostname, Profile: host.ProfilePath})
 	reg.Add(app.Drill{Store: store, Secrets: sec, StateDir: stateDir})
 	reg.Add(app.RestoreDef{Store: store, Secrets: sec, StateDir: stateDir})
 	return reg
@@ -137,9 +129,14 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	if err := app.RecoverBackupPauses(ctx, store.Path()); err != nil {
 		return fmt.Errorf("recover backup pauses: %w", err)
 	}
+	// Job runs the last daemon left open are taken up again or closed;
+	// Docker being down only means they wait for the next start.
+	if err := app.ReconcileJobRuns(ctx, store, logf); err != nil {
+		logf("job runs: %v", err)
+	}
 	clearStaleUpgrade(logf)
 	sec := secrets.DefaultStore(cfg.StateDir)
-	engine := kernel.New(store, RegistryIn(store, sec, cfg.Socket, cfg.StateDir), cfg.Owner)
+	engine := kernel.New(store, Registry(store, sec, cfg.Socket, cfg.StateDir), cfg.Owner)
 	logf("bedrock daemon %s, state %s, owner %s", version.Current().Version, store.Path(), cfg.Owner)
 
 	apiServer := &api.Server{Engine: engine, Store: store}
@@ -162,22 +159,15 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	} else if recovered > 0 {
 		logf("recovered %d interrupted operation(s)", recovered)
 	}
-	go func() {
-		ticker := time.NewTicker(cfg.SweepInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if n, err := apiServer.Recover(ctx, recoveryLog); err != nil && ctx.Err() == nil {
-					logf("recovery sweep: %v", err)
-				} else if n > 0 {
-					logf("recovered %d interrupted operation(s)", n)
-				}
+	go every(ctx, cfg.SweepInterval, false, func(time.Time) {
+		guarded(logf, "recovery sweep", func() {
+			if n, err := apiServer.Recover(ctx, recoveryLog); err != nil && ctx.Err() == nil {
+				logf("recovery sweep: %v", err)
+			} else if n > 0 {
+				logf("recovered %d interrupted operation(s)", n)
 			}
-		}
-	}()
+		})
+	})
 
 	// The edge gets the configuration this build of bedrock makes for the
 	// active revisions, in case the shape changed since the last deploy;
@@ -188,37 +178,34 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 
 	// Cron workloads run on the daemon's clock, outside the operation lock.
 	jobs := app.NewJobs(store, sec)
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case now := <-ticker.C:
-				jobs.Tick(ctx, now.UTC(), logf)
-			}
-		}
-	}()
+	go every(ctx, 30*time.Second, false, func(now time.Time) {
+		guarded(logf, "cron", func() { jobs.Tick(ctx, now, logf) })
+	})
 
 	// Watching, signals and scheduled backups run on their own clocks.
 	machine := hostname()
 	watcher := &watch.Watcher{Store: store, Notifier: watch.EmailNotifier{Secrets: sec, Store: store}, Hostname: machine, Log: logf}
 	prober := watch.NewProber(store)
-	go every(ctx, time.Minute, true, func(now time.Time) {
-		if err := watcher.Round(ctx, prober.Observe(ctx)); err != nil && ctx.Err() == nil {
-			logf("watch: %v", err)
-		}
+	go every(ctx, time.Minute, true, func(time.Time) {
+		guarded(logf, "watch", func() {
+			if err := watcher.Round(ctx, prober.Observe(ctx)); err != nil && ctx.Err() == nil {
+				logf("watch: %v", err)
+			}
+		})
 	})
 	sampler := signals.NewSampler(store)
 	sampler.Log = logf
-	go every(ctx, time.Minute, true, func(now time.Time) {
-		if err := sampler.Sample(ctx); err != nil && ctx.Err() == nil {
-			logf("signals: %v", err)
-		}
+	go every(ctx, time.Minute, true, func(time.Time) {
+		guarded(logf, "signals", func() {
+			if err := sampler.Sample(ctx); err != nil && ctx.Err() == nil {
+				logf("signals: %v", err)
+			}
+		})
 	})
 	scheduler := &Scheduler{Store: store, Secrets: sec, Server: apiServer, Log: logf, Started: time.Now().UTC()}
-	go every(ctx, 30*time.Second, false, func(now time.Time) { scheduler.Tick(ctx, now) })
+	go every(ctx, 30*time.Second, false, func(now time.Time) {
+		guarded(logf, "schedule", func() { scheduler.Tick(ctx, now) })
+	})
 
 	// GitHub's webhooks reach the daemon through the edge, on a socket in
 	// the directory the two share.
@@ -226,7 +213,9 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 		Store: store, Secrets: sec,
 		Deploy: gitdeploy.InProcess(apiServer.RunLocked),
 		Notify: func(ctx context.Context, subject, body string) {
-			_ = watch.EmailNotifier{Secrets: sec, Store: store}.Notify(ctx, watch.Notice{Subject: machine + ": " + subject, Body: body})
+			if err := (watch.EmailNotifier{Secrets: sec, Store: store}).Notify(ctx, watch.Notice{Subject: machine + ": " + subject, Body: body}); err != nil {
+				logf("webhooks: telling you about %s failed: %v", subject, err)
+			}
 		},
 		Log:        logf,
 		SourcesDir: filepath.Join(cfg.StateDir, "sources"),
@@ -235,7 +224,8 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	if hooks, err := listenHooks(); err != nil {
 		logf("webhooks: %v", err)
 	} else {
-		hookServer := &http.Server{Handler: receiver, ReadHeaderTimeout: 10 * time.Second}
+		// The edge puts this on the internet, so every read is bounded.
+		hookServer := &http.Server{Handler: receiver, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: time.Minute}
 		go func() { _ = hookServer.Serve(hooks) }()
 		defer hookServer.Close()
 	}
@@ -270,8 +260,24 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = server.Shutdown(shutdownCtx)
+	// A deploy a webhook started is journaled and would be resumed, but
+	// finishing it here is better than resuming it there.
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelWait()
+	receiver.Wait(waitCtx)
 	logf("stopped")
 	return nil
+}
+
+// guarded runs fn and turns a panic in it into a log line with its stack,
+// so one loop's bug doesn't take the daemon down with every other loop.
+func guarded(logf func(string, ...any), name string, fn func()) {
+	defer func() {
+		if p := recover(); p != nil {
+			logf("%s: panic: %v\n%s", name, p, debug.Stack())
+		}
+	}()
+	fn()
 }
 
 // every calls fn on a period until ctx ends, first right away when asked.
@@ -322,13 +328,11 @@ func listenHooks() (net.Listener, error) {
 
 // clearStaleUpgrade removes an upgrade marker too old to belong to an
 // upgrade in flight, so the rollback unit never acts on it; an upgrade
-// that verified removes its own. The .restarting marker is an older
-// bedrock's.
+// that verified removes its own.
 func clearStaleUpgrade(logf func(string, ...any)) {
 	if info, err := os.Stat(host.StagedMarker); err == nil && time.Since(info.ModTime()) > 10*time.Minute {
 		if os.Remove(host.StagedMarker) == nil {
 			logf("cleared a stale upgrade marker from %s", info.ModTime().UTC().Format(time.RFC3339))
 		}
 	}
-	_ = os.Remove(host.StagedMarker + ".restarting")
 }

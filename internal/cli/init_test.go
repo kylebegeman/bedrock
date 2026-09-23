@@ -23,7 +23,7 @@ func TestInitWritesAManifestThatLoads(t *testing.T) {
 	if m.App != "acme" || !m.HasData() {
 		t.Fatalf("got %+v", m)
 	}
-	for _, want := range []string{"Wrote ", "Still to do:", "bedrock deploy acme"} {
+	for _, want := range []string{"Wrote ", "Still to do:", "bedrock deploy " + dir} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output never says %q: %q", want, out)
 		}

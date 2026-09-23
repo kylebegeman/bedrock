@@ -42,10 +42,12 @@ that off, so the machine needs the loom integration before any of this works.`,
 
 func newPreviewUp(a *app) *cobra.Command {
 	var (
-		branch   string
-		domain   string
-		secrets  bool
-		planOnly bool
+		branch       string
+		domain       string
+		manifestName string
+		dnsMode      string
+		secrets      bool
+		planOnly     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "up <repository>",
@@ -55,7 +57,11 @@ func newPreviewUp(a *app) *cobra.Command {
 			"preview is derived from it: a name with the branch in it, hostnames under\n" +
 			"the preview domain, every route behind a sign-in, no checks and no backups.\n\n" +
 			"The database starts empty and is built by whatever the app runs to migrate\n" +
-			"itself. Most branches want a schema rather than somebody's real rows.",
+			"itself. Most branches want a schema rather than somebody's real rows.\n\n" +
+			"The preview's hostnames keep their records the way the app's own routes\n" +
+			"say. An app whose records are kept by hand has none for a preview, so\n" +
+			"either --dns direct makes them, or a wildcard under the preview domain\n" +
+			"points at this machine already.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repo := args[0]
@@ -65,21 +71,39 @@ func newPreviewUp(a *app) *cobra.Command {
 			if branch == "" {
 				return fmt.Errorf("which branch? pass --branch")
 			}
+			if err := gitdeploy.ValidBranch(branch); err != nil {
+				return err
+			}
 			if domain == "" {
 				return fmt.Errorf("where do previews live? pass --domain, such as --domain preview.example.com")
 			}
-			dir := filepath.Join(a.stateDir, "previews", fmt.Sprintf("%s-%d", apps.DNSLabel(branch), time.Now().UnixMilli()))
-			if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
+			mode, override, err := previewDNS(dnsMode)
+			if err != nil {
 				return err
 			}
-			if planOnly {
-				defer os.RemoveAll(dir)
+			// The tree is fetched under a name of its own and moved beside
+			// the app's other sources once the app's name is known. A
+			// planned or failed preview leaves nothing behind; a deployed
+			// one keeps the newest few, because its revision names it.
+			root := filepath.Join(a.stateDir, "builds")
+			if err := os.MkdirAll(root, 0o700); err != nil {
+				return err
 			}
+			dir, err := os.MkdirTemp(root, ".preview-")
+			if err != nil {
+				return err
+			}
+			deployed := false
+			defer func() {
+				if !deployed {
+					_ = os.RemoveAll(dir)
+				}
+			}()
 			fmt.Fprintf(a.stderr, "fetching %s at %s\n", repo, branch)
 			if err := shallowClone(cmd.Context(), repo, branch, dir); err != nil {
 				return err
 			}
-			parent, err := manifest.Load(dir)
+			parent, err := manifest.LoadFile(dir, manifestName)
 			if err != nil {
 				return fmt.Errorf("the branch has no app to preview: %w", err)
 			}
@@ -90,6 +114,17 @@ func newPreviewUp(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if override {
+				apps.SetRouteDNS(derived, mode)
+			}
+			home := gitdeploy.BuildDir(root, derived.App, "preview")
+			if err := os.MkdirAll(filepath.Dir(home), 0o755); err != nil {
+				return err
+			}
+			if err := os.Rename(dir, home); err != nil {
+				return err
+			}
+			dir = home
 			body, err := yaml.Marshal(derived)
 			if err != nil {
 				return err
@@ -98,7 +133,7 @@ func newPreviewUp(a *app) *cobra.Command {
 			// rather than over it: the tree is a clone, but a manifest that
 			// silently replaced the app's own would be a trap if it ever
 			// were not.
-			name := "bedrock.preview.yaml"
+			name := previewManifestName(manifestName)
 			if err := os.WriteFile(filepath.Join(dir, name), body, 0o644); err != nil {
 				return err
 			}
@@ -106,35 +141,56 @@ func newPreviewUp(a *app) *cobra.Command {
 			if _, err := manifest.LoadFile(dir, name); err != nil {
 				return fmt.Errorf("the derived manifest does not load, which is a bug in bedrock: %w", err)
 			}
-			fmt.Fprintf(a.stderr, "%s is a preview of %s at %s\n", derived.App, parent.App, hostsOrIts(apps.Hosts(derived)))
+			fmt.Fprintf(a.stderr, "%s is a preview of %s at %s\n\n", derived.App, parent.App, hostsOrIts(derived.Hosts()))
 
+			in := apps.DeployInput{Source: dir, Manifest: name, Revision: apps.NewRevision(time.Now())}
 			if secrets {
-				copied, err := a.secretsStore().CopyAll(parent.App, derived.App)
-				if err != nil {
-					return fmt.Errorf("copying %s's secrets to the preview: %w", parent.App, err)
-				}
-				if len(copied) > 0 {
-					fmt.Fprintf(a.stderr, "copied %d secret(s) from %s\n", len(copied), parent.App)
-				}
+				// A step of the deploy, so a plan shows it and only an
+				// applied plan does it.
+				in.SecretsFrom = parent.App
 			}
-			fmt.Fprintln(a.stderr)
-
-			in := apps.DeployInput{Source: dir, Manifest: name, Revision: time.Now().UTC().Format("20060102-150405")}
 			if err := a.operate(cmd.Context(), apps.DeployKind, in, planOnly); err != nil {
 				return err
 			}
 			if planOnly {
 				return nil
 			}
-			fmt.Fprintf(a.stdout, "\n%s is up. Remove it with: bedrock remove %s --data\n", derived.App, derived.App)
+			deployed = true
+			gitdeploy.PruneBuilds(root, derived.App, 3)
+			fmt.Fprintf(a.prose(), "\n%s is up. Remove it with: bedrock remove %s --data\n", derived.App, derived.App)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&branch, "branch", "", "the branch to preview")
 	cmd.Flags().StringVar(&domain, "domain", "", "the domain previews answer under, such as preview.example.com")
+	cmd.Flags().StringVar(&manifestName, "manifest", manifest.FileName, "the manifest at the branch's root, for a source that holds several apps")
+	cmd.Flags().StringVar(&dnsMode, "dns", "", "keep the preview's records this way: direct, proxied or manual (default: as the app's routes say)")
 	cmd.Flags().BoolVar(&secrets, "secrets", true, "copy the parent's hand-set secrets so the preview can start")
 	a.mutatingFlags(cmd, &planOnly)
 	return cmd
+}
+
+// previewDNS reads the --dns flag: the mode, and whether one was given.
+func previewDNS(flag string) (manifest.DNSMode, bool, error) {
+	switch flag {
+	case "":
+		return "", false, nil
+	case "manual":
+		return manifest.DNSManual, true, nil
+	case "direct":
+		return manifest.DNSDirect, true, nil
+	case "proxied":
+		return manifest.DNSProxied, true, nil
+	}
+	return "", false, fmt.Errorf("--dns %q isn't direct, proxied or manual", flag)
+}
+
+// previewManifestName is where a preview's derived manifest is written,
+// beside the one it was derived from: bedrock.preview.yaml for
+// bedrock.yaml, worker.preview.yml for worker.yml.
+func previewManifestName(name string) string {
+	ext := filepath.Ext(name)
+	return strings.TrimSuffix(name, ext) + ".preview" + ext
 }
 
 func newPreviewLs(a *app) *cobra.Command {
@@ -154,10 +210,12 @@ func newPreviewLs(a *app) *cobra.Command {
 				return err
 			}
 			type row struct {
-				app, parent, hosts string
-				since              time.Duration
+				Preview    string    `json:"preview"`
+				Of         string    `json:"of"`
+				Hosts      []string  `json:"hosts,omitempty"`
+				DeployedAt time.Time `json:"deployed_at"`
 			}
-			var rows []row
+			rows := []row{}
 			for _, rev := range revs {
 				parent, ok := apps.IsPreview(rev.App)
 				if !ok {
@@ -167,11 +225,14 @@ func newPreviewLs(a *app) *cobra.Command {
 				var hosts []string
 				var m manifest.Manifest
 				if err := json.Unmarshal(rev.Manifest, &m); err == nil {
-					hosts = apps.Hosts(&m)
+					hosts = m.Hosts()
 				}
-				rows = append(rows, row{rev.App, parent, strings.Join(hosts, ", "), time.Since(rev.CreatedAt)})
+				rows = append(rows, row{rev.App, parent, hosts, rev.CreatedAt})
 			}
-			sort.Slice(rows, func(i, j int) bool { return rows[i].app < rows[j].app })
+			sort.Slice(rows, func(i, j int) bool { return rows[i].Preview < rows[j].Preview })
+			if a.json {
+				return json.NewEncoder(a.stdout).Encode(rows)
+			}
 			if len(rows) == 0 {
 				fmt.Fprintln(a.stdout, "no previews")
 				return nil
@@ -179,7 +240,7 @@ func newPreviewLs(a *app) *cobra.Command {
 			w := tabwriter.NewWriter(a.stdout, 0, 4, 2, ' ', 0)
 			fmt.Fprintln(w, "PREVIEW\tOF\tHOSTS\tDEPLOYED")
 			for _, r := range rows {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s ago\n", r.app, r.parent, r.hosts, r.since.Round(time.Minute))
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s ago\n", r.Preview, r.Of, strings.Join(r.Hosts, ", "), time.Since(r.DeployedAt).Round(time.Minute))
 			}
 			return w.Flush()
 		},

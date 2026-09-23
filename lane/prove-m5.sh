@@ -12,6 +12,9 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 . "$here/hostinger.env"
+: "${LANE_DOMAIN:?set LANE_DOMAIN in lane/hostinger.env; see hostinger.env.example}"
+: "${LANE_DW_CHAPTERS:?set LANE_DW_CHAPTERS in lane/hostinger.env; see hostinger.env.example}"
+export LANE_DOMAIN LANE_DW_CHAPTERS
 ssh_opts=(-i "$KEY" -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes
   -o UserKnownHostsFile="$here/known_hosts" -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
 box="root@$HOST"
@@ -50,7 +53,7 @@ docker run -d --name lane-minio -p 127.0.0.1:9000:9000 -e MINIO_ROOT_USER=lane -
 sleep 3; curl -sf http://127.0.0.1:9000/minio/health/live >/dev/null && echo 'mail sink and S3 store up'"
 
 echo "== integrations: email to the sink, storage to the S3 store (values never leave the box)"
-run "printf 'smtp_host=127.0.0.1\nsmtp_port=1025\nfrom=bedrock@lane.begam.in\nto=kyle@lane.begam.in\n' | bedrock integration set email"
+run "printf 'smtp_host=127.0.0.1\nsmtp_port=1025\nfrom=bedrock@$LANE_DOMAIN\nto=kyle@$LANE_DOMAIN\n' | bedrock integration set email"
 run "printf 'kind=s3\nendpoint=http://127.0.0.1:9000\nkey_id=lane\nkey=%s\nbucket_prefix=lane\n' \"\$(cat /root/.lane-minio-key)\" | bedrock integration set storage" 2>&1 | mask
 run 'bedrock integration list'
 
@@ -64,7 +67,7 @@ mail_subjects | grep -q "test alert" || fail "the test alert didn't arrive"
 echo "== Dragon Writer gets a verify query for its drills (a redeploy; the build is cached)"
 run "cat > /srv/lane/dragon-writer/bedrock.yaml <<'EOF'
 app: dragon-writer
-description: Olive's writing app
+description: A writing app
 owner: personal
 workloads:
   web:
@@ -75,14 +78,14 @@ workloads:
         DATABASE_URL: postgres://build:build@localhost:5432/build
     port: 3000
     routes:
-      - host: dragonwriter.lane.begam.in
+      - host: dragonwriter.$LANE_DOMAIN
     env:
       NODE_ENV: production
       UPLOAD_DIR: /app/public/uploads
       MAX_UPLOAD_SIZE_MB: \"20\"
       EMAIL_DELIVERY_MODE: log
       ALLOW_PUBLIC_SIGNUP: \"false\"
-      NEXT_PUBLIC_APP_URL: https://dragonwriter.lane.begam.in
+      NEXT_PUBLIC_APP_URL: https://dragonwriter.$LANE_DOMAIN
     health:
       path: /
       timeout: 120s
@@ -96,11 +99,11 @@ data:
     version: \"16\"
   volumes:
     uploads:
-      description: Her drawings
+      description: The drawings people upload
 backup:
   verify:
     sql: select count(*) from story_chapters
-    at_least: 36
+    at_least: $LANE_DW_CHAPTERS
 EOF"
 run 'bedrock deploy /srv/lane/dragon-writer --yes' | quiet | grep -v '^       | \(#\|=>\|npm\|added\|found\|>\|▲\|  \)' | tail -4
 
@@ -122,11 +125,11 @@ echo "== a drill: restore the latest snapshot beside Dragon Writer, start it on 
 run 'bedrock drill dragon-writer --yes' | quiet
 run 'bedrock backups dragon-writer --limit 2'
 run 'bedrock backups dragon-writer --json' | python3 -c '
-import json,sys
+import json,os,sys
 runs=json.load(sys.stdin)
 drill=next(r for r in runs if r["kind"]=="drill")
 assert drill["ok"], drill
-assert "verify query 36" in drill["detail"], drill["detail"]
+assert "verify query "+os.environ["LANE_DW_CHAPTERS"] in drill["detail"], drill["detail"]
 assert "web answered" in drill["detail"], drill["detail"]
 print("drill:", drill["detail"])'
 run 'docker ps -a --format "{{.Names}}" | grep -c drill || true' | grep -qx 0 || fail "the drill left containers behind"
@@ -156,7 +159,7 @@ assert started > $deployed - 5 and newest['ok'], newest
 print('scheduled backup ran at', newest['started_at'])"
 
 echo "== signals: traffic to hello shows up in status"
-for _ in $(seq 40); do fetch -o /dev/null https://hello.lane.begam.in/; done
+for _ in $(seq 40); do fetch -o /dev/null https://hello.$LANE_DOMAIN/; done
 sleep 75
 run 'bedrock status'
 run 'bedrock status --json' | python3 -c '
@@ -170,19 +173,19 @@ print("hello: %d requests, p95 %.0f ms, cpu %.1f%%, memory %d bytes" % (s["reque
 run 'bedrock status hello'
 
 echo "== an outage: hello is stopped; one email says so within minutes, and the external watch reports it too"
-run 'bedrock watch add https://hello.lane.begam.in/'
+run "bedrock watch add https://hello.$LANE_DOMAIN/"
 run 'docker stop $(docker ps -q -f name=bedrock-hello-web) >/dev/null && echo stopped'
 wait_for_mail "hello is down" 420 || fail "no outage email within 7 minutes"
-wait_for_mail "https://hello.lane.begam.in/ is down" 120 || fail "the external watch didn't report the outage"
+wait_for_mail "https://hello.$LANE_DOMAIN/ is down" 120 || fail "the external watch didn't report the outage"
 mail_subjects
 run 'bedrock alerts'
 echo "-- recovery"
 run 'docker start $(docker ps -aq -f name=bedrock-hello-web) >/dev/null && echo started'
 wait_for_mail "hello recovered" 300 || fail "no recovery email within 5 minutes"
-wait_for_mail "https://hello.lane.begam.in/ recovered" 120 || fail "the external watch didn't recover"
+wait_for_mail "https://hello.$LANE_DOMAIN/ recovered" 120 || fail "the external watch didn't recover"
 mail_subjects
 run 'bedrock alerts'
-run 'bedrock watch remove https://hello.lane.begam.in/'
+run "bedrock watch remove https://hello.$LANE_DOMAIN/"
 total=$(mail_subjects | wc -l | tr -d ' ')
 [[ "$total" == "5" ]] || fail "expected exactly 5 emails (test, 2 down, 2 recovered), got $total"
 

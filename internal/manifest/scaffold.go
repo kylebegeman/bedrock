@@ -27,6 +27,11 @@ type Scaffold struct {
 	// Postgres adds a database. Every workload of an app with one is given
 	// DATABASE_URL, so nothing else has to be declared to use it.
 	Postgres bool
+	// Dir is the directory a static site is served from. Default public.
+	Dir string
+	// Existing says the source already holds what the kind runs from, a
+	// Dockerfile or the site's files, so Next needn't ask for it.
+	Existing bool
 }
 
 // DefaultPort is what a web workload is assumed to listen on.
@@ -71,6 +76,9 @@ func (s Scaffold) Check() error {
 	if s.Kind != Cron && s.Schedule != "" {
 		return fmt.Errorf("--schedule is for a cron workload")
 	}
+	if s.Dir != "" && (s.Kind != Static || strings.HasPrefix(s.Dir, "/") || strings.Contains(s.Dir, "..")) {
+		return fmt.Errorf("--dir %q must be a directory inside a static site's source", s.Dir)
+	}
 	if s.Schedule != "" {
 		if _, err := ParseSchedule(s.Schedule); err != nil {
 			return fmt.Errorf("--schedule: %w", err)
@@ -101,11 +109,15 @@ func (s Scaffold) Render() ([]byte, error) {
 
 	switch s.Kind {
 	case Static:
+		dir := s.Dir
+		if dir == "" {
+			dir = "public"
+		}
 		w("  # A static workload serves files straight from the source. It has\n")
 		w("  # no image and no port; the edge serves the directory itself.\n")
 		w("  pages:\n")
 		w("    kind: static\n")
-		w("    dir: public\n")
+		w("    dir: %s\n", dir)
 		w("    routes:\n")
 		w("      - host: %s\n", s.Host)
 	case Web:
@@ -217,10 +229,15 @@ func (s Scaffold) Render() ([]byte, error) {
 // need it. An empty result means the app is ready to deploy as written.
 func (s Scaffold) Next() []string {
 	var next []string
-	switch s.Kind {
-	case Static:
-		next = append(next, "put the site's files in ./public")
-	case Web, Worker, Cron:
+	switch {
+	case s.Existing:
+	case s.Kind == Static:
+		dir := s.Dir
+		if dir == "" {
+			dir = "public"
+		}
+		next = append(next, "put the site's files in ./"+dir)
+	default:
 		next = append(next, "write a ./Dockerfile that builds the app")
 	}
 	if s.Kind == Web {

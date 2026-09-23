@@ -40,12 +40,6 @@ func TestBackupRunsRememberTheLastGoodOne(t *testing.T) {
 	if none, _ := s.LastGoodBackupRun(ctx, "other", BackupRunBackup); none != nil {
 		t.Fatal("found a run for an unknown app")
 	}
-	if err := s.ForgetBackupRuns(ctx, "dw"); err != nil {
-		t.Fatal(err)
-	}
-	if all, _ := s.BackupRuns(ctx, "dw", "", 10); len(all) != 0 {
-		t.Fatal("runs not forgotten")
-	}
 }
 
 func TestIncidentsOpenUpdateAndResolve(t *testing.T) {

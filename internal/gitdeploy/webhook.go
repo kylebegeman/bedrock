@@ -15,25 +15,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/kylebegeman/bedrock/internal/app"
+	"github.com/kylebegeman/bedrock/internal/edge"
 	"github.com/kylebegeman/bedrock/internal/integration"
 	"github.com/kylebegeman/bedrock/internal/kernel"
 	"github.com/kylebegeman/bedrock/internal/secrets"
 	"github.com/kylebegeman/bedrock/internal/state"
 )
-
-// HookPath is where webhooks arrive, on the app's own first host.
-const HookPath = "/_bedrock/hook"
-
-// secretName names an app's webhook secret and deploy key in bedrock's own
-// secrets. App names have no underscores, so the mapping is one to one.
-func secretName(kind, app string) string {
-	return kind + "_" + strings.ToUpper(strings.ReplaceAll(app, "-", "_"))
-}
 
 // ValidRepo checks a repository URL bedrock can fetch.
 func ValidRepo(repo string) error {
@@ -44,6 +38,19 @@ func ValidRepo(repo string) error {
 		return nil
 	}
 	return fmt.Errorf("%q isn't a repository URL bedrock can fetch (https://, git@host:owner/repo.git, ssh:// or file:///)", repo)
+}
+
+var branchPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
+
+// ValidBranch checks a branch name before it goes on a git command line:
+// one that starts with a hyphen would be read as a flag, and git refuses
+// the rest.
+func ValidBranch(branch string) error {
+	switch {
+	case !branchPattern.MatchString(branch), strings.Contains(branch, ".."), strings.HasSuffix(branch, "/"), strings.HasSuffix(branch, ".lock"):
+		return fmt.Errorf("%q isn't a branch name", branch)
+	}
+	return nil
 }
 
 func usesSSH(repo string) bool {
@@ -66,19 +73,22 @@ func Configure(ctx context.Context, store *state.Store, sec *secrets.Store, appN
 	if err := ValidRepo(repo); err != nil {
 		return nil, err
 	}
+	if err := ValidBranch(branch); err != nil {
+		return nil, err
+	}
 	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return nil, err
 	}
-	w := &Webhook{URL: "https://" + host + HookPath, Secret: hex.EncodeToString(b[:])}
+	w := &Webhook{URL: "https://" + host + edge.HookPath, Secret: hex.EncodeToString(b[:])}
 	secret := w.Secret
-	changes := map[string]*string{secretName("WEBHOOK_SECRET", appName): &secret, secretName("DEPLOY_KEY", appName): nil}
+	changes := map[string]*string{integration.WebhookSecretName(appName): &secret, integration.DeployKeyName(appName): nil}
 	if usesSSH(repo) {
 		private, public, err := newDeployKey(appName)
 		if err != nil {
 			return nil, err
 		}
-		changes[secretName("DEPLOY_KEY", appName)] = &private
+		changes[integration.DeployKeyName(appName)] = &private
 		w.DeployKey = public
 	}
 	if _, err := sec.SetAll(integration.App, changes); err != nil {
@@ -95,7 +105,7 @@ func Disable(ctx context.Context, store *state.Store, sec *secrets.Store, appNam
 	if err := store.RemoveGitHook(ctx, appName); err != nil {
 		return err
 	}
-	_, err := sec.SetAll(integration.App, map[string]*string{secretName("WEBHOOK_SECRET", appName): nil, secretName("DEPLOY_KEY", appName): nil})
+	_, err := sec.SetAll(integration.App, map[string]*string{integration.WebhookSecretName(appName): nil, integration.DeployKeyName(appName): nil})
 	return err
 }
 
@@ -165,7 +175,7 @@ type pushEvent struct {
 
 // ServeHTTP implements http.Handler.
 func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodPost || strings.TrimSuffix(req.URL.Path, "/") != HookPath {
+	if req.Method != http.MethodPost || strings.TrimSuffix(req.URL.Path, "/") != edge.HookPath {
 		http.NotFound(w, req)
 		return
 	}
@@ -194,8 +204,8 @@ func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "secrets unavailable", http.StatusInternalServerError)
 		return
 	}
-	if !VerifySignature(values[secretName("WEBHOOK_SECRET", appName)], body, req.Header.Get("X-Hub-Signature-256")) {
-		r.Log("webhook for %s: bad signature from %s", appName, req.Header.Get("X-Forwarded-For"))
+	if !VerifySignature(values[integration.WebhookSecretName(appName)], body, req.Header.Get("X-Hub-Signature-256")) {
+		r.Log("webhook for %s: bad signature from %s", appName, logSafe(req.Header.Get("X-Forwarded-For")))
 		http.Error(w, "bad signature", http.StatusUnauthorized)
 		return
 	}
@@ -231,6 +241,21 @@ func short(s string) string {
 	return s
 }
 
+// logSafe bounds a value from a request before it goes in the log, so a
+// caller can't write lines of their own there.
+func logSafe(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 {
+			return ' '
+		}
+		return r
+	}, s)
+	if len(s) > 80 {
+		s = s[:80] + "..."
+	}
+	return s
+}
+
 // appFor finds the app a host belongs to.
 func (r *Receiver) appFor(ctx context.Context, host string) (string, error) {
 	routes, err := app.Routes(ctx, r.Store)
@@ -262,6 +287,15 @@ func (r *Receiver) enqueue(appName string) {
 }
 
 func (r *Receiver) work(appName string) {
+	defer func() {
+		if p := recover(); p != nil {
+			r.Log("webhook deploy of %s: panic: %v\n%s", appName, p, debug.Stack())
+			r.mu.Lock()
+			delete(r.running, appName)
+			delete(r.pending, appName)
+			r.mu.Unlock()
+		}
+	}()
 	for {
 		r.deployOnce(appName)
 		r.mu.Lock()
@@ -355,11 +389,14 @@ func (r *Receiver) fetch(ctx context.Context, h state.GitHook) (string, string, 
 		if err != nil {
 			return "", "", err
 		}
-		key := values[secretName("DEPLOY_KEY", h.App)]
+		key := values[integration.DeployKeyName(h.App)]
 		if key == "" {
 			return "", "", errors.New("no deploy key; run bedrock git webhook again")
 		}
+		// Made afresh, so the file has the mode asked for and not one an
+		// earlier bedrock left it with.
 		keyFile := filepath.Join(r.SourcesDir, "."+h.App+".key")
+		_ = os.Remove(keyFile)
 		if err := os.WriteFile(keyFile, []byte(key), 0o600); err != nil {
 			return "", "", err
 		}

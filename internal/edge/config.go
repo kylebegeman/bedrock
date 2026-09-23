@@ -14,8 +14,9 @@ type Route struct {
 	Host string
 	// Path is a normalized prefix ending in "/"; "/" is the catch-all.
 	Path string
-	// Dial is the upstream as Caddy reaches it on the edge network,
-	// such as bedrock-kylebegeman-site-3f2a9c:8080.
+	// Dial is the upstream as Caddy reaches it on the edge network, such as
+	// bedrock-kylebegeman-site-3f2a9c:8080, or a Unix socket (unix//path)
+	// for bedrock's own endpoints.
 	Dial string
 	// Guard, when set, is asked about every request before the upstream
 	// sees it. A route with no Guard is open.
@@ -24,8 +25,8 @@ type Route struct {
 
 // Guard is an endpoint the edge asks whether a request may proceed.
 //
-// The answer is the status code and nothing else: any 2xx lets the request
-// through to the app, and anything else is returned to the browser as it
+// A 2xx carrying the named header lets the request through to the app;
+// anything else the endpoint answers is returned to the browser as it
 // stands. That is what makes a redirect to a sign-in page work without the
 // edge knowing anything about signing in.
 //
@@ -134,9 +135,6 @@ func Config(routes []Route) ([]byte, error) {
 
 // Initial is the configuration the edge starts with before any app is
 // deployed: an admin API bedrock can reach, and nothing to serve.
-//
-// A route's Dial may be a Unix socket (unix//path), for bedrock's own
-// endpoints.
 func Initial() []byte {
 	b, _ := Config(nil)
 	return b

@@ -35,11 +35,6 @@ func NewAdmin() *Admin {
 	return &Admin{Base: "http://localhost", BootFile: BootFile, http: &http.Client{Timeout: 15 * time.Second, Transport: transport}}
 }
 
-// NewAdminAt returns a client for an HTTP base URL, for tests.
-func NewAdminAt(base, bootFile string) *Admin {
-	return &Admin{Base: base, BootFile: bootFile, http: &http.Client{Timeout: 15 * time.Second}}
-}
-
 // Load replaces the whole configuration atomically, then keeps it as the
 // configuration the edge starts with.
 func (a *Admin) Load(ctx context.Context, config []byte) error {

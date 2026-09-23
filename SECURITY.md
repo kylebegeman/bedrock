@@ -1,32 +1,45 @@
 # Security Policy
 
-## Supported Versions
+## Supported versions
 
-Bedrock is pre-1.0 infrastructure software. Security fixes target the default
-branch first. Tagged release support will be documented once public releases are
-cut.
+Bedrock is pre-1.0. Fixes land on the default branch, `next`, and ship as
+the next 0.7.x patch release; there are no backports.
 
-## Reporting A Vulnerability
+## Reporting a vulnerability
 
-Do not open a public issue for suspected vulnerabilities. Use GitHub private
-vulnerability reporting when it is enabled for the repository. If it is not
-enabled, open a minimal public issue asking the maintainer to enable private
-security reporting, without including exploit details or sensitive data.
+Do not open a public issue for a suspected vulnerability. Use GitHub's
+private vulnerability reporting on the repository; if it is not enabled,
+open a minimal public issue asking for it to be, with no details.
 
-Please include:
+Please include the version or commit, the command or component, the impact
+and likely path, reproduction steps using fixture data, and whether any
+secret, token, hostname or production data may have been exposed.
 
-- affected version, commit, or branch
-- component or command involved
-- impact and likely exploit path
-- reproduction steps using fixture data where possible
-- whether any secret, token, host, or production data may have been exposed
+Secret exposure, command injection, a restore that could replace the keys
+data was written with, a deploy that runs without the plan that was
+approved, a guarded route served open, and DNS or edge changes that reach
+another machine's traffic are treated as high priority.
 
-Bedrock treats secret exposure, command injection, unsafe restore behavior,
-provider mutation bypasses, receipt redaction gaps, and deploy confirmation
-bypasses as high-priority security issues.
+## What to know about the design
 
-## Secret Handling
+- Secrets are sealed with age to a key the machine holds at
+  `/etc/bedrock/secrets.key`, mode 0600. Values never appear in arguments,
+  logs, receipts or backups; only names do. The recovery identity is shown
+  once, when the key is made.
+- Releases are static binaries published with `SHA256SUMS`. `bedrock
+  upgrade --version` checks a download against them; `--sha256` pins a
+  checksum from reviewed source, which is what proves where it came from.
+- The daemon listens on `/run/bedrock/bedrock.sock`, mode 0660, owned by
+  root and the `bedrock` group that receives pushes. The edge's admin API is
+  a Unix socket only the machine reaches.
+- A backup runs restic in a container. The repository password and the
+  storage credentials reach it in a file only root reads, mounted read-only
+  for the length of the run and removed with it, never in the container's
+  environment, which Docker would keep on disk and show to anyone who can
+  inspect the container.
 
-Never submit real secrets, `.env` values, private keys, provider tokens, host
-IPs, personal paths, or production runtime payloads. Use secret reference names,
-fixture values, and `example.com` domains in public material.
+## Secret handling in contributions
+
+Never submit real secrets, `.env` values, private keys, provider tokens,
+host addresses, personal paths or production payloads. Use secret names,
+fixture values and `example.com` domains.

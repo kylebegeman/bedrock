@@ -1,24 +1,22 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 
 	apps "github.com/kylebegeman/bedrock/internal/app"
 	"github.com/kylebegeman/bedrock/internal/docker"
 	"github.com/kylebegeman/bedrock/internal/edge"
-	"github.com/kylebegeman/bedrock/internal/integration"
 	"github.com/kylebegeman/bedrock/internal/manifest"
 	"github.com/kylebegeman/bedrock/internal/signals"
 	"github.com/kylebegeman/bedrock/internal/state"
@@ -173,6 +171,7 @@ func newLs(a *app) *cobra.Command {
 	}
 }
 
+// short7 is a commit as git shows it: its first seven characters.
 func short7(s string) string {
 	if len(s) > 7 {
 		return s[:7]
@@ -201,10 +200,10 @@ func machineLine(ctx context.Context, hostname string, open []state.Incident) st
 		engine.Close()
 	}
 	if free, total, ok := watch.DiskFree("/"); ok {
-		parts = append(parts, fmt.Sprintf("%s free of %s", watch.HumanBytes(free), watch.HumanBytes(total)))
+		parts = append(parts, fmt.Sprintf("%s free of %s", apps.HumanBytes(int64(free)), apps.HumanBytes(int64(total))))
 	}
 	if avail, total, ok := watch.Memory(); ok {
-		parts = append(parts, fmt.Sprintf("%s of %s memory available", watch.HumanBytes(avail), watch.HumanBytes(total)))
+		parts = append(parts, fmt.Sprintf("%s of %s memory available", apps.HumanBytes(int64(avail)), apps.HumanBytes(int64(total))))
 	}
 	if load, err := os.ReadFile("/proc/loadavg"); err == nil {
 		if f := strings.Fields(string(load)); len(f) >= 3 {
@@ -374,14 +373,7 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
+func sortedKeys[V any](m map[string]V) []string { return slices.Sorted(maps.Keys(m)) }
 
 // healthWord is an app's health as the watcher last saw it.
 func healthWord(r appRow, openBy map[string]state.Incident) (string, *state.Incident) {
@@ -446,380 +438,5 @@ func bytesWord(n int64) string {
 	if n <= 0 {
 		return "-"
 	}
-	return watch.HumanBytes(uint64(n))
-}
-
-func newBackup(a *app) *cobra.Command {
-	var planOnly bool
-	cmd := &cobra.Command{
-		Use:   "backup <app>",
-		Short: "Back the app's data up to its bucket now. \"bedrock\" backs up the machine's own state.",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.operate(cmd.Context(), apps.BackupKind, apps.BackupInput{App: args[0]}, planOnly)
-		},
-	}
-	a.mutatingFlags(cmd, &planOnly)
-	return cmd
-}
-
-func newDrill(a *app) *cobra.Command {
-	var (
-		planOnly bool
-		snapshot string
-	)
-	cmd := &cobra.Command{
-		Use:   "drill <app>",
-		Short: "Prove a backup: restore it beside the app, start the app on it, check, clean up.",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.operate(cmd.Context(), apps.DrillKind, apps.DrillInput{App: args[0], Snapshot: snapshot}, planOnly)
-		},
-	}
-	cmd.Flags().StringVar(&snapshot, "snapshot", "", "a snapshot id instead of the latest")
-	a.mutatingFlags(cmd, &planOnly)
-	return cmd
-}
-
-func newRestore(a *app) *cobra.Command {
-	var (
-		planOnly bool
-		snapshot string
-	)
-	cmd := &cobra.Command{
-		Use:   "restore <app>",
-		Short: "Bring an app's data back from its bucket onto this machine, before deploying it here.",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.operate(cmd.Context(), apps.RestoreKind, apps.RestoreInput{App: args[0], Snapshot: snapshot}, planOnly)
-		},
-	}
-	cmd.Flags().StringVar(&snapshot, "snapshot", "", "a snapshot id instead of the latest")
-	a.mutatingFlags(cmd, &planOnly)
-	return cmd
-}
-
-func newBackups(a *app) *cobra.Command {
-	var limit int
-	cmd := &cobra.Command{
-		Use:   "backups [app]",
-		Short: "List backups, drills and restores, newest first.",
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			store, err := a.openState()
-			if err != nil {
-				return err
-			}
-			defer store.Close()
-			runs, err := store.BackupRuns(cmd.Context(), optional(args, 0), "", limit)
-			if err != nil {
-				return err
-			}
-			if a.json {
-				return json.NewEncoder(a.stdout).Encode(runs)
-			}
-			if len(runs) == 0 {
-				fmt.Fprintln(a.stdout, "no backups yet")
-				return nil
-			}
-			w := tabwriter.NewWriter(a.stdout, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(w, "APP\tKIND\tSTARTED\tTOOK\tRESULT\tSNAPSHOT\tDETAIL")
-			for _, r := range runs {
-				result, took, detail := "running", "", r.Detail
-				if r.Finished() {
-					took = r.FinishedAt.Sub(r.StartedAt).Round(time.Second).String()
-					if r.OK {
-						result = "ok"
-					} else {
-						result, detail = "FAILED", r.Error
-					}
-				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.App, r.Kind, r.StartedAt.Local().Format("2006-01-02 15:04:05"), took, result, orDash(r.Snapshot), detail)
-			}
-			return w.Flush()
-		},
-	}
-	cmd.Flags().IntVar(&limit, "limit", 20, "how many to list")
-	return cmd
-}
-
-func newAlerts(a *app) *cobra.Command {
-	var limit int
-	cmd := &cobra.Command{
-		Use:   "alerts",
-		Short: "What is wrong right now, and what was recently.",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := cmd.Context()
-			store, err := a.openState()
-			if err != nil {
-				return err
-			}
-			defer store.Close()
-			all, err := store.Incidents(ctx, limit)
-			if err != nil {
-				return err
-			}
-			if a.json {
-				return json.NewEncoder(a.stdout).Encode(all)
-			}
-			var open, past []state.Incident
-			for _, inc := range all {
-				if inc.Open() {
-					open = append(open, inc)
-				} else {
-					past = append(past, inc)
-				}
-			}
-			if len(open) == 0 {
-				fmt.Fprintln(a.stdout, "nothing wrong right now")
-			}
-			for _, inc := range open {
-				fmt.Fprintf(a.stdout, "OPEN  %s (%s) since %s: %s\n", inc.Subject, inc.Severity, inc.OpenedAt.Local().Format("2006-01-02 15:04"), inc.Message)
-				switch {
-				case inc.NotifyError != "":
-					fmt.Fprintf(a.stdout, "      NOT DELIVERED: %s\n", inc.NotifyError)
-				case !inc.NotifiedAt.IsZero():
-					fmt.Fprintf(a.stdout, "      told you at %s\n", inc.NotifiedAt.Local().Format("15:04"))
-				}
-			}
-			for _, inc := range past {
-				fmt.Fprintf(a.stdout, "past  %s: %s, from %s for %s\n", inc.Subject, inc.Message, inc.OpenedAt.Local().Format("2006-01-02 15:04"), inc.ResolvedAt.Sub(inc.OpenedAt).Round(time.Minute))
-			}
-			return nil
-		},
-	}
-	cmd.Flags().IntVar(&limit, "limit", 20, "how many to list, open ones included")
-	test := &cobra.Command{
-		Use:   "test",
-		Short: "Send a test alert through the email integration.",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			store, err := a.openState()
-			if err != nil {
-				return err
-			}
-			defer store.Close()
-			hostname, _ := os.Hostname()
-			n := watch.EmailNotifier{Secrets: a.secretsStore(), Store: store}
-			if err := n.Test(cmd.Context(), hostname); err != nil {
-				return err
-			}
-			cfg, _ := integration.LoadEmail(a.secretsStore())
-			fmt.Fprintf(a.stdout, "test alert sent to %s\n", strings.Join(cfg.To, ", "))
-			return nil
-		},
-	}
-	cmd.AddCommand(test)
-	return cmd
-}
-
-func newWatch(a *app) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "watch",
-		Short: "Public URLs this machine checks from the outside, such as the other machine's sites.",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			store, err := a.openState()
-			if err != nil {
-				return err
-			}
-			defer store.Close()
-			ws, err := store.Watches(cmd.Context())
-			if err != nil {
-				return err
-			}
-			if a.json {
-				return json.NewEncoder(a.stdout).Encode(ws)
-			}
-			if len(ws) == 0 {
-				fmt.Fprintln(a.stdout, "watching nothing; add a URL with bedrock watch add https://...")
-			}
-			for _, w := range ws {
-				fmt.Fprintf(a.stdout, "%s (since %s)\n", w.URL, w.AddedAt.Local().Format("2006-01-02"))
-			}
-			return nil
-		},
-	}
-	add := &cobra.Command{
-		Use:   "add <url>",
-		Short: "Check a URL every minute and alert when it stops answering 200.",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			url := args[0]
-			if !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "http://") {
-				return errors.New("the URL must start with https:// or http://")
-			}
-			store, err := a.openState()
-			if err != nil {
-				return err
-			}
-			defer store.Close()
-			if err := store.AddWatch(cmd.Context(), url, time.Now().UTC()); err != nil {
-				return err
-			}
-			fmt.Fprintf(a.stdout, "watching %s\n", url)
-			return nil
-		},
-	}
-	remove := &cobra.Command{
-		Use:   "remove <url>",
-		Short: "Stop checking a URL.",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			store, err := a.openState()
-			if err != nil {
-				return err
-			}
-			defer store.Close()
-			if err := store.RemoveWatch(cmd.Context(), args[0]); errors.Is(err, state.ErrNotFound) {
-				return fmt.Errorf("%s wasn't being watched", args[0])
-			} else if err != nil {
-				return err
-			}
-			fmt.Fprintf(a.stdout, "no longer watching %s\n", args[0])
-			return nil
-		},
-	}
-	cmd.AddCommand(add, remove)
-	return cmd
-}
-
-func newIntegration(a *app) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "integration",
-		Short: "The credentials bedrock itself uses: storage for backups, email for alerts, Cloudflare for DNS.",
-	}
-	set := &cobra.Command{
-		Use:   "set <name>",
-		Short: "Type an integration's values in, or pipe field=value lines. Values are sealed and never shown.",
-		Long:  "Integrations: " + strings.Join(integration.Names(), ", ") + ". In a terminal each field is asked for; otherwise stdin holds one field=value per line.",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			def, ok := integration.Lookup(args[0])
-			if !ok {
-				return fmt.Errorf("no integration named %q; there are %s", args[0], strings.Join(integration.Names(), ", "))
-			}
-			store := a.secretsStore()
-			if err := a.ensureSecretsKey(store); err != nil {
-				return err
-			}
-			values, err := readIntegrationValues(a, def)
-			if err != nil {
-				return err
-			}
-			version, generated, err := integration.Set(store, def.Name, values)
-			if err != nil {
-				return err
-			}
-			for field, value := range generated {
-				fmt.Fprintf(a.stderr, "\nbedrock made a %s for %s. It is shown once, here, and nowhere else. Keep it with the recovery identity in your password manager; a new machine needs it to read these backups:\n\n  %s\n\n", field, def.Name, value)
-			}
-			fmt.Fprintf(a.stdout, "%s set (bedrock's secrets version %d)\n", def.Name, version)
-			return nil
-		},
-	}
-	list := &cobra.Command{
-		Use:   "list",
-		Short: "List the integrations, which are set, and when they were last used.",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			statuses, err := integration.List(a.secretsStore())
-			if err != nil {
-				return err
-			}
-			uses := map[string]state.IntegrationUse{}
-			if store, err := a.openState(); err == nil {
-				uses, _ = store.IntegrationUses(cmd.Context())
-				store.Close()
-			}
-			if a.json {
-				return json.NewEncoder(a.stdout).Encode(struct {
-					Integrations []integration.Status            `json:"integrations"`
-					Uses         map[string]state.IntegrationUse `json:"uses"`
-				}{statuses, uses})
-			}
-			w := tabwriter.NewWriter(a.stdout, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(w, "NAME\tFOR\tSET\tFIELDS\tLAST USED")
-			for _, st := range statuses {
-				set, fields, used := "no", "-", "-"
-				if st.Set {
-					set = st.At.Local().Format("2006-01-02 15:04")
-					var fs []string
-					for _, k := range sortedKeys(st.Fields) {
-						fs = append(fs, k+"="+st.Fields[k])
-					}
-					fields = strings.Join(fs, " ")
-				}
-				if u, ok := uses[st.Name]; ok {
-					used = fmt.Sprintf("%s (%s)", agoWord(u.UsedAt, time.Now().UTC()), u.Purpose)
-				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", st.Name, st.Purpose, set, fields, used)
-			}
-			return w.Flush()
-		},
-	}
-	remove := &cobra.Command{
-		Use:   "remove <name>",
-		Short: "Drop an integration's values.",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			version, err := integration.Remove(a.secretsStore(), args[0])
-			if err != nil {
-				return err
-			}
-			fmt.Fprintf(a.stdout, "%s removed (bedrock's secrets version %d)\n", args[0], version)
-			return nil
-		},
-	}
-	cmd.AddCommand(set, list, remove)
-	return cmd
-}
-
-// readIntegrationValues asks for each field in a terminal, hiding
-// secrets, or reads field=value lines from stdin otherwise.
-func readIntegrationValues(a *app, def integration.Definition) (map[string]string, error) {
-	values := map[string]string{}
-	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
-		sc := bufio.NewScanner(os.Stdin)
-		for sc.Scan() {
-			line := strings.TrimSpace(sc.Text())
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			k, v, ok := strings.Cut(line, "=")
-			if !ok {
-				return nil, fmt.Errorf("expected field=value, got %q", line)
-			}
-			values[strings.TrimSpace(k)] = strings.TrimSpace(v)
-		}
-		return values, sc.Err()
-	}
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Fprintf(a.stderr, "%s: %s\n", def.Name, def.Purpose)
-	for _, f := range def.Fields {
-		prompt := f.Prompt
-		if f.Default != "" {
-			prompt += " [" + f.Default + "]"
-		} else if f.Optional {
-			prompt += " (optional)"
-		}
-		fmt.Fprintf(a.stderr, "  %s: ", prompt)
-		if f.Secret {
-			raw, err := term.ReadPassword(fd)
-			fmt.Fprintln(a.stderr)
-			if err != nil {
-				return nil, err
-			}
-			values[f.Name] = string(raw)
-			continue
-		}
-		line, err := reader.ReadString('\n')
-		if err != nil && line == "" {
-			return nil, err
-		}
-		values[f.Name] = strings.TrimSpace(line)
-	}
-	return values, nil
+	return apps.HumanBytes(n)
 }

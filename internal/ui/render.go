@@ -11,6 +11,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/kylebegeman/bedrock/internal/kernel"
 	"github.com/kylebegeman/bedrock/internal/state"
 )
@@ -23,14 +25,19 @@ type Renderer struct {
 	width int
 	enc   *json.Encoder
 	live  bool // a step line is on screen and can be rewritten
-	names map[int]string
 }
 
 // New returns a renderer. In a terminal (tty) a running step is one line
-// that updates in place; otherwise every event is its own line. With
-// jsonMode each event is written as one JSON object per line.
+// that updates in place, cut to the terminal's width; otherwise every
+// event is its own line. With jsonMode each event is written as one JSON
+// object per line.
 func New(out io.Writer, tty, jsonMode bool) *Renderer {
-	r := &Renderer{out: out, tty: tty, json: jsonMode, width: 100, names: map[int]string{}}
+	r := &Renderer{out: out, tty: tty, json: jsonMode, width: 100}
+	if f, ok := out.(*os.File); ok && tty {
+		if width, _, err := term.GetSize(int(f.Fd())); err == nil && width > 20 {
+			r.width = width
+		}
+	}
 	if jsonMode {
 		r.enc = json.NewEncoder(out)
 	}
@@ -64,7 +71,6 @@ func (r *Renderer) Event(ev kernel.Event) {
 		if ev.Step.Undoing {
 			verb = "undo"
 		}
-		r.names[ev.Step.Index] = ev.Step.Name
 		r.running(fmt.Sprintf("  %-4s %s", verb, ev.Step.Name))
 	case kernel.EventStepOutput:
 		if ev.Step == nil {
@@ -95,12 +101,10 @@ func (r *Renderer) Event(ev kernel.Event) {
 
 func (r *Renderer) finished(st kernel.StepView) {
 	word := "ok"
-	switch {
-	case st.Status == state.StepFailed && st.Undoing:
+	switch st.Status {
+	case state.StepFailed:
 		word = "fail"
-	case st.Status == state.StepFailed:
-		word = "fail"
-	case st.Status == state.StepUndone:
+	case state.StepUndone:
 		word = "undid"
 	}
 	line := fmt.Sprintf("  %-4s %s (%s)", word, st.Name, Duration(st.Duration))
@@ -138,8 +142,8 @@ func (r *Renderer) running(line string) {
 		r.println(line)
 		return
 	}
-	if len(line) > r.width {
-		line = line[:r.width-1] + "…"
+	if runes := []rune(line); len(runes) > r.width {
+		line = string(runes[:r.width-1]) + "…"
 	}
 	fmt.Fprint(r.out, "\r\033[K"+line)
 	r.live = true
@@ -211,6 +215,9 @@ func (r *Renderer) Receipt(rc *kernel.Receipt) {
 	for _, st := range rc.Steps {
 		word := map[state.StepStatus]string{state.StepPending: "-", state.StepRunning: "...", state.StepSucceeded: "ok", state.StepFailed: "fail", state.StepUndone: "undid"}[st.Status]
 		s := fmt.Sprintf("  %-4s %s", word, orName(st.Change, st.Name))
+		if st.Note != "" {
+			s += " (" + st.Note + ")"
+		}
 		if st.Duration > 0 {
 			s += fmt.Sprintf(" (%s)", Duration(st.Duration))
 		}

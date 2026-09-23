@@ -39,19 +39,5 @@ func (e EmailNotifier) Notify(ctx context.Context, n Notice) error {
 
 // Test sends a test message through the email integration.
 func (e EmailNotifier) Test(ctx context.Context, hostname string) error {
-	cfg, err := integration.LoadEmail(e.Secrets)
-	if err != nil {
-		return err
-	}
-	if err := e.Notify(ctx, Notice{Subject: hostname + ": test alert", Body: fmt.Sprintf("This is bedrock on %s checking that alerts reach you. Nothing is wrong.\n", hostname)}); err != nil {
-		return err
-	}
-	_ = cfg
-	return nil
-}
-
-// Configured reports whether the email integration is set up.
-func (e EmailNotifier) Configured() bool {
-	_, err := integration.LoadEmail(e.Secrets)
-	return err == nil
+	return e.Notify(ctx, Notice{Subject: hostname + ": test alert", Body: fmt.Sprintf("This is bedrock on %s checking that alerts reach you. Nothing is wrong.\n", hostname)})
 }

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Cloudflare itself, on the lane. The box's cloudflare integration holds a
-# real token (Zone read and DNS edit on begam.in, usable only from the box's
+# real token (Zone read and DNS edit on the zone, usable only from the box's
 # two addresses), which its owner typed in on the box. Deploys make and
 # remove real records, the audit reads the real zone, and nothing outside
-# lane.begam.in is written. The token never leaves the box.
+# $LANE_DOMAIN is written. The token never leaves the box.
 #
 # Needs the lane after prove-m6.sh, with the stand-in gone.
 set -euo pipefail
@@ -11,6 +11,8 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 . "$here/hostinger.env"
+: "${LANE_DOMAIN:?set LANE_DOMAIN in lane/hostinger.env; see hostinger.env.example}"
+export LANE_DOMAIN
 ssh_opts=(-i "$KEY" -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes
   -o UserKnownHostsFile="$here/known_hosts" -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
 box="root@$HOST"
@@ -34,48 +36,48 @@ echo "== what the real zone says about every routed host"
 run 'bedrock dns'
 
 echo "== begamin deploys and keeps its two records in the real zone"
-run 'bedrock deploy /srv/lane/begamin --yes' | quiet | grep -E "api.lane|go.lane|succeeded|failed"
-for h in api.lane.begam.in go.lane.begam.in; do
+run 'bedrock deploy /srv/lane/begamin --yes' | quiet | grep -E "api\.|go\.|succeeded|failed"
+for h in api.$LANE_DOMAIN go.$LANE_DOMAIN; do
   v=$(verdict $h); echo "-- $h: $v"; [[ "$v" == ok ]] || fail "$h's record isn't bedrock's in the real zone"
 done
 
 echo "== a route's record follows it: made with the route, removed when the route goes"
-run "grep -q dnstest /srv/lane/hello/bedrock.yaml || sed -i 's|      - host: hello.lane.begam.in|      - host: hello.lane.begam.in\n      - host: dnstest.lane.begam.in\n        dns: direct|' /srv/lane/hello/bedrock.yaml"
+run "grep -q dnstest /srv/lane/hello/bedrock.yaml || sed -i 's|      - host: hello.$LANE_DOMAIN|      - host: hello.$LANE_DOMAIN\n      - host: dnstest.$LANE_DOMAIN\n        dns: direct|' /srv/lane/hello/bedrock.yaml"
 run 'bedrock deploy /srv/lane/hello --yes' | quiet | grep -E "dnstest|succeeded|failed"
-[[ "$(verdict dnstest.lane.begam.in)" == ok ]] || fail "dnstest.lane.begam.in has no record of bedrock's"
-echo "-- from the outside: $(fetch https://dnstest.lane.begam.in/)"
-run "sed -i '/dnstest.lane.begam.in/,+1d' /srv/lane/hello/bedrock.yaml && bedrock deploy /srv/lane/hello --yes" | quiet | grep -E "record removed|succeeded|failed"
-audit_mentions dnstest.lane.begam.in && fail "dnstest.lane.begam.in's record outlived its route"
-echo "-- the audit finds nothing left of dnstest.lane.begam.in"
+[[ "$(verdict dnstest.$LANE_DOMAIN)" == ok ]] || fail "dnstest.$LANE_DOMAIN has no record of bedrock's"
+echo "-- from the outside: $(fetch https://dnstest.$LANE_DOMAIN/)"
+run "sed -i '/dnstest.$LANE_DOMAIN/,+1d' /srv/lane/hello/bedrock.yaml && bedrock deploy /srv/lane/hello --yes" | quiet | grep -E "record removed|succeeded|failed"
+audit_mentions dnstest.$LANE_DOMAIN && fail "dnstest.$LANE_DOMAIN's record outlived its route"
+echo "-- the audit finds nothing left of dnstest.$LANE_DOMAIN"
 
 echo "== removing begamin removes its records; deploying it again brings them back"
 run 'bedrock remove begamin --yes' | quiet | grep -E "record|forgotten"
-for h in api.lane.begam.in go.lane.begam.in; do audit_mentions $h && fail "$h's record outlived begamin"; done
+for h in api.$LANE_DOMAIN go.$LANE_DOMAIN; do audit_mentions $h && fail "$h's record outlived begamin"; done
 echo "-- the audit finds neither record"
 run 'bedrock deploy /srv/lane/begamin --yes' | quiet | grep -E "made|succeeded|failed"
-[[ "$(verdict api.lane.begam.in)" == ok ]] || fail "api.lane.begam.in's record didn't come back"
-echo "-- from the outside: $(fetch -o /dev/null -w '%{http_code}' https://api.lane.begam.in/healthz) at https://api.lane.begam.in/healthz"
+[[ "$(verdict api.$LANE_DOMAIN)" == ok ]] || fail "api.$LANE_DOMAIN's record didn't come back"
+echo "-- from the outside: $(fetch -o /dev/null -w '%{http_code}' https://api.$LANE_DOMAIN/healthz) at https://api.$LANE_DOMAIN/healthz"
 
 echo "== exploratory: a proxied route, reached through Cloudflare's own addresses"
-# Two levels below begam.in, so Cloudflare's free certificate doesn't cover
+# Two levels below the zone, so Cloudflare's free certificate doesn't cover
 # it: plain HTTP goes through the proxy, HTTPS fails at Cloudflare's edge,
 # and bedrock says so. A name one level below the zone is what proxied suits.
-run "grep -q proxytest /srv/lane/hello/bedrock.yaml || sed -i 's|      - host: hello.lane.begam.in|      - host: hello.lane.begam.in\n      - host: proxytest.lane.begam.in\n        dns: proxied|' /srv/lane/hello/bedrock.yaml"
+run "grep -q proxytest /srv/lane/hello/bedrock.yaml || sed -i 's|      - host: hello.$LANE_DOMAIN|      - host: hello.$LANE_DOMAIN\n      - host: proxytest.$LANE_DOMAIN\n        dns: proxied|' /srv/lane/hello/bedrock.yaml"
 run 'bedrock deploy /srv/lane/hello --yes' 2>&1 | quiet | grep -E "proxytest|note:|succeeded|failed" || true
 proxy=""
 for _ in $(seq 1 30); do
-  proxy=$(dig +short @1.1.1.1 proxytest.lane.begam.in A | head -1)
+  proxy=$(dig +short @1.1.1.1 proxytest.$LANE_DOMAIN A | head -1)
   [[ -n "$proxy" && "$proxy" != "$HOST" ]] && break
   sleep 5
 done
-[[ -n "$proxy" && "$proxy" != "$HOST" ]] || fail "public DNS never answered proxytest.lane.begam.in with Cloudflare's addresses"
+[[ -n "$proxy" && "$proxy" != "$HOST" ]] || fail "public DNS never answered proxytest.$LANE_DOMAIN with Cloudflare's addresses"
 echo "-- public DNS answers with Cloudflare's $proxy"
-echo "-- plain HTTP through Cloudflare: $(fetch --resolve "proxytest.lane.begam.in:80:$proxy" -o /dev/null -w '%{http_code}' http://proxytest.lane.begam.in/ 2>&1 || true)"
-echo "-- HTTPS through Cloudflare: $(fetch --resolve "proxytest.lane.begam.in:443:$proxy" -o /dev/null -w '%{http_code}' https://proxytest.lane.begam.in/ 2>&1 | tail -1 || true)"
-run "sed -i '/proxytest.lane.begam.in/,+1d' /srv/lane/hello/bedrock.yaml && bedrock deploy /srv/lane/hello --yes" | quiet | grep -E "record removed|succeeded|failed"
-audit_mentions proxytest.lane.begam.in && fail "proxytest.lane.begam.in's record outlived its route"
-echo "-- proxytest.lane.begam.in's record is gone again"
+echo "-- plain HTTP through Cloudflare: $(fetch --resolve "proxytest.$LANE_DOMAIN:80:$proxy" -o /dev/null -w '%{http_code}' http://proxytest.$LANE_DOMAIN/ 2>&1 || true)"
+echo "-- HTTPS through Cloudflare: $(fetch --resolve "proxytest.$LANE_DOMAIN:443:$proxy" -o /dev/null -w '%{http_code}' https://proxytest.$LANE_DOMAIN/ 2>&1 | tail -1 || true)"
+run "sed -i '/proxytest.$LANE_DOMAIN/,+1d' /srv/lane/hello/bedrock.yaml && bedrock deploy /srv/lane/hello --yes" | quiet | grep -E "record removed|succeeded|failed"
+audit_mentions proxytest.$LANE_DOMAIN && fail "proxytest.$LANE_DOMAIN's record outlived its route"
+echo "-- proxytest.$LANE_DOMAIN's record is gone again"
 
 echo "== the audit of the real zone"
 run 'bedrock dns audit'
-echo "Cloudflare proven: records made, kept, pruned and removed in the real begam.in zone from the box"
+echo "Cloudflare proven: records made, kept, pruned and removed in the real zone from the box"

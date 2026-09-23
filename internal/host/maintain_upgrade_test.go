@@ -9,6 +9,8 @@ import (
 	"github.com/kylebegeman/bedrock/internal/kernel"
 	"github.com/kylebegeman/bedrock/internal/state"
 	"github.com/kylebegeman/bedrock/internal/version"
+	"os"
+	"path/filepath"
 )
 
 func maintainRegistry(m *fakeMachine) kernel.Registry {
@@ -193,5 +195,57 @@ func TestUpgradeRefusesWrongBinaries(t *testing.T) {
 	}
 	if _, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "relative/path")); err == nil {
 		t.Fatal("relative paths must be refused")
+	}
+}
+
+func TestVerifyAsksTheDaemonWhenThisProcessIsNotIt(t *testing.T) {
+	m := setUpBox(t)
+	allowEverything(m)
+	m.write(BinaryPath, "old binary")
+	m.write("/tmp/bedrock-new", "new binary")
+	m.answers["/tmp/bedrock-new version --json"] = `{"version":"0.7.0-test","commit":"aaaaaaaaaaaa","go":"go1.26","os":"linux","arch":"amd64"}`
+	target := m.runningVersion()
+	old := target
+	old.Commit = "000000000000"
+	env := m.env()
+	// This process is the old command line; the daemon it restarts is new.
+	env.RunningVersion = func() version.Info { return old }
+	daemon := func(context.Context) (version.Info, bool) {
+		if m.ranCommand("systemctl restart bedrock.service") {
+			return target, true
+		}
+		return old, true
+	}
+	reg := kernel.Registry{}
+	reg.Add(Upgrade{Env: env, DaemonVersion: daemon})
+	engine := kernel.New(openStore(t), reg, "test")
+	receipt, err := engine.Run(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/bedrock-new"), func(kernel.Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Status != state.Succeeded {
+		t.Fatalf("receipt: %+v", receipt)
+	}
+	if _, err := os.Stat(filepath.Join(m.root, StagedMarker)); err == nil {
+		t.Fatal("the staged marker outlived a verified upgrade")
+	}
+}
+
+func TestVerifyTrustsItselfWhenNoDaemonAnswers(t *testing.T) {
+	m := setUpBox(t)
+	allowEverything(m)
+	m.write(BinaryPath, "old binary")
+	m.write("/tmp/bedrock-new", "new binary")
+	m.answers["/tmp/bedrock-new version --json"] = `{"version":"0.7.0-test","commit":"aaaaaaaaaaaa","go":"go1.26","os":"linux","arch":"amd64"}`
+	env := m.env() // this process already runs the target build
+	reg := kernel.Registry{}
+	reg.Add(Upgrade{Env: env, DaemonVersion: func(context.Context) (version.Info, bool) { return version.Info{}, false }})
+	engine := kernel.New(openStore(t), reg, "test")
+	view, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/bedrock-new"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Steps[0].Note != "already the running build" {
+		t.Fatalf("with no daemon answering, this process's build is the running one: %+v", view.Steps[0])
 	}
 }

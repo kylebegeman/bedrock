@@ -90,8 +90,8 @@ func TestPlanAndReceiptRender(t *testing.T) {
 	}
 	out.Reset()
 	r.Receipt(&kernel.Receipt{ID: "op-1", Kind: "kernel.exercise", Target: "/tmp/x", Status: state.Succeeded, Duration: 2 * time.Second, StartedAt: time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC),
-		Steps: []kernel.StepView{{Name: "step-1", Status: state.StepSucceeded, Duration: time.Second, Attempts: 2}}})
-	if got := out.String(); !strings.Contains(got, "succeeded, 1 steps, 2.0s") || !strings.Contains(got, "  ok   step-1 (1.0s), 2 attempts") {
+		Steps: []kernel.StepView{{Name: "step-1", Note: "revision r1", Status: state.StepSucceeded, Duration: time.Second, Attempts: 2}}})
+	if got := out.String(); !strings.Contains(got, "succeeded, 1 steps, 2.0s") || !strings.Contains(got, "  ok   step-1 (revision r1) (1.0s), 2 attempts") {
 		t.Fatalf("receipt:\n%q", got)
 	}
 }

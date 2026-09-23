@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/mail"
 	"net/url"
 	"regexp"
 	"sort"
@@ -66,7 +67,7 @@ var Definitions = []Definition{
 			{Name: "key_id", Prompt: "key ID"},
 			{Name: "key", Prompt: "key", Secret: true},
 			{Name: "bucket_prefix", Prompt: "bucket name prefix, such as kb (buckets are prefix-app)"},
-			{Name: "password", Prompt: "backup encryption password; leave blank to make one, then keep it with the recovery identity", Secret: true, Optional: true},
+			{Name: "password", Prompt: "backup encryption password; blank makes one the first time, then keep it with the recovery identity", Secret: true, Optional: true},
 		},
 	},
 	{
@@ -121,6 +122,18 @@ func (d Definition) key(field string) string {
 	return strings.ToUpper(d.Name + "_" + field)
 }
 
+// WebhookSecretName and DeployKeyName name an app's webhook secret and
+// deploy key in bedrock's own secrets. App names have no underscores, so
+// the mapping is one to one.
+func WebhookSecretName(app string) string { return hookSecretName("WEBHOOK_SECRET", app) }
+
+// DeployKeyName is the deploy key's name; see WebhookSecretName.
+func DeployKeyName(app string) string { return hookSecretName("DEPLOY_KEY", app) }
+
+func hookSecretName(kind, app string) string {
+	return kind + "_" + strings.ToUpper(strings.ReplaceAll(app, "-", "_"))
+}
+
 // ErrNotSet means an integration hasn't been set up on this machine.
 var ErrNotSet = errors.New("not set up")
 
@@ -129,6 +142,11 @@ var bucketPrefixPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,19}$`)
 // Set stores an integration's values in one new version of bedrock's
 // secrets and returns values it made up, such as a generated password,
 // so the caller can show them exactly once.
+//
+// Setting an integration that is already set changes only the fields
+// named: the rest keep their values. The storage password in particular
+// is made once, when none is held, because a new one would leave every
+// repository the old one opened unreadable.
 func Set(store *secrets.Store, name string, values map[string]string) (version int, generated map[string]string, err error) {
 	def, ok := Lookup(name)
 	if !ok {
@@ -143,20 +161,30 @@ func Set(store *secrets.Store, name string, values map[string]string) (version i
 			return 0, nil, fmt.Errorf("%s has no field named %q", name, k)
 		}
 	}
+	current, err := Get(store, name)
+	if err != nil && !errors.Is(err, ErrNotSet) {
+		return 0, nil, err
+	}
 	generated = map[string]string{}
 	changes := map[string]*string{}
 	for _, f := range def.Fields {
-		v := strings.TrimSpace(values[f.Name])
+		v, named := values[f.Name]
+		v = strings.TrimSpace(v)
+		if !named {
+			v = current[f.Name]
+		}
 		if v == "" {
 			v = f.Default
 		}
 		if v == "" && name == StorageName && f.Name == "password" {
-			var b [24]byte
-			if _, err := rand.Read(b[:]); err != nil {
-				return 0, nil, err
+			if v = current[f.Name]; v == "" {
+				var b [24]byte
+				if _, err := rand.Read(b[:]); err != nil {
+					return 0, nil, err
+				}
+				v = hex.EncodeToString(b[:])
+				generated[f.Name] = v
 			}
-			v = hex.EncodeToString(b[:])
-			generated[f.Name] = v
 		}
 		if v == "" {
 			if !f.Optional {
@@ -220,8 +248,9 @@ func validate(name string, v map[string]string) error {
 		}
 		for _, f := range []string{"from", "to"} {
 			for _, addr := range strings.Split(v[f], ",") {
-				if !strings.Contains(strings.TrimSpace(addr), "@") {
-					return fmt.Errorf("email.%s: %q isn't an address", f, strings.TrimSpace(addr))
+				addr = strings.TrimSpace(addr)
+				if _, err := mail.ParseAddress(addr); err != nil {
+					return fmt.Errorf("email.%s: %q isn't an address", f, addr)
 				}
 			}
 		}

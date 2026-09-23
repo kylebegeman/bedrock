@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -89,16 +91,31 @@ type Keep struct {
 // ErrNoRepository means the bucket holds no repository yet.
 var ErrNoRepository = errors.New("no repository")
 
+// secretsInside is where the repository's password and the storage
+// credentials are mounted in a restic container.
+const secretsInside = "/run/bedrock-restic"
+
 // run executes restic with the mounts and returns its output lines.
+//
+// The repository's password and the storage credentials never go in the
+// container's environment, which Docker keeps in the container's config on
+// disk and shows to anyone who can inspect it. They go in a file only root
+// reads, mounted read-only, which a shell reads before it becomes restic,
+// and the file is gone when the run is.
 func (r Runner) run(ctx context.Context, mounts []string, args ...string) ([]string, error) {
-	env := append([]string{"RESTIC_REPOSITORY=" + r.Repo.Repository, "RESTIC_PASSWORD=" + r.Repo.Password, "RESTIC_CACHE_DIR=/cache"}, r.Repo.Env...)
+	secrets, err := secretsFile(append([]string{"RESTIC_PASSWORD=" + r.Repo.Password}, r.Repo.Env...))
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(secrets)
 	spec := docker.Spec{
 		Name:        fmt.Sprintf("bedrock-%s-restic-%d", r.Owner, time.Now().UnixMilli()),
 		Image:       Image,
+		Entrypoint:  []string{"/bin/sh", "-c", `set -a && . ` + secretsInside + `/env && set +a && exec /usr/bin/restic "$@"`, "restic"},
 		Cmd:         args,
-		Env:         env,
+		Env:         []string{"RESTIC_REPOSITORY=" + r.Repo.Repository, "RESTIC_CACHE_DIR=/cache"},
 		Labels:      map[string]string{docker.LabelApp: r.Owner, docker.LabelWorkload: "backup"},
-		Mounts:      append(append([]string{}, mounts...), CacheVolume+":/cache"),
+		Mounts:      append(append([]string{}, mounts...), CacheVolume+":/cache", secrets+":"+secretsInside+":ro"),
 		HostNetwork: true,
 	}
 	e := r.Engine
@@ -110,16 +127,13 @@ func (r Runner) run(ctx context.Context, mounts []string, args ...string) ([]str
 	if err := e.Run(ctx, spec); err != nil {
 		return nil, err
 	}
-	cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	defer e.Remove(cleanup, spec.Name, 5*time.Second) //nolint:errcheck // best effort
-	code, err := e.WaitExit(ctx, spec.Name)
-	var buf bytes.Buffer
-	_ = e.Logs(cleanup, spec.Name, false, "all", &buf)
-	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	if err != nil {
-		_ = e.Remove(cleanup, spec.Name, time.Second)
-		return lines, err
+	code, waitErr := e.WaitExit(ctx, spec.Name)
+	// The wait may have taken an hour, or ended with ctx. The container's
+	// last words and its removal get a context of their own, made now: one
+	// made before the wait would have been spent by it.
+	lines := finish(e, spec.Name)
+	if waitErr != nil {
+		return lines, waitErr
 	}
 	if r.Log != nil {
 		for _, l := range lines {
@@ -132,6 +146,42 @@ func (r Runner) run(ctx context.Context, mounts []string, args ...string) ([]str
 		return lines, fmt.Errorf("restic %s: %s", args[0], explain(lines))
 	}
 	return lines, nil
+}
+
+// secretsFile writes NAME=value pairs where only this machine's root reads
+// them, as a shell reads assignments, and returns the directory holding
+// the file. The caller removes it.
+func secretsFile(pairs []string) (string, error) {
+	dir, err := os.MkdirTemp("", "bedrock-restic-")
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	for _, pair := range pairs {
+		name, value, ok := strings.Cut(pair, "=")
+		if !ok {
+			continue
+		}
+		// Single quotes hold anything but a single quote, which is closed,
+		// escaped and reopened.
+		fmt.Fprintf(&b, "%s='%s'\n", name, strings.ReplaceAll(value, "'", `'\''`))
+	}
+	if err := os.WriteFile(filepath.Join(dir, "env"), []byte(b.String()), 0o600); err != nil {
+		os.RemoveAll(dir)
+		return "", err
+	}
+	return dir, nil
+}
+
+// finish reads a stopped restic container's output and removes it, on a
+// fresh, bounded context of its own.
+func finish(e *docker.Engine, name string) []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var buf bytes.Buffer
+	_ = e.Logs(ctx, name, false, "all", &buf)
+	_ = e.Remove(ctx, name, 5*time.Second)
+	return strings.Split(strings.TrimSpace(buf.String()), "\n")
 }
 
 type nopWriter struct{}

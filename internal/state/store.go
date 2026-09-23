@@ -29,7 +29,11 @@ func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("state directory: %w", err)
 	}
-	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=synchronous(NORMAL)")
+	// The path goes in as a file: URI, with what a URI would misread
+	// escaped, so a "?" or "#" in it isn't taken for the query that
+	// carries the pragmas; SQLite decodes the escapes itself.
+	dsn := "file:" + dsnPath.Replace(path) + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=synchronous(NORMAL)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open state: %w", err)
 	}
@@ -43,6 +47,9 @@ func Open(path string) (*Store, error) {
 	}
 	return s, nil
 }
+
+// dsnPath escapes the characters a file: URI would read as its own.
+var dsnPath = strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23")
 
 // Path is where the database lives.
 func (s *Store) Path() string { return s.path }
@@ -182,8 +189,9 @@ type NewOperation struct {
 	CreatedAt  time.Time
 }
 
-// ErrNotFound is returned for an unknown operation.
-var ErrNotFound = errors.New("no such operation")
+// ErrNotFound is returned for an operation, revision, watch or webhook the
+// store doesn't have; callers say which.
+var ErrNotFound = errors.New("not found")
 
 // ErrLeased is returned when another owner holds a live lease.
 var ErrLeased = errors.New("operation is leased by another owner")

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -17,7 +18,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -60,9 +60,19 @@ type DeployInput struct {
 	Commit string `json:"commit,omitempty"`
 	// Manifest names the manifest at the source's root; empty is bedrock.yaml.
 	Manifest string `json:"manifest,omitempty"`
+	// SecretsFrom names an app whose current secrets are copied to this one
+	// before its own are made: a preview inherits the values its parent was
+	// given by hand. Empty means none.
+	SecretsFrom string `json:"secrets_from,omitempty"`
 }
 
 var revisionPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{3,40}$`)
+
+// NewRevision names a revision by the moment it was made, to the second, so
+// revisions sort by time and read as dates. It is the one place a revision
+// is minted, and nothing that goes into a plan's digest carries it: the
+// same source planned twice yields the same plan, whenever it was planned.
+func NewRevision(now time.Time) string { return now.UTC().Format("20060102-150405") }
 
 // Kind implements kernel.Definition.
 func (Deploy) Kind() string { return DeployKind }
@@ -107,19 +117,23 @@ func (d Deploy) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 				m.App, strings.Join(guarded, ", "))
 		}
 	}
+	if in.SecretsFrom == m.App {
+		return nil, fmt.Errorf("%s would copy its secrets onto itself", m.App)
+	}
 	commit := in.Commit
 	if commit == "" {
 		commit = sourceCommit(ctx, in.Source)
 	}
-	return d.rollout(ctx, m, in.Revision, &buildFrom{source: in.Source, commit: commit, restore: in.Restore})
+	return d.rollout(ctx, m, in.Revision, &buildFrom{source: in.Source, commit: commit, restore: in.Restore, secretsFrom: in.SecretsFrom})
 }
 
 // buildFrom says images come from a source directory; nil means they are
 // already recorded (a rollback).
 type buildFrom struct {
-	source  string
-	commit  string
-	restore Restore
+	source      string
+	commit      string
+	restore     Restore
+	secretsFrom string
 }
 
 // rollout is the plan both deploy and rollback share.
@@ -148,8 +162,9 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 		}
 	}
 	hosts := m.Hosts()
-	target := fmt.Sprintf("%s %s", m.App, revision)
-	plan := &kernel.Plan{Target: target, Recovery: kernel.Resume}
+	// The target and the changes name no revision: the digest is meant to
+	// pin the plan, not the moment it was made. The revision is a note.
+	plan := &kernel.Plan{Target: m.App, Recovery: kernel.Resume}
 	add := func(st kernel.Step) { plan.Steps = append(plan.Steps, st) }
 
 	var engine *docker.Engine
@@ -212,10 +227,14 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 
 	if from != nil {
 		add(kernel.Step{
-			Name: "record", Change: fmt.Sprintf("record revision %s of %s", revision, m.App),
-			Note: noteCommit(from.commit),
+			Name: "record", Change: "record a new revision of " + m.App,
+			Note: notes("revision "+revision, noteCommit(from.commit)),
 			Apply: func(ctx context.Context, out io.Writer) error {
-				return saveImages(ctx)
+				if err := saveImages(ctx); err != nil {
+					return err
+				}
+				fmt.Fprintf(out, "revision %s\n", revision)
+				return nil
 			},
 		})
 	}
@@ -253,6 +272,27 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 			Name: "dns", Change: change,
 			Apply: func(ctx context.Context, out io.Writer) error {
 				return keepRecords(ctx, d.Secrets, m, d.Addresses(ctx), out)
+			},
+		})
+	}
+	// A preview inherits what its parent was given by hand before its own
+	// secrets are made, so the values its code expects are there to derive
+	// from. The copy is a step of its own: shown in the plan, journaled, and
+	// done by whoever holds the key.
+	if from != nil && from.secretsFrom != "" {
+		add(kernel.Step{
+			Name: "inherit", Change: fmt.Sprintf("copy %s's secrets to %s, which runs its code", from.secretsFrom, m.App),
+			Apply: func(_ context.Context, out io.Writer) error {
+				copied, err := d.Secrets.CopyAll(from.secretsFrom, m.App)
+				if err != nil {
+					return err
+				}
+				if len(copied) == 0 {
+					fmt.Fprintf(out, "%s already holds what %s has\n", m.App, from.secretsFrom)
+					return nil
+				}
+				fmt.Fprintf(out, "copied %d secret(s) from %s: %s\n", len(copied), from.secretsFrom, strings.Join(copied, ", "))
+				return nil
 			},
 		})
 	}
@@ -364,7 +404,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 				for _, name := range releases {
 					fmt.Fprintf(out, "%s:\n", name)
 					if _, err := jobs.Run(ctx, rev, name, nil, JobRelease, out); err != nil {
-						return fmt.Errorf("release workload %s: %w; nothing new started, the running revision is untouched", name, err)
+						return fmt.Errorf("release workload %s: %w; nothing new started and the running revision still serves, though the release may already have changed the database", name, err)
 					}
 				}
 				return nil
@@ -372,8 +412,8 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 		})
 	}
 	add(kernel.Step{
-		Name: "start", Change: fmt.Sprintf("start %d container(s) for revision %s", len(containers), revision),
-		Note: secretsNote(m),
+		Name: "start", Change: fmt.Sprintf("start %d container(s)", len(containers)),
+		Note: notes("revision "+revision, secretsNote(m)),
 		Apply: func(ctx context.Context, out io.Writer) (startErr error) {
 			e, err := connect(ctx)
 			if err != nil {
@@ -688,6 +728,17 @@ func noteCommit(commit string) string {
 	return "commit " + commit
 }
 
+// notes joins the parts of a step's note that are there.
+func notes(parts ...string) string {
+	var kept []string
+	for _, p := range parts {
+		if p != "" {
+			kept = append(kept, p)
+		}
+	}
+	return strings.Join(kept, "; ")
+}
+
 func orDot(s string) string {
 	if s == "" {
 		return "."
@@ -893,7 +944,7 @@ func probeReady(ctx context.Context, e *docker.Engine, container string, info *d
 		}
 		return false, fmt.Sprintf("%s answered %s", w.Health.Path, resp.Status)
 	}
-	conn, err := (&net_Dialer{}).dial(ctx, fmt.Sprintf("%s:%d", ip, port))
+	conn, err := (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", fmt.Sprintf("%s:%d", ip, port))
 	if err != nil {
 		return false, err.Error()
 	}
@@ -1000,8 +1051,9 @@ func EdgeConfig(ctx context.Context, store *state.Store, sec *secrets.Store) ([]
 	return edgeConfig(ctx, store, sec)
 }
 
-// HookRoute is the path webhooks arrive on, as the edge routes it.
-const HookRoute = "/_bedrock/hook/"
+// HookRoute is the path webhooks arrive on, as the edge routes it: a
+// prefix, as every route's path is.
+const HookRoute = edge.HookPath + "/"
 
 // lastWords picks the line of a container's output that best says why it
 // stopped, for an error message: the last one that names an error, or else
@@ -1199,17 +1251,29 @@ func revertSwitch(ctx context.Context, store *state.Store, sec *secrets.Store, c
 	if err != nil {
 		return "", err
 	}
+	var failures []error
 	for _, c := range containers {
 		if err := e.Remove(ctx, c, 5*time.Second); err != nil {
-			return "", err
+			failures = append(failures, err)
 		}
 	}
-	// Restore stopped workloads even when the edge itself is unavailable.
-	if err := restartStoppedWorkloads(ctx, e, store, app, failed, io.Discard); err != nil {
-		return "", err
+	if len(failures) == 0 {
+		// Restore stopped workloads even when the edge itself is unavailable.
+		if err := restartStoppedWorkloads(ctx, e, store, app, failed, io.Discard); err != nil {
+			failures = append(failures, err)
+		}
+	} else {
+		// Never start a singleton again while its failed replacement may
+		// still be running.
+		failures = append(failures, errors.New("the previous revision's stopped workloads were not started again while the failed containers remain"))
 	}
+	// The edge goes back whatever happened above: what still runs of the
+	// previous revision should be reached, and the failed revision should not.
 	if err := edge.NewAdmin().Load(ctx, cfg); err != nil {
-		return "", err
+		failures = append(failures, err)
+	}
+	if len(failures) > 0 {
+		return "", errors.Join(failures...)
 	}
 	if prev == nil {
 		return "the edge routes nothing to " + app + " now", nil
@@ -1371,14 +1435,9 @@ func restoreNote(r Restore) string {
 	return "restore " + strings.Join(parts, "; ")
 }
 
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
+// sortedKeys is a map's keys in order, for output that reads the same way
+// every time.
+func sortedKeys[V any](m map[string]V) []string { return slices.Sorted(maps.Keys(m)) }
 
 // loomGuard turns the loom integration into the endpoint the edge asks. A
 // machine with no such integration gets nil, which is not an error: most

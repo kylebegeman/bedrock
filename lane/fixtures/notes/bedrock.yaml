@@ -11,8 +11,8 @@ workloads:
     env: {NOTE: first}
     secrets: [NOTES_DATABASE_URL]
     routes:
-      - host: notes.lane.begam.in
-      - host: notes-control.lane.begam.in
+      - host: notes.lane.example.com
+      - host: notes-control.lane.example.com
         port: 8001
     health: {path: /healthz}
     resources: {memory: 64m}
@@ -64,7 +64,7 @@ secrets:
 backup:
   verify: {sql: "select count(*) from notes", at_least: 1}
 checks:
-  - url: https://notes.lane.begam.in/
+  - url: https://notes.lane.example.com/
     contains: notes api
-  - url: https://notes-control.lane.begam.in/
+  - url: https://notes-control.lane.example.com/
     contains: notes control

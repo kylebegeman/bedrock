@@ -13,6 +13,7 @@ import (
 
 	"github.com/kylebegeman/bedrock/internal/docker"
 	"github.com/kylebegeman/bedrock/internal/edge"
+	"github.com/kylebegeman/bedrock/internal/integration"
 	"github.com/kylebegeman/bedrock/internal/kernel"
 	"github.com/kylebegeman/bedrock/internal/manifest"
 	"github.com/kylebegeman/bedrock/internal/secrets"
@@ -38,6 +39,10 @@ type RemoveInput struct {
 	// Data also removes the app's volumes and database. There is no way
 	// back from that except a backup.
 	Data bool `json:"data,omitempty"`
+	// Secrets also forgets the app's sealed secrets. Without it they stay,
+	// so the app can be restored or deployed again with what it had; a
+	// preview removed with Data forgets its own, which were copies.
+	Secrets bool `json:"secrets,omitempty"`
 }
 
 // Kind implements kernel.Definition.
@@ -59,15 +64,25 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 	if len(revs) == 0 {
 		return nil, fmt.Errorf("%s isn't on this machine", in.App)
 	}
-	var m manifest.Manifest
+	// The active revision's manifest says what the app keeps; failing
+	// that, the newest one's. One that doesn't parse would leave records
+	// and volumes behind unseen, so it stops the remove instead.
+	described := revs[0]
 	for _, rev := range revs {
 		if rev.Status == state.RevisionActive {
-			_ = json.Unmarshal(rev.Manifest, &m)
+			described = rev
 		}
 	}
-	if m.App == "" {
-		_ = json.Unmarshal(revs[0].Manifest, &m)
+	var m manifest.Manifest
+	if err := json.Unmarshal(described.Manifest, &m); err != nil {
+		return nil, fmt.Errorf("revision %s of %s: its manifest doesn't parse: %w", described.ID, in.App, err)
 	}
+	stateDir := r.StateDir
+	if stateDir == "" {
+		stateDir = defaultStateDir
+	}
+	_, preview := IsPreview(in.App)
+	forgetSecrets := in.Secrets || (in.Data && preview)
 	store := r.Store
 	plan := &kernel.Plan{Target: in.App, Recovery: kernel.Resume}
 	plan.Steps = append(plan.Steps,
@@ -166,7 +181,9 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 				}
 				for _, img := range images {
 					if img.Labels[docker.LabelApp] == in.App {
-						_ = e.RemoveImage(ctx, img.ID)
+						if err := e.RemoveImage(ctx, img.ID); err != nil {
+							fmt.Fprintf(out, "image %s stays: %v\n", img.Describe(), err)
+						}
 					}
 				}
 				return nil
@@ -196,10 +213,6 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 					}
 				}
 				// The copy of the database's first-run scripts goes too.
-				stateDir := r.StateDir
-				if stateDir == "" {
-					stateDir = defaultStateDir
-				}
 				if err := os.RemoveAll(filepath.Dir(InitDir(stateDir, in.App))); err != nil {
 					return err
 				}
@@ -207,8 +220,15 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 			},
 		})
 	}
+	change := "remove the app's network and forget it"
+	switch {
+	case in.Secrets:
+		change += ", and its secrets"
+	case forgetSecrets:
+		change += ", and the secrets it was given as a preview"
+	}
 	plan.Steps = append(plan.Steps, kernel.Step{
-		Name: "forget", Change: "remove the app's network and forget it",
+		Name: "forget", Change: change,
 		Apply: func(ctx context.Context, out io.Writer) error {
 			e, err := docker.Connect(ctx)
 			if err != nil {
@@ -221,7 +241,7 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 			if err := e.RemoveNetwork(ctx, docker.AppNetwork(in.App)); err != nil {
 				return err
 			}
-			if err := store.RemoveApp(ctx, in.App); err != nil {
+			if err := forgetApp(ctx, store, r.Secrets, stateDir, in.App, forgetSecrets, out); err != nil {
 				return err
 			}
 			fmt.Fprintf(out, "%s forgotten\n", in.App)
@@ -229,6 +249,47 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 		},
 	})
 	return plan, nil
+}
+
+// forgetApp drops what the machine keeps about an app beside its
+// containers: its rows, its staging directories, the webhook credentials
+// bedrock made for it and, when asked, its sealed secrets. Its backup runs
+// stay, because they say where its data went.
+func forgetApp(ctx context.Context, store *state.Store, sec *secrets.Store, stateDir, app string, secretsToo bool, out io.Writer) error {
+	if err := store.RemoveApp(ctx, app); err != nil {
+		return err
+	}
+	for _, dir := range []string{"backups", "restore", "drills", "builds"} {
+		if err := os.RemoveAll(filepath.Join(stateDir, dir, app)); err != nil {
+			return err
+		}
+	}
+	if sec == nil {
+		return nil
+	}
+	own, _, err := sec.LoadCurrent(integration.App)
+	if err != nil {
+		return err
+	}
+	changes := map[string]*string{}
+	for _, name := range []string{integration.WebhookSecretName(app), integration.DeployKeyName(app)} {
+		if _, ok := own[name]; ok {
+			changes[name] = nil
+		}
+	}
+	if len(changes) > 0 {
+		if _, err := sec.SetAll(integration.App, changes); err != nil {
+			return err
+		}
+		fmt.Fprintln(out, "the webhook secret and deploy key made for it are gone")
+	}
+	if secretsToo {
+		if err := sec.RemoveApp(app); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s's secrets forgotten\n", app)
+	}
+	return nil
 }
 
 func recordsNote(m manifest.Manifest) string {

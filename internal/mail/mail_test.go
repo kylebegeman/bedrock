@@ -113,3 +113,16 @@ func TestRefusesAnUnencryptedRemoteServer(t *testing.T) {
 		t.Fatal("sent in the clear to a remote host")
 	}
 }
+
+func TestHeadersStayOnOneLineWhateverTheAddressesHold(t *testing.T) {
+	m := Message{From: "a@b\r\nBcc: x@y", To: []string{"c@d\nBcc: z@w"}, Subject: "s\r\nX-Bad: y", Body: "hi"}
+	headers, _, _ := strings.Cut(m.render(), "\r\n\r\n")
+	for _, line := range strings.Split(headers, "\r\n") {
+		if strings.HasPrefix(line, "Bcc:") || strings.HasPrefix(line, "X-Bad:") {
+			t.Fatalf("a header was injected: %q", headers)
+		}
+	}
+	if !strings.Contains(headers, "From: a@b  Bcc: x@y") {
+		t.Fatalf("the address was not kept on its line: %q", headers)
+	}
+}

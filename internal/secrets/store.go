@@ -36,6 +36,15 @@ type Store struct {
 
 var namePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 
+// reservedApp is the app whose secrets are bedrock's own, the integration
+// credentials: manifest.ReservedApp, spelled here because this package
+// sits beneath manifest. They are never transferred, copied or removed as
+// an app's are.
+const reservedApp = "bedrock"
+
+// appPattern is what a manifest accepts as an app's name.
+var appPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
+
 // ValidName reports whether name is an UPPER_CASE secret name.
 func ValidName(name string) bool { return namePattern.MatchString(name) }
 
@@ -302,6 +311,20 @@ func (s *Store) lock(app string) (func(), error) {
 		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 		f.Close()
 	}, nil
+}
+
+// RemoveApp forgets every version of an app's secrets. It is for an app
+// that is leaving the machine for good; bedrock's own never go this way.
+func (s *Store) RemoveApp(app string) error {
+	if !appPattern.MatchString(app) || app == reservedApp {
+		return fmt.Errorf("%q isn't an app whose secrets can be removed", app)
+	}
+	unlock, err := s.lock(app)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return os.RemoveAll(s.appDir(app))
 }
 
 // Versions lists an app's versions, newest first, without values.

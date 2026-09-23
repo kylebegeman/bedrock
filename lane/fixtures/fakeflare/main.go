@@ -3,7 +3,7 @@
 // cloudflare integration at it so no real token is needed; the records it
 // keeps don't change public DNS (the lane's wildcard does that).
 //
-//	FAKEFLARE_TOKEN=... FAKEFLARE_ZONES=begam.in fakeflare -listen :8788
+//	FAKEFLARE_TOKEN=... FAKEFLARE_ZONES=example.com fakeflare -listen :8788
 package main
 
 import (

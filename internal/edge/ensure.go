@@ -36,6 +36,9 @@ const (
 	adminListen   = "unix/" + runDirInside + "/caddy.sock"
 	// HooksDial is how the edge reaches bedrock's hooks endpoint.
 	HooksDial = "unix/" + runDirInside + "/hooks.sock"
+	// HookPath is where GitHub's webhooks arrive, on an app's own first
+	// host; the edge routes it to HooksDial.
+	HookPath = "/_bedrock/hook"
 
 	// LayoutLabel marks how the edge's container is made. A container
 	// with another layout is replaced by Ensure.
@@ -78,7 +81,7 @@ func Ensure(ctx context.Context, engine *docker.Engine, boot []byte, out io.Writ
 		return err
 	}
 	for _, dir := range []string{RunDir, BootDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return err
 		}
 	}

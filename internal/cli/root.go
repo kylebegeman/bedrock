@@ -43,15 +43,36 @@ func Main(args []string, stdout, stderr io.Writer) int {
 // app holds what every command shares.
 type app struct {
 	stdout, stderr io.Writer
-	stateDir       string
-	socket         string
-	json           bool
-	tty            bool
-	yes            bool
-	digest         string
+	// narrate is where an operation shows its plan, asks and reports its
+	// steps: stdout, unless a command's own result owns stdout, as move
+	// out's handoff does.
+	narrate  io.Writer
+	stateDir string
+	socket   string
+	json     bool
+	tty      bool
+	yes      bool
+	digest   string
 }
 
-func (a *app) renderer() *ui.Renderer { return ui.New(a.stdout, a.tty, a.json) }
+func (a *app) renderer() *ui.Renderer { return ui.New(a.narrateTo(), a.tty, a.json) }
+
+// narrateTo is where an operation's plan, prompt and steps go.
+func (a *app) narrateTo() io.Writer {
+	if a.narrate != nil {
+		return a.narrate
+	}
+	return a.stdout
+}
+
+// prose is where a command's closing words go: stdout, or stderr under
+// --json, which keeps stdout for the objects alone.
+func (a *app) prose() io.Writer {
+	if a.json {
+		return a.stderr
+	}
+	return a.stdout
+}
 
 // runner returns a daemon client when a daemon answers on the socket, and
 // otherwise the local kernel over the state directory.
@@ -67,7 +88,7 @@ func (a *app) runner(ctx context.Context, owner string) (api.Runner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &api.Local{Engine: kernel.New(store, daemon.RegistryIn(store, a.secretsStore(), a.socket, a.stateDir), owner), Store: store}, nil
+	return &api.Local{Engine: kernel.New(store, daemon.Registry(store, a.secretsStore(), a.socket, a.stateDir), owner), Store: store}, nil
 }
 
 func newRoot(stdout, stderr io.Writer) *cobra.Command {
@@ -89,6 +110,11 @@ func newRoot(stdout, stderr io.Writer) *cobra.Command {
 	root.AddCommand(newVersion(a), newInit(a), newDoctor(a), newHost(a), newUpgrade(a), newDeploy(a), newRollback(a), newLs(a), newStatus(a), newExposure(a), newDNS(a), newPs(a), newLogs(a), newExec(a), newGC(a), newLaunch(a), newMove(a), newPreview(a), newSecret(a), newIntegration(a), newRun(a), newJobs(a), newPsql(a), newBackup(a), newBackups(a), newDrill(a), newRestore(a), newAlerts(a), newWatch(a), newRemove(a), newGit(a), newReceive(a), newHistory(a), newKernel(a), newDaemon(a))
 	return root
 }
+
+// quietError ends the program with a code, its message already shown.
+type quietError struct{ code int }
+
+func (q quietError) Error() string { return fmt.Sprintf("exit %d", q.code) }
 
 func envOr(name, fallback string) string {
 	if v := os.Getenv(name); v != "" {

@@ -74,14 +74,18 @@ CREATE TABLE IF NOT EXISTS job_runs (
   finished_at INTEGER NOT NULL DEFAULT 0,
   exit_code   INTEGER NOT NULL DEFAULT -1,
   error       TEXT NOT NULL DEFAULT '',
-  output      TEXT NOT NULL DEFAULT ''
+  output      TEXT NOT NULL DEFAULT '',
+  container   TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS job_runs_app ON job_runs (app, workload, started_at DESC);`
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return err
 	}
 	// Columns added after a table first shipped.
-	return s.ensureColumn(ctx, "revisions", "secrets_version", "INTEGER NOT NULL DEFAULT 0")
+	if err := s.ensureColumn(ctx, "revisions", "secrets_version", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	return s.ensureColumn(ctx, "job_runs", "container", "TEXT NOT NULL DEFAULT ''")
 }
 
 // ensureColumn adds a column to a table that predates it.
@@ -245,18 +249,26 @@ func (s *Store) ActiveRevisions(ctx context.Context) ([]Revision, error) {
 	return out, rows.Err()
 }
 
-// RemoveApp forgets an app and its revisions.
+// RemoveApp forgets an app: its revisions, its job runs, its signals, its
+// incident and its webhook. Its backup runs stay, because they say where
+// its data went.
 func (s *Store) RemoveApp(ctx context.Context, app string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM revisions WHERE app = ?`, app); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM apps WHERE name = ?`, app); err != nil {
-		return err
+	for _, q := range []struct{ query, arg string }{
+		{`DELETE FROM revisions WHERE app = ?`, app},
+		{`DELETE FROM apps WHERE name = ?`, app},
+		{`DELETE FROM job_runs WHERE app = ?`, app},
+		{`DELETE FROM signals WHERE app = ?`, app},
+		{`DELETE FROM incidents WHERE key = ?`, "app:" + app},
+		{`DELETE FROM git_hooks WHERE app = ?`, app},
+	} {
+		if _, err := tx.ExecContext(ctx, q.query, q.arg); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -291,11 +303,14 @@ func (s *Store) ForgetRevision(ctx context.Context, app, id string) error {
 
 // JobRun is one run of a cron workload or a one-off command.
 type JobRun struct {
-	ID         int64     `json:"id"`
-	App        string    `json:"app"`
-	Workload   string    `json:"workload"`
-	Revision   string    `json:"revision"`
-	Kind       string    `json:"kind"`
+	ID       int64  `json:"id"`
+	App      string `json:"app"`
+	Workload string `json:"workload"`
+	Revision string `json:"revision"`
+	Kind     string `json:"kind"`
+	// Container is the name of the container the run is in, so a daemon
+	// that starts while the run is going can find it again.
+	Container  string    `json:"container,omitempty"`
 	StartedAt  time.Time `json:"started_at"`
 	FinishedAt time.Time `json:"finished_at,omitempty"`
 	ExitCode   int       `json:"exit_code"`
@@ -305,7 +320,7 @@ type JobRun struct {
 
 // StartJobRun records that a run began and returns its id.
 func (s *Store) StartJobRun(ctx context.Context, run JobRun) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `INSERT INTO job_runs (app, workload, revision, kind, started_at) VALUES (?, ?, ?, ?, ?)`, run.App, run.Workload, run.Revision, run.Kind, unix(run.StartedAt))
+	res, err := s.db.ExecContext(ctx, `INSERT INTO job_runs (app, workload, revision, kind, started_at, container) VALUES (?, ?, ?, ?, ?, ?)`, run.App, run.Workload, run.Revision, run.Kind, unix(run.StartedAt), run.Container)
 	if err != nil {
 		return 0, err
 	}
@@ -332,7 +347,7 @@ func (s *Store) JobRuns(ctx context.Context, app, workload string, limit int) ([
 	if limit <= 0 {
 		limit = 20
 	}
-	query := `SELECT id, app, workload, revision, kind, started_at, finished_at, exit_code, error, output FROM job_runs WHERE app = ?`
+	query := selectJobRun + ` WHERE app = ?`
 	args := []any{app}
 	if workload != "" {
 		query += ` AND workload = ?`
@@ -340,6 +355,18 @@ func (s *Store) JobRuns(ctx context.Context, app, workload string, limit int) ([
 	}
 	query += ` ORDER BY started_at DESC, id DESC LIMIT ?`
 	args = append(args, limit)
+	return s.queryJobRuns(ctx, query, args...)
+}
+
+// OpenJobRuns lists the runs that haven't finished, oldest first: what a
+// daemon that starts finds left over from the one before.
+func (s *Store) OpenJobRuns(ctx context.Context) ([]JobRun, error) {
+	return s.queryJobRuns(ctx, selectJobRun+` WHERE finished_at = 0 ORDER BY started_at, id`)
+}
+
+const selectJobRun = `SELECT id, app, workload, revision, kind, started_at, finished_at, exit_code, error, output, container FROM job_runs`
+
+func (s *Store) queryJobRuns(ctx context.Context, query string, args ...any) ([]JobRun, error) {
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -349,7 +376,7 @@ func (s *Store) JobRuns(ctx context.Context, app, workload string, limit int) ([
 	for rows.Next() {
 		var r JobRun
 		var started, finished int64
-		if err := rows.Scan(&r.ID, &r.App, &r.Workload, &r.Revision, &r.Kind, &started, &finished, &r.ExitCode, &r.Error, &r.Output); err != nil {
+		if err := rows.Scan(&r.ID, &r.App, &r.Workload, &r.Revision, &r.Kind, &started, &finished, &r.ExitCode, &r.Error, &r.Output, &r.Container); err != nil {
 			return nil, err
 		}
 		r.StartedAt, r.FinishedAt = fromUnix(started), fromUnix(finished)

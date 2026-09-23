@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/kylebegeman/bedrock/internal/api"
 	"github.com/kylebegeman/bedrock/internal/kernel"
 	"github.com/kylebegeman/bedrock/internal/version"
 )
@@ -31,6 +33,41 @@ const (
 // Upgrade is the Definition for UpgradeKind.
 type Upgrade struct {
 	Env Env
+	// Socket is the daemon's, to ask it which build it runs.
+	Socket string
+	// DaemonVersion asks the daemon which build it runs, and says whether
+	// one answered. Nil asks on Socket; a socket nobody answers on means
+	// this process is the daemon, or there is none.
+	DaemonVersion func(ctx context.Context) (version.Info, bool)
+}
+
+// running is the build this machine runs bedrock as: the daemon's answer
+// when one answers, else this process's own. A resumed upgrade runs inside
+// the new daemon before it listens, and the command line's local kernel
+// runs beside the daemon it restarts; each is right about itself.
+func (u Upgrade) running(ctx context.Context) version.Info {
+	ask := u.DaemonVersion
+	if ask == nil && u.Socket != "" {
+		ask = askDaemon(u.Socket)
+	}
+	if ask != nil {
+		if info, ok := ask(ctx); ok {
+			return info
+		}
+	}
+	return u.Env.RunningVersion()
+}
+
+// askDaemon asks the daemon on a socket which build it runs.
+func askDaemon(socket string) func(context.Context) (version.Info, bool) {
+	return func(ctx context.Context) (version.Info, bool) {
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		client := api.Dial(socket)
+		defer client.Close()
+		info, err := client.Version(ctx)
+		return info, err == nil
+	}
 }
 
 // UpgradeInput says which binary to install.
@@ -55,7 +92,7 @@ func (u Upgrade) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, e
 	if !env.Privileged {
 		return nil, errors.New("upgrading needs root")
 	}
-	running := env.RunningVersion()
+	running := u.running(ctx)
 	target, err := probeVersion(ctx, env, in.Path)
 	if err != nil {
 		return nil, err
@@ -102,12 +139,14 @@ func (u Upgrade) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, e
 		},
 		kernel.Step{
 			Name: "restart", Change: "restart the daemon on the new binary",
-			// The first attempt restarts the daemon, which ends this process.
-			// The second attempt is the resumed operation: on the new daemon
-			// (done), or on the old one that systemd's rollback put back
-			// (failed).
+			// Inside the daemon, the first attempt restarts it, which ends
+			// this process, and the second attempt is the resumed operation:
+			// on the new daemon (done), or on the old one that systemd's
+			// rollback put back (failed). From the command line, the restart
+			// returns once the new daemon is ready (the unit is Type=notify),
+			// and the daemon is asked what it runs.
 			Apply: func(ctx context.Context, out io.Writer) error {
-				now := env.RunningVersion()
+				now := u.running(ctx)
 				if identity(now) == identity(target) {
 					fmt.Fprintf(out, "running %s (%s)\n", now.Version, now.Commit)
 					return nil
@@ -123,8 +162,8 @@ func (u Upgrade) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, e
 		},
 		kernel.Step{
 			Name: "verify", Change: "confirm the daemon runs the new build",
-			Apply: func(_ context.Context, out io.Writer) error {
-				now := env.RunningVersion()
+			Apply: func(ctx context.Context, out io.Writer) error {
+				now := u.running(ctx)
 				if identity(now) != identity(target) {
 					return fmt.Errorf("running %s (%s), not %s (%s)", now.Version, now.Commit, target.Version, target.Commit)
 				}

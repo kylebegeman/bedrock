@@ -52,8 +52,9 @@ func TestStorageIsStoredUnderBedrockAndListedWithoutSecrets(t *testing.T) {
 	if strings.Join(names, ",") != "STORAGE_BUCKET_PREFIX,STORAGE_ENDPOINT,STORAGE_KEY,STORAGE_KEY_ID,STORAGE_KIND,STORAGE_PASSWORD" {
 		t.Fatalf("names %v", names)
 	}
-	// Setting it again with a password keeps that password.
-	if _, generated, err := Set(s, StorageName, map[string]string{"kind": "b2", "key_id": "id2", "key": "k2", "bucket_prefix": "kb", "password": "mine"}); err != nil || len(generated) != 0 {
+	// Setting it again with a password keeps that password; the endpoint
+	// has to be cleared by name now that unnamed fields keep their values.
+	if _, generated, err := Set(s, StorageName, map[string]string{"kind": "b2", "endpoint": "", "key_id": "id2", "key": "k2", "bucket_prefix": "kb", "password": "mine"}); err != nil || len(generated) != 0 {
 		t.Fatalf("%v %v", err, generated)
 	}
 	st, _ = LoadStorage(s)
@@ -81,6 +82,7 @@ func TestFieldsAreValidated(t *testing.T) {
 		{StorageName, map[string]string{"kind": "b2", "key": "b", "bucket_prefix": "lane"}, "needs key_id"},
 		{EmailName, map[string]string{"smtp_host": "h", "smtp_port": "x", "from": "a@b", "to": "c@d"}, "smtp_port"},
 		{EmailName, map[string]string{"smtp_host": "h", "from": "nobody", "to": "c@d"}, "isn't an address"},
+		{EmailName, map[string]string{"smtp_host": "h", "from": "a@b\r\nBcc: x@y", "to": "c@d"}, "isn't an address"},
 		{EmailName, map[string]string{"smtp_host": "h", "smtp_user": "u", "from": "a@b", "to": "c@d"}, "both smtp_user and smtp_password"},
 		{"slack", map[string]string{}, "no integration named"},
 		{EmailName, map[string]string{"colour": "blue"}, "no field named"},
@@ -97,5 +99,38 @@ func TestFieldsAreValidated(t *testing.T) {
 	e, err := LoadEmail(s)
 	if err != nil || e.Port != 1025 || len(e.To) != 2 || e.To[1] != "olive@lane" || e.User != "" {
 		t.Fatalf("%+v %v", e, err)
+	}
+}
+
+func TestSettingAnIntegrationAgainKeepsWhatIsNotNamed(t *testing.T) {
+	s := newStore(t)
+	if _, generated, err := Set(s, StorageName, map[string]string{"kind": "s3", "endpoint": "http://127.0.0.1:9000", "key_id": "id", "key": "k", "bucket_prefix": "lane"}); err != nil || generated["password"] == "" {
+		t.Fatalf("%v %v", err, generated)
+	}
+	first, err := LoadStorage(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, generated, err := Set(s, StorageName, map[string]string{"key": "k2"})
+	if err != nil || len(generated) != 0 || version != 2 {
+		t.Fatalf("version %d generated %v err %v", version, generated, err)
+	}
+	again, err := LoadStorage(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Key != "k2" || again.KeyID != "id" || again.Endpoint != first.Endpoint || again.BucketPrefix != "lane" || again.Password != first.Password {
+		t.Fatalf("after naming one field: %+v, was %+v", again, first)
+	}
+	// A blank password keeps the one the repositories were made with.
+	if _, generated, err := Set(s, StorageName, map[string]string{"password": ""}); err != nil || len(generated) != 0 {
+		t.Fatalf("%v %v", err, generated)
+	}
+	if again, _ = LoadStorage(s); again.Password != first.Password {
+		t.Fatal("a blank password made a new one")
+	}
+	// The first time, what is required still has to be given.
+	if _, _, err := Set(s, EmailName, map[string]string{"smtp_host": "h"}); err == nil || !strings.Contains(err.Error(), "needs from") {
+		t.Fatalf("a first set with fields missing: %v", err)
 	}
 }

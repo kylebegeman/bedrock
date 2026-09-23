@@ -1,28 +1,24 @@
 # Support
 
-Bedrock is an open-source deployment control plane. Community support is best
-effort unless a maintainer states otherwise.
+Bedrock is a small open-source program that runs a machine. Support is
+best effort, from the maintainer, in the repository's issues and
+discussions.
 
-## Good Support Requests
+## A good report
 
-Open an issue or discussion with:
+- `bedrock version`, which names the build and its commit, and the
+  machine's operating system
+- the exact command and flags, and the `--plan` output where there is one
+- the manifest, with hostnames and names changed where they are private
+- the receipt, from `bedrock history <operation-id>` or `--json` output,
+  which carries secret names and never values
+- what you expected and what happened
 
-- Bedrock version or commit
-- operating system and Python version
-- exact command and flags
-- redacted manifest or fixture that reproduces the issue
-- expected behavior and actual behavior
-- relevant JSON output with secrets removed
+## Out of scope
 
-## Out Of Scope For Public Support
+- debugging private production machines, or recovering their data
+- the logic of the apps bedrock runs
+- live credentials of any kind in a public issue
 
-- debugging private production hosts
-- recovering private secrets, databases, or volumes
-- diagnosing product-specific business logic
-- handling live provider credentials in public issues
-- maintaining old deployment layouts that are not represented by Bedrock
-  manifests and fixtures
-
-For live deployments, start with fixture reproduction first. If the issue only
-appears with real infrastructure, reduce it to a sanitized manifest, redacted
-receipt, or synthetic fixture before filing.
+Where you can, reduce a problem to a fixture app and a sanitised manifest
+before filing; that is also what a fix is tested against.

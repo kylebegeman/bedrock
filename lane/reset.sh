@@ -32,31 +32,36 @@ fi
 # `make lane-reset` one command away from reinstalling the OS under five
 # live apps and deleting their snapshots with it.
 #
-# A machine that does not answer, or that has no bedrock on it, is a wiped
-# or fresh machine and is fine to take. Only a clear yes, naming this exact
-# host, gets past a machine that answers with apps.
-carried=$(ssh "${ssh_opts[@]}" "root@$HOST" 'bedrock ls --json 2>/dev/null' 2>/dev/null \
-  | python3 -c 'import json,sys
-try:
-    print(" ".join(a["name"] for a in json.load(sys.stdin).get("apps") or []))
-except Exception:
-    print("")' 2>/dev/null || true)
+# A machine that answers with no bedrock on it is a wiped or fresh machine
+# and is fine to take. One that cannot be asked at all is not assumed
+# empty: an SSH failure, a changed host key or a missing tool must not read
+# as "no apps". Only a clear yes, naming this exact host, gets past either
+# a machine that answers with apps or one that gives no answer.
+probe=$(ssh "${ssh_opts[@]}" "root@$HOST" 'if command -v bedrock >/dev/null 2>&1; then bedrock ls --json; else echo NO_BEDROCK; fi' 2>/dev/null) || probe=UNREACHABLE
+carried=""
+case "$probe" in
+  NO_BEDROCK) ;;
+  UNREACHABLE) carried="(could not ask: ssh to root@$HOST failed)" ;;
+  *)
+    carried=$(printf '%s' "$probe" | python3 -c 'import json,sys
+print(" ".join(a["name"] for a in json.load(sys.stdin).get("apps") or []))' 2>/dev/null) || carried="(could not read what $HOST answered)" ;;
+esac
 if [[ -n "${carried// /}" ]]; then
   if [[ "${BEDROCK_LANE_DESTROY:-}" != "$HOST" ]]; then
     cat >&2 <<EOF
-$HOST is carrying apps, so it is not a test bed:
+$HOST is not known to be empty:
 
   $carried
 
-Recreating it reinstalls the OS and deletes every snapshot, and those apps
-go with it. Point hostinger.env at a machine you can lose, or if you really
-mean this one, name it:
+Recreating it reinstalls the OS and deletes every snapshot, and whatever it
+carries goes with it. Point hostinger.env at a machine you can lose, or if
+you really mean this one, name it:
 
   BEDROCK_LANE_DESTROY=$HOST $0
 EOF
     exit 1
   fi
-  echo "BEDROCK_LANE_DESTROY names $HOST; destroying it with $carried on it" >&2
+  echo "BEDROCK_LANE_DESTROY names $HOST; destroying it: $carried" >&2
 fi
 
 echo "recreating vm $VM_ID with template $TEMPLATE_ID and post-install script $SCRIPT_ID"

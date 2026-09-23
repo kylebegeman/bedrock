@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kylebegeman/bedrock/internal/kernel"
 	"github.com/kylebegeman/bedrock/internal/manifest"
 	"github.com/kylebegeman/bedrock/internal/restic"
 	"github.com/kylebegeman/bedrock/internal/secrets"
@@ -572,5 +573,89 @@ func TestRestoreResumeAdoptsItsRunAndUsesTheFetchedSnapshot(t *testing.T) {
 	}
 	if run.ID != id || !run.OK || run.Snapshot != snapshot.ShortID || !run.Finished() {
 		t.Fatalf("incorrect recovery receipt: %+v", run)
+	}
+}
+
+func TestTwoPlansOfOneSourceASecondApartShareADigest(t *testing.T) {
+	_, dir := loadCore(t)
+	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	reg := kernel.Registry{}
+	reg.Add(Deploy{Store: store, Secrets: newSecrets(t), StateDir: t.TempDir(), Addresses: func(context.Context) []string { return nil }})
+	engine := kernel.New(store, reg, "test")
+	plan := func(revision string) *kernel.PlanView {
+		t.Helper()
+		raw, err := json.Marshal(DeployInput{Source: dir, Revision: revision})
+		if err != nil {
+			t.Fatal(err)
+		}
+		view, err := engine.PlanOnly(context.Background(), DeployKind, raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return view
+	}
+	t0 := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	first, second := plan(NewRevision(t0)), plan(NewRevision(t0.Add(time.Second)))
+	if first.Digest != second.Digest {
+		t.Fatalf("the digest moved with the clock: %s then %s", first.Digest, second.Digest)
+	}
+	if first.Target != "loom" {
+		t.Fatalf("target %q, want the app alone", first.Target)
+	}
+	noted := false
+	for _, st := range first.Steps {
+		if strings.Contains(st.Change, NewRevision(t0)) {
+			t.Fatalf("step %s names the revision in its change: %q", st.Name, st.Change)
+		}
+		if strings.Contains(st.Note, "revision "+NewRevision(t0)) {
+			noted = true
+		}
+	}
+	if !noted {
+		t.Fatalf("no step's note names the revision: %+v", first.Steps)
+	}
+}
+
+func TestAPreviewPlanInheritsItsParentsSecretsBeforeMakingItsOwn(t *testing.T) {
+	m, dir := loadCore(t)
+	sec := newSecrets(t)
+	d := Deploy{Secrets: sec, StateDir: t.TempDir(), Addresses: func(context.Context) []string { return nil }}
+	plan, err := d.rollout(context.Background(), m, "20260922-120000", &buildFrom{source: dir, secretsFrom: "parent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	var inherit kernel.Step
+	for _, s := range plan.Steps {
+		names = append(names, s.Name)
+		if s.Name == "inherit" {
+			inherit = s
+		}
+	}
+	at := slices.Index(names, "inherit")
+	if at < 0 || names[at+1] != "secrets" {
+		t.Fatalf("inherit must come right before secrets: %v", names)
+	}
+	if _, err := sec.Set("parent", "API_KEY", "v"); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if err := inherit.Apply(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if values, _, _ := sec.LoadCurrent("loom"); values["API_KEY"] != "v" || !strings.Contains(out.String(), "copied 1 secret(s) from parent: API_KEY") {
+		t.Fatalf("values %v, out %q", values, out.String())
+	}
+	_, version, _ := sec.LoadCurrent("loom")
+	out.Reset()
+	if err := inherit.Apply(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if _, again, _ := sec.LoadCurrent("loom"); again != version || !strings.Contains(out.String(), "already holds") {
+		t.Fatalf("a second inherit wrote a version: %d then %d, %q", version, again, out.String())
 	}
 }

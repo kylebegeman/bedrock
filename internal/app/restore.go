@@ -189,7 +189,7 @@ func (r RestoreDef) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 			if err != nil {
 				return run.fail(err)
 			}
-			fmt.Fprintf(out, "%d volume(s) restored: %d files, %s\n", len(mounts), sum.FilesRestored, humanBytes(sum.BytesRestored))
+			fmt.Fprintf(out, "%d volume(s) restored: %d files, %s\n", len(mounts), sum.FilesRestored, HumanBytes(sum.BytesRestored))
 			return nil
 		},
 	})

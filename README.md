@@ -56,9 +56,12 @@ bedrock integration set cloudflare # DNS records for your hosts
 bedrock integration set storage    # Backblaze B2 or any S3 store, for backups
 bedrock integration set email      # SMTP, for alerts
 
+mkdir my-app && cd my-app
 bedrock init my-app --host app.example.com  # write a starting bedrock.yaml
-bedrock deploy ./my-app            # build, check, switch the edge
+bedrock deploy .                   # build, check, switch the edge
 bedrock status                     # health, traffic, errors, backups
+
+bedrock launch https://github.com/you/site --host site.example.com  # or from a repository
 ```
 
 Bedrock needs Ubuntu 22.04 or 24.04, or Debian 12 or 13, on x86_64 or aarch64.
@@ -260,6 +263,34 @@ way, commit or not. `bedrock git webhook <app> --repo git@github.com:you/app.git
 deploys when GitHub says the branch moved, with a deploy key and secret
 bedrock makes and shows once.
 
+`bedrock launch <repository> --host <hostname>` takes a repository from
+nothing to running: it fetches the branch, works out what the source is (a
+Dockerfile, or a built site), writes the manifest it is missing and deploys
+it. What it guesses is deliberately narrow; anything else is refused with a
+suggestion.
+
+`bedrock preview up <repository> --branch <branch> --domain preview.example.com`
+runs a branch as its own app beside the one it is a branch of: a derived
+name, its own containers and an empty database, at hostnames under the
+preview domain, with every route behind a sign-in (`auth: loom`, below).
+Pushing the same branch again updates it; `bedrock preview ls` lists them,
+and `bedrock remove <preview> --data` throws one away, the secrets it was
+given included.
+
+`bedrock move out <app> --yes > handoff.json` on one machine and
+`bedrock move in <app> --handoff handoff.json` on another move an app's data
+through the backup bucket both machines read, and `bedrock move secrets`
+seals its secrets for the target. The source keeps serving until DNS is
+pointed at the target and the source is removed.
+
+## A sign-in in front of a route
+
+A route marked `auth: loom` is put behind a Loom Core's sign-in by the edge:
+the app behind it never sees a request from someone who is not signed in,
+and needs no auth code of its own. `bedrock integration set loom` names the
+Core's verify endpoint. A machine without that integration refuses to
+deploy a guarded route rather than serve it open, and previews rely on it.
+
 ## What Bedrock keeps an eye on
 
 The daemon watches every app and the machine once a minute: containers
@@ -267,7 +298,8 @@ running, health paths and checks answering through the edge, certificates
 valid and renewing, disk and memory, backups fresh and drills passing, and
 any URL added with `bedrock watch add` (the other machine's sites, say). A
 problem has to hold for three rounds before it becomes an alert, one alert
-per app, and you hear once when it starts and once when it recovers.
+per app, and you hear once when it starts, once a day while it lasts, and
+once when it recovers.
 
 | Command | Shows |
 |---|---|
@@ -322,9 +354,12 @@ for restored data, which could make encrypted records unreadable.
 
 The credentials Bedrock itself uses are integrations, kept sealed like any
 secret: `bedrock integration set storage` (Backblaze B2 or any S3 store),
-`bedrock integration set email` (SMTP, for alerts) and
-`bedrock integration set cloudflare`. `bedrock integration list` shows which are
-set and when each was last used, never the values.
+`bedrock integration set email` (SMTP, for alerts),
+`bedrock integration set cloudflare` (checked against the API before it is
+kept) and `bedrock integration set loom` (a Loom Core's verify endpoint, for
+routes behind a sign-in). Setting one again changes only what is answered; a
+blank answer keeps the current value. `bedrock integration list` shows which
+are set and when each was last used, never the values.
 
 <details>
 <summary><b>Moving a secret between machines</b></summary>
@@ -339,7 +374,8 @@ process; automation never prints its private recovery key.
 ciphertext. Pipe that to `bedrock secret import runner TOKEN` on the receiving
 machine through pinned SSH connections. Transfers expire after ten minutes, are
 bound to the receiving app and name, and are idempotent. Integration credentials
-cannot be exported.
+cannot be exported. `bedrock move secrets <app> --to <age1...>` does the same
+for every secret an app holds at once, which is what a move needs.
 
 </details>
 
@@ -347,7 +383,7 @@ cannot be exported.
 
 | | |
 |---|---|
-| **Machine** | `host` · `daemon` · `doctor` · `upgrade` · `status` · `alerts` · `watch` |
+| **Machine** | `host` · `daemon` · `doctor` · `upgrade` · `version` · `status` · `alerts` · `watch` |
 | **Apps** | `init` · `launch` · `deploy` · `preview` · `rollback` · `remove` · `move` · `ls` · `ps` · `logs` · `history` · `gc` |
 | **Data** | `backup` · `backups` · `restore` · `drill` · `psql` |
 | **Access** | `secret` · `integration` · `git` · `exec` · `run` · `jobs` |
@@ -355,8 +391,10 @@ cannot be exported.
 
 Run `bedrock <command> --help` for any of them.
 
-Everything that changes the machine takes `--plan` to see it first and
-`--digest` to apply only what was seen. Between reading a plan and applying
+Every operation on the machine, from a deploy or a backup to a host setup
+or an upgrade, takes `--plan` to see it first and `--digest` to apply only
+what was seen; the settings commands (`secret set`, `integration set`,
+`git allow`, `watch add`) apply at once. Between reading a plan and applying
 it the manifest or the machine can move, so the digest is how an agent, or a
 person, applies the plan they actually approved:
 

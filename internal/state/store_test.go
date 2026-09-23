@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -142,5 +143,21 @@ func TestReopenKeepsTheJournal(t *testing.T) {
 	defer s.Close()
 	if _, steps, err := s.Get(ctx, "op-1"); err != nil || len(steps) != 2 {
 		t.Fatalf("after reopen: %v, %d steps", err, len(steps))
+	}
+}
+
+func TestAPathAURIWouldMisreadStillOpensWhereItWasAsked(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "odd?dir#x%y")
+	s, err := Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var mode string
+	if err := s.db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil || mode != "wal" {
+		t.Fatalf("journal mode %q, %v: the pragmas after the path were lost", mode, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "state.db")); err != nil {
+		t.Fatalf("the database is not where it was asked to be: %v", err)
 	}
 }

@@ -116,12 +116,6 @@ func (s *Store) PruneSignals(ctx context.Context, before time.Time) (int64, erro
 	return res.RowsAffected()
 }
 
-// ForgetSignals drops an app's rollups.
-func (s *Store) ForgetSignals(ctx context.Context, app string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM signals WHERE app = ?`, app)
-	return err
-}
-
 // IntegrationUse is the last time an integration's credentials were used.
 type IntegrationUse struct {
 	Name    string    `json:"name"`

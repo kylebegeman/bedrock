@@ -2,12 +2,15 @@ package watch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/kylebegeman/bedrock/internal/app"
+	"github.com/kylebegeman/bedrock/internal/kernel"
 	"github.com/kylebegeman/bedrock/internal/state"
 )
 
@@ -155,5 +158,40 @@ func TestWithoutANotifierIncidentsAreStillRecorded(t *testing.T) {
 	open, _ := w.Store.OpenIncidents(ctx)
 	if len(open) != 1 || !strings.Contains(open[0].NotifyError, "integration set email") {
 		t.Fatalf("%+v", open)
+	}
+}
+
+func TestADeployUnderWayIsFoundByTheAppsName(t *testing.T) {
+	w, now := newWatcher(t, nil)
+	ctx := context.Background()
+	start := func(id, target string) {
+		t.Helper()
+		op := state.NewOperation{ID: id, Kind: app.DeployKind, Target: target, Input: json.RawMessage(`{}`), Plan: json.RawMessage(`{}`),
+			PlanDigest: "d", Recovery: string(kernel.Resume), StepNames: []string{"one"}, CreatedAt: *now}
+		if err := w.Store.CreateOperation(ctx, op); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Store.Claim(ctx, id, "daemon", *now, now.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	start("op-1", "hello")
+	// A journal from before 0.7.8 named the revision in the target.
+	start("op-2", "world 20260922-120000")
+	p := &Prober{Store: w.Store}
+	if !p.deploying(ctx, "hello") {
+		t.Fatal("hello's deploy was not found")
+	}
+	if !p.deploying(ctx, "world") {
+		t.Fatal("world's older deploy was not found")
+	}
+	if p.deploying(ctx, "hello-pr-nav") {
+		t.Fatal("another app's deploy was taken for hello-pr-nav's")
+	}
+	if err := w.Store.Finish(ctx, "op-1", state.Succeeded, "", json.RawMessage(`{}`), *now); err != nil {
+		t.Fatal(err)
+	}
+	if p.deploying(ctx, "hello") {
+		t.Fatal("a finished deploy still counts as under way")
 	}
 }

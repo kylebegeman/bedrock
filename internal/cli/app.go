@@ -41,6 +41,9 @@ func newDeploy(a *app) *cobra.Command {
 				return err
 			}
 			if to != "" {
+				if planOnly || a.digest != "" {
+					return fmt.Errorf("--plan and --digest don't cross the wire; run bedrock deploy --plan on the machine, or send the tree with --to and answer there")
+				}
 				if restorePostgres != "" || len(restoreVolumes) > 0 {
 					return fmt.Errorf("restores read files on the machine; run them there")
 				}
@@ -49,7 +52,7 @@ func newDeploy(a *app) *cobra.Command {
 				}
 				return deployTo(cmd.Context(), a, source, m.App, to)
 			}
-			in := apps.DeployInput{Source: source, Revision: time.Now().UTC().Format("20060102-150405")}
+			in := apps.DeployInput{Source: source, Revision: apps.NewRevision(time.Now())}
 			if manifestName != manifest.FileName {
 				in.Manifest = manifestName
 			}
@@ -289,7 +292,12 @@ func newPs(a *app) *cobra.Command {
 			}
 			defer engine.Close()
 			type row struct {
-				App, Workload, Revision, Container, Status, Image string
+				App       string `json:"app"`
+				Workload  string `json:"workload"`
+				Revision  string `json:"revision"`
+				Container string `json:"container,omitempty"`
+				Status    string `json:"status"`
+				Image     string `json:"image,omitempty"`
 			}
 			var rows []row
 			for _, rev := range active {
@@ -416,18 +424,20 @@ func (a *app) resolveContainer(ctx context.Context, appName, workload string) (s
 
 func newRemove(a *app) *cobra.Command {
 	var (
-		planOnly bool
-		data     bool
+		planOnly      bool
+		data          bool
+		forgetSecrets bool
 	)
 	cmd := &cobra.Command{
 		Use:   "remove <app>",
-		Short: "Take an app off this machine. Its volumes and database stay unless --data is given.",
+		Short: "Take an app off this machine. Its volumes, database and secrets stay unless asked.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.operate(cmd.Context(), apps.RemoveKind, apps.RemoveInput{App: args[0], Data: data}, planOnly)
+			return a.operate(cmd.Context(), apps.RemoveKind, apps.RemoveInput{App: args[0], Data: data, Secrets: forgetSecrets}, planOnly)
 		},
 	}
 	cmd.Flags().BoolVar(&data, "data", false, "also remove the app's volumes and database; only a backup brings them back")
+	cmd.Flags().BoolVar(&forgetSecrets, "secrets", false, "also forget the app's sealed secrets; a preview removed with --data forgets its own")
 	a.mutatingFlags(cmd, &planOnly)
 	return cmd
 }

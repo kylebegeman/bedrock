@@ -30,11 +30,6 @@ import (
 	"github.com/kylebegeman/bedrock/internal/state"
 )
 
-// quietError ends the program with a code, its message already shown.
-type quietError struct{ code int }
-
-func (q quietError) Error() string { return fmt.Sprintf("exit %d", q.code) }
-
 func newGit(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "git",
@@ -65,7 +60,10 @@ func newGit(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			key = kf.Allow(key, appName)
+			key, err = kf.Allow(key, appName)
+			if err != nil {
+				return err
+			}
 			if err := writeKeys(kf); err != nil {
 				return err
 			}

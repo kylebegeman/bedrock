@@ -2,6 +2,8 @@ package cli
 
 import (
 	"encoding/json"
+	"github.com/kylebegeman/bedrock/internal/integration"
+	"github.com/kylebegeman/bedrock/internal/secrets"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,8 +53,10 @@ func TestIntegrationsAreSetFromStdinAndListedWithoutValues(t *testing.T) {
 	if strings.Contains(out, "hush") {
 		t.Fatal("a secret value was listed")
 	}
+	// Setting it again changes only what is named: the s3 endpoint stays,
+	// which b2 then refuses.
 	_, errOut, code = withStdin(t, "kind=b2\n", stateDir, "integration", "set", "storage")
-	if code != 1 || !strings.Contains(errOut, "needs key_id") {
+	if code != 1 || !strings.Contains(errOut, "endpoint is for s3 only") {
 		t.Fatalf("code %d, err %q", code, errOut)
 	}
 	out, _, code = run(t, stateDir, "integration", "remove", "email")
@@ -118,5 +122,27 @@ func TestEmptyMachineReadsAsEmpty(t *testing.T) {
 	out, _, _ = run(t, stateDir, "--json", "backups")
 	if err := json.Unmarshal([]byte(out), &rows); err != nil || len(rows) != 0 {
 		t.Fatalf("backups json: %v %q", err, out)
+	}
+}
+
+func TestIntegrationSetAgainKeepsTheStoragePassword(t *testing.T) {
+	stateDir := t.TempDir()
+	if _, errOut, code := withStdin(t, "kind=s3\nendpoint=http://127.0.0.1:9000\nkey_id=lane\nkey=hush\nbucket_prefix=lane\n", stateDir, "integration", "set", "storage"); code != 0 {
+		t.Fatalf("code %d, err %q", code, errOut)
+	}
+	first, err := integration.LoadStorage(secrets.DefaultStore(stateDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, errOut, code := withStdin(t, "key=hush2\n", stateDir, "integration", "set", "storage")
+	if code != 0 || strings.Contains(errOut, "bedrock made a password") {
+		t.Fatalf("code %d, err %q", code, errOut)
+	}
+	again, err := integration.LoadStorage(secrets.DefaultStore(stateDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Key != "hush2" || again.Password != first.Password || again.Endpoint != first.Endpoint {
+		t.Fatalf("after setting the key again: %+v, was %+v", again, first)
 	}
 }

@@ -137,9 +137,3 @@ func (s *Store) LastGoodBackupRun(ctx context.Context, app, kind string) (*Backu
 	r.StartedAt, r.FinishedAt, r.SnapshotAt = fromUnix(started), fromUnix(finished), fromUnix(snapshotAt)
 	return &r, nil
 }
-
-// ForgetBackupRuns drops an app's run history.
-func (s *Store) ForgetBackupRuns(ctx context.Context, app string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM backup_runs WHERE app = ?`, app)
-	return err
-}

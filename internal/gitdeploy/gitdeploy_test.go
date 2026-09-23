@@ -40,9 +40,14 @@ func TestKeysAreBoundToTheirApps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	kf.Allow(k, "begamin")
-	kf.Allow(k, "dragon-writer")
-	kf.Allow(k, "begamin")
+	for _, app := range []string{"begamin", "dragon-writer", "begamin"} {
+		if _, err := kf.Allow(k, app); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := kf.Allow(k, "Not An App"); err == nil {
+		t.Fatal("a name that isn't an app's went into a forced command")
+	}
 	if err := kf.Write(); err != nil {
 		t.Fatal(err)
 	}
@@ -253,4 +258,17 @@ func hookWithBuilds(t *testing.T, app, stdin string, out *bytes.Buffer, d Deploy
 	hookBuildsDir = t.TempDir()
 	defer func() { hookBuildsDir = saved }()
 	return Hook(context.Background(), app, strings.NewReader(stdin), out, d)
+}
+
+func TestBranchNamesThatWouldBeFlagsAreRefused(t *testing.T) {
+	for _, bad := range []string{"-x", "--upload-pack=evil", "a..b", "feat/", "", "x.lock", "a b"} {
+		if err := ValidBranch(bad); err == nil {
+			t.Errorf("%q was accepted as a branch name", bad)
+		}
+	}
+	for _, good := range []string{"main", "feature/new-nav", "v1.2", "release-2026.09", "kyle_wip"} {
+		if err := ValidBranch(good); err != nil {
+			t.Errorf("%q: %v", good, err)
+		}
+	}
 }

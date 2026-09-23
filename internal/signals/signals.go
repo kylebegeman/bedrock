@@ -155,9 +155,14 @@ func NewSampler(store *state.Store) *Sampler {
 	}
 }
 
-// Sample takes one round of measurements.
+// Sample takes one round of measurements. A round still going when the
+// next is due is left to finish, and the next is skipped: the rollups are
+// hourly, and a queue of late rounds would only pile onto the machine.
 func (s *Sampler) Sample(ctx context.Context) error {
-	s.mu.Lock()
+	if !s.mu.TryLock() {
+		s.Log("signals: the last round is still going; skipping this one")
+		return nil
+	}
 	defer s.mu.Unlock()
 	now := s.Now()
 	active, err := s.Store.ActiveRevisions(ctx)
@@ -384,7 +389,6 @@ func Summarize(rows []state.Signal) Summary {
 	var sum Summary
 	var durationMS, observed float64
 	buckets := map[float64]float64{}
-	type wl struct{ cpu, mem float64 }
 	perWorkload := map[string]*struct {
 		cpu, cpuSamples, mem, memSamples float64
 	}{}
@@ -461,15 +465,6 @@ func Summarize(rows []state.Signal) Summary {
 		}
 	}
 	return sum
-}
-
-// Summary returns an app's signals since a time.
-func (s *Sampler) Summary(ctx context.Context, app string, since time.Time) (Summary, error) {
-	rows, err := s.Store.Signals(ctx, app, since)
-	if err != nil {
-		return Summary{}, err
-	}
-	return Summarize(rows), nil
 }
 
 // AppSummaries returns every app's summary since a time.

@@ -135,8 +135,8 @@ func TestAPreviewsNameIsStableAndFitsAManifest(t *testing.T) {
 	for _, branch := range []string{
 		"main", "feature/new-nav", "Feature/New_Nav", "renovate/some-extremely-long-dependency-bump-branch-name-that-goes-on",
 	} {
-		first := PreviewName("kylebegeman", branch)
-		if first != PreviewName("kylebegeman", branch) {
+		first := previewName("kylebegeman", branch)
+		if first != previewName("kylebegeman", branch) {
 			t.Fatalf("%s: the name is not stable", branch)
 		}
 		if len(first) > maxAppName {
@@ -150,8 +150,8 @@ func TestAPreviewsNameIsStableAndFitsAManifest(t *testing.T) {
 		}
 	}
 	// Two long branches of one app must not land on the same preview.
-	a := PreviewName("kylebegeman", "renovate/bump-the-first-extremely-long-dependency-name-here")
-	b := PreviewName("kylebegeman", "renovate/bump-the-second-extremely-long-dependency-name-here")
+	a := previewName("kylebegeman", "renovate/bump-the-first-extremely-long-dependency-name-here")
+	b := previewName("kylebegeman", "renovate/bump-the-second-extremely-long-dependency-name-here")
 	if a == b {
 		t.Fatalf("two branches collided on %q", a)
 	}
@@ -208,5 +208,27 @@ func TestAPreviewKeepsWhatMakesItTheSameApp(t *testing.T) {
 	// The parent's own routes must be exactly as they were.
 	if src.Workloads["web"].Routes[0].Host != "kylebegeman.com" || src.Workloads["web"].Routes[0].Auth != manifest.AuthNone {
 		t.Fatal("deriving a preview changed the parent")
+	}
+}
+
+func TestAPreviewSharesNothingWithItsParent(t *testing.T) {
+	src, err := manifest.Parse([]byte("app: shop\nworkloads:\n  web:\n    kind: web\n    image: x\n    port: 80\n    routes: [{host: shop.example.com, dns: direct}]\ndata:\n  postgres: {version: \"16\", env: {TZ: UTC}}\n  volumes:\n    files: {}\nsecrets:\n  generate: {TOKEN: hex:16}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := PreviewOf(src, "nav", "preview.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Data.Postgres.Version = "18"
+	p.Data.Postgres.Env["TZ"] = "Mars"
+	p.Data.Volumes["more"] = manifest.Volume{}
+	p.Secrets.Generate["OTHER"] = "hex:8"
+	SetRouteDNS(p, manifest.DNSManual)
+	if src.Data.Postgres.Version != "16" || src.Data.Postgres.Env["TZ"] != "UTC" || len(src.Data.Volumes) != 1 || len(src.Secrets.Generate) != 1 {
+		t.Fatalf("the parent changed underneath: %+v %+v", src.Data, src.Secrets)
+	}
+	if src.Workloads["web"].Routes[0].DNS != manifest.DNSDirect || p.Workloads["web"].Routes[0].DNS != manifest.DNSManual {
+		t.Fatalf("routes: parent %v, preview %v", src.Workloads["web"].Routes, p.Workloads["web"].Routes)
 	}
 }

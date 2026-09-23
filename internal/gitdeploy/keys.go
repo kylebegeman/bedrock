@@ -148,13 +148,17 @@ func ReadKeys(path string) (*KeyFile, error) {
 	return kf, sc.Err()
 }
 
-// Allow lets a key deploy an app, adding the key when it is new.
-func (kf *KeyFile) Allow(k Key, app string) Key {
+// Allow lets a key deploy an app, adding the key when it is new. The app
+// goes into a forced command's options, so its name is checked here too.
+func (kf *KeyFile) Allow(k Key, app string) (Key, error) {
+	if !ValidApp(app) {
+		return Key{}, fmt.Errorf("%q isn't an app's name", app)
+	}
 	for i := range kf.Keys {
 		if kf.Keys[i].Blob == k.Blob {
 			for _, a := range kf.Keys[i].Apps {
 				if a == app {
-					return kf.Keys[i]
+					return kf.Keys[i], nil
 				}
 			}
 			kf.Keys[i].Apps = append(kf.Keys[i].Apps, app)
@@ -162,12 +166,12 @@ func (kf *KeyFile) Allow(k Key, app string) Key {
 			if k.Comment != "" {
 				kf.Keys[i].Comment = k.Comment
 			}
-			return kf.Keys[i]
+			return kf.Keys[i], nil
 		}
 	}
 	k.Apps = []string{app}
 	kf.Keys = append(kf.Keys, k)
-	return k
+	return k, nil
 }
 
 // Deny takes an app from a key named by fingerprint or public key; a key
@@ -219,9 +223,29 @@ func (kf *KeyFile) Write() error {
 	for _, k := range kf.Keys {
 		b.WriteString(k.Line() + "\n")
 	}
-	tmp := kf.Path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(b.String()), 0o600); err != nil {
+	// A temporary file of its own: two allows at once must not write over
+	// each other's half.
+	tmp, err := os.CreateTemp(filepath.Dir(kf.Path), ".authorized_keys-*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, kf.Path)
+	if _, err := tmp.WriteString(b.String()); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Rename(tmp.Name(), kf.Path); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	return nil
 }

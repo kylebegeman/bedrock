@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/kylebegeman/bedrock/internal/kernel"
@@ -218,12 +219,48 @@ func (l *Local) Plan(ctx context.Context, kind string, input json.RawMessage) (*
 
 // Run implements Runner.
 func (l *Local) Run(ctx context.Context, kind string, input json.RawMessage, emit func(kernel.Event)) (*kernel.Receipt, error) {
-	return l.Engine.Run(ctx, kind, input, emit)
+	return l.RunExpecting(ctx, kind, input, "", emit)
 }
 
-// RunExpecting implements Runner.
+// RunExpecting implements Runner. Operations run one at a time on a
+// machine; with no daemon to hold them in line, a lock beside the store
+// does, so two commands run by hand can't interleave their steps.
 func (l *Local) RunExpecting(ctx context.Context, kind string, input json.RawMessage, expect string, emit func(kernel.Event)) (*kernel.Receipt, error) {
+	unlock, err := lockOperations(ctx, l.Store.Path())
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	return l.Engine.RunExpecting(ctx, kind, input, expect, emit)
+}
+
+// lockOperations takes the machine's operation lock, kept beside the state
+// store, waiting for whoever holds it until ctx ends.
+func lockOperations(ctx context.Context, statePath string) (func(), error) {
+	dir := filepath.Join(filepath.Dir(statePath), "locks")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "operations.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return func() { _ = f.Close() }, nil
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
+			_ = f.Close()
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			_ = f.Close()
+			return nil, fmt.Errorf("another bedrock operation is running on this machine: %w", ctx.Err())
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 // List implements Runner.

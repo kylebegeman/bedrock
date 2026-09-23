@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -123,7 +124,7 @@ func (j *Jobs) RunWith(ctx context.Context, rev *state.Revision, workload string
 		spec.ReadOnly = false
 	}
 	started := time.Now().UTC()
-	id, err := j.Store.StartJobRun(ctx, state.JobRun{App: rev.App, Workload: workload, Revision: rev.ID, Kind: kind, StartedAt: started})
+	id, err := j.Store.StartJobRun(ctx, state.JobRun{App: rev.App, Workload: workload, Revision: rev.ID, Kind: kind, StartedAt: started, Container: spec.Name})
 	if err != nil {
 		return -1, err
 	}
@@ -227,10 +228,15 @@ func (j *Jobs) Tick(ctx context.Context, now time.Time, log func(string, ...any)
 			rev := rev
 			go func() {
 				defer func() {
+					if p := recover(); p != nil {
+						log("cron %s: panic: %v\n%s", key, p, debug.Stack())
+					}
 					j.mu.Lock()
 					delete(j.running, key)
 					j.mu.Unlock()
 				}()
+				// On its own context: a daemon restart must not kill a long
+				// job. The next daemon takes the run up again (ReconcileJobRuns).
 				code, err := j.Run(context.Background(), &rev, name, nil, JobCron, io.Discard)
 				if err != nil {
 					log("cron %s: %v (exit %d)", key, err, code)

@@ -68,8 +68,7 @@ func newHost(a *app) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if profile.Hostname == "" {
-				current, _ := host.RealEnv().Run(cmd.Context(), "hostname")
-				profile.Hostname = strings.TrimSpace(current)
+				profile.Hostname, _ = os.Hostname()
 			}
 			if err := profile.Validate(); err != nil {
 				return err

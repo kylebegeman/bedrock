@@ -506,6 +506,11 @@ func (m *Manifest) Validate() error {
 				}
 			}
 		}
+		if h := w.Health; h != nil && h.Timeout != "" {
+			if d, err := time.ParseDuration(h.Timeout); err != nil || d <= 0 {
+				fail("%s.health.timeout: %q isn't a duration such as 90s", at, h.Timeout)
+			}
+		}
 		for i, mt := range w.Mounts {
 			ma := fmt.Sprintf("%s.mounts[%d]", at, i)
 			if m.Data == nil || m.Data.Volumes == nil {
@@ -716,6 +721,11 @@ func (m *Manifest) Validate() error {
 		if c.Status < 0 || c.Status > 599 {
 			fail("checks[%d]: status must be an HTTP status", i)
 		}
+		if c.Within != "" {
+			if d, err := time.ParseDuration(c.Within); err != nil || d <= 0 {
+				fail("checks[%d].within: %q isn't a duration such as 5s", i, c.Within)
+			}
+		}
 	}
 	if len(errs) > 0 {
 		return errors.New(strings.Join(errs, "\n"))
@@ -749,7 +759,8 @@ func (m *Manifest) Hosts() []string {
 	return hosts
 }
 
-// Path returns a route's path with its default applied.
+// NormalizedPath returns a route's path prefix with its default applied
+// and a trailing slash, the form routes are matched in.
 func (r Route) NormalizedPath() string {
 	if r.Path == "" {
 		return "/"
@@ -757,15 +768,9 @@ func (r Route) NormalizedPath() string {
 	return strings.TrimSuffix(r.Path, "/") + "/"
 }
 
-// WorkloadFor finds the workload that serves a host and path: the route
-// with the longest matching prefix wins, as it does at the edge.
-func (m *Manifest) WorkloadFor(host, path string) (string, Workload, bool) {
-	name, w, _, ok := m.RouteFor(host, path)
-	return name, w, ok
-}
-
-// RouteFor is WorkloadFor with the route that matched, whose port the
-// request reaches.
+// RouteFor finds the workload that serves a host and path, and the route
+// that matched, whose port the request reaches: the route with the
+// longest matching prefix wins, as it does at the edge.
 func (m *Manifest) RouteFor(host, path string) (string, Workload, Route, bool) {
 	if path == "" {
 		path = "/"
@@ -970,7 +975,7 @@ func (m *Manifest) GuardedRoutes() []string {
 	return out
 }
 
-// Capabilities returns the capability names to keep, with CAP_ stripped.
+// CapabilityNames returns the capability names to keep, with CAP_ stripped.
 func (w Workload) CapabilityNames() []string {
 	var out []string
 	for _, c := range w.Capabilities {

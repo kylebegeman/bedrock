@@ -11,18 +11,22 @@
 #
 # Needs the lane after prove-m5.sh: the storage integration is used for the
 # backup. Loom's Core is the other half of M7: `pnpm loom core create`
-# against core.lane.begam.in, from the Loom repository.
+# against core.$LANE_DOMAIN, from the Loom repository.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 . "$here/hostinger.env"
+: "${LANE_DOMAIN:?set LANE_DOMAIN in lane/hostinger.env; see hostinger.env.example}"
+export LANE_DOMAIN
 ssh_opts=(-i "$KEY" -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes
   -o UserKnownHostsFile="$here/known_hosts" -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
 box="root@$HOST"
 run() { ssh "${ssh_opts[@]}" "$box" "$@"; }
 put() { scp -q "${ssh_opts[@]}" "$1" "$box:$2"; }
 fetch() { curl -sS --max-time 30 "$@"; }
+# The fixtures name lane.example.com; the box answers for $LANE_DOMAIN.
+localize() { run "sed -i 's/lane\\.example\\.com/$LANE_DOMAIN/g' $*"; }
 quiet() { grep -v '^  \.\.\.  '; }
 fail() { echo "M7 NOT proven: $*" >&2; exit 1; }
 sql() { run "bedrock psql notes -- -tAc \"$1\"" | tr -d '\r'; }
@@ -30,7 +34,7 @@ sql() { run "bedrock psql notes -- -tAc \"$1\"" | tr -d '\r'; }
 edit() { run "sed -i '$1' /srv/lane/notes/bedrock.yaml"; }
 # worker prints the running worker container's name.
 worker() { run "docker ps --filter label=bedrock.app=notes --filter label=bedrock.workload=worker --format '{{.Names}}'"; }
-active() { run 'bedrock ps --json' | python3 -c 'import json,sys; print(next(r["Revision"] for r in json.load(sys.stdin) if r["App"]=="notes" and r["Workload"]=="api"))'; }
+active() { run 'bedrock ps --json' | python3 -c 'import json,sys; print(next(r["revision"] for r in json.load(sys.stdin) if r["app"]=="notes" and r["workload"]=="api"))'; }
 
 echo "== build and install"
 (cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/bedrock-linux-amd64 ./cmd/bedrock && go build -trimpath -o bin/bedrock ./cmd/bedrock)
@@ -43,6 +47,7 @@ echo "== the first deploy makes the secrets, the data and the bucket, and runs t
 run 'bedrock remove notes --data --yes >/dev/null 2>&1 || true'
 run 'rm -rf /srv/lane/notes'
 (cd "$here/fixtures" && COPYFILE_DISABLE=1 tar czf - notes) | run 'tar xzf - -C /srv/lane 2>/dev/null'
+localize /srv/lane/notes/bedrock.yaml
 if ! out=$(run 'bedrock deploy /srv/lane/notes --yes' 2>&1 | quiet); then echo "$out"; fail "the first deploy failed"; fi
 echo "$out" | grep -E "made |derived |credentials made|postgres .* ready|object store ready|build api's image|buckets:|migrate:|Bucket created|INSERT|stopped first|running as|ready$|succeeded|failed"
 names=$(run 'bedrock secret list notes --json')
@@ -53,16 +58,16 @@ echo "$names" | grep -q '"DATABASE_URL"' && fail "database_url: false still made
 echo "-- every secret made or derived; no DATABASE_URL, as the manifest says"
 
 echo "== from the outside: both ports, through the edge"
-api=$(fetch https://notes.lane.begam.in/); control=$(fetch https://notes-control.lane.begam.in/)
+api=$(fetch https://notes.$LANE_DOMAIN/); control=$(fetch https://notes-control.$LANE_DOMAIN/)
 echo "-- $api"; echo "-- $control"
 [[ "$api" == "notes api, revision"* && "$control" == "notes control, revision"* ]] || fail "a route doesn't reach its port"
 
 echo "== one image serves both workloads"
 run 'bedrock ps --json' | python3 -c '
 import json,sys
-rows={r["Workload"]:r for r in json.load(sys.stdin) if r["App"]=="notes"}
-assert rows["api"]["Image"]==rows["worker"]["Image"], rows
-print("-- api and worker run", rows["api"]["Image"][:60])'
+rows={r["workload"]:r for r in json.load(sys.stdin) if r["app"]=="notes"}
+assert rows["api"]["image"]==rows["worker"]["image"], rows
+print("-- api and worker run", rows["api"]["image"][:60])'
 
 echo "== the database: another image, its own superuser, roles from the first-run scripts, a password on every connection"
 roles=$(sql "select string_agg(rolname, ',' order by rolname) from pg_roles where rolname like 'notes%'")
@@ -84,7 +89,7 @@ if ! out=$(run 'bedrock deploy /srv/lane/notes --yes' 2>&1 | quiet); then echo "
 echo "$out" | grep -E "stopped first|worker ready|succeeded"
 echo "$out" | grep -q "$before stopped first" || fail "the old worker wasn't stopped before the new one started"
 [[ $(worker | wc -l | tr -d ' ') == 1 ]] || fail "more than one worker runs"
-[[ "$(fetch https://notes.lane.begam.in/)" == *"note second"* ]] || fail "the second revision doesn't serve"
+[[ "$(fetch https://notes.$LANE_DOMAIN/)" == *"note second"* ]] || fail "the second revision doesn't serve"
 [[ "$(sql "select count(*) from notes")" == 2 ]] || fail "the releases didn't run again"
 good=$(active); good_worker=$(worker)
 echo "-- $good serves, one worker ($good_worker), 2 rows"
@@ -96,7 +101,7 @@ echo "$out" | grep -E "stopped first|started again|told to fail|failed" | head -
 edit '/    env: {FAIL: "1"}/d'
 [[ "$(worker)" == "$good_worker" ]] || fail "the previous worker isn't running again: $(worker)"
 [[ "$(active)" == "$good" ]] || fail "the active revision changed"
-[[ "$(fetch https://notes.lane.begam.in/)" == *"note second"* ]] || fail "the site stopped serving the good revision"
+[[ "$(fetch https://notes.$LANE_DOMAIN/)" == *"note second"* ]] || fail "the site stopped serving the good revision"
 echo "-- $good_worker runs again; $good still serves (its releases ran: the data moves forward, as a migration does)"
 
 echo "== a release that fails starts nothing new"

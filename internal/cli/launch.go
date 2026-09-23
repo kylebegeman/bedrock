@@ -55,22 +55,42 @@ manifest it writes is an ordinary one: read it, change it, commit it.`,
 			if err := gitdeploy.ValidRepo(repo); err != nil {
 				return err
 			}
+			if err := gitdeploy.ValidBranch(branch); err != nil {
+				return err
+			}
 			if appName == "" {
 				appName = appNameFromRepo(repo)
 			}
 			if appName == "" {
 				return fmt.Errorf("could not read an app name out of %q; pass --app", repo)
 			}
-			dir := filepath.Join(a.stateDir, "launches", fmt.Sprintf("%s-%d", appName, time.Now().UnixMilli()))
-			if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
+			// What can be refused before anything is fetched, is.
+			if err := (manifest.Scaffold{App: appName, Kind: manifest.Worker}).Check(); err != nil {
 				return err
 			}
-			// A planned launch fetched the tree only to read it, so it goes
-			// again afterwards. A real one keeps it: the deployed revision
-			// records that directory as its source.
-			if planOnly && !keep {
-				defer os.RemoveAll(dir)
+			if host != "" && !manifest.ValidHost(host) {
+				return fmt.Errorf("--host %q isn't a hostname such as %s.example.com", host, appName)
 			}
+			// The tree lives beside the other sources deploys are made from,
+			// and goes when the launch does not: a planned or failed one
+			// leaves nothing behind unless asked to, and a deployed one is
+			// kept, the newest few per app, because its revision names it.
+			root := filepath.Join(a.stateDir, "builds")
+			dir, err := gitdeploy.NewBuildDir(root, appName, "launch")
+			if err != nil {
+				return err
+			}
+			deployed := false
+			defer func() {
+				switch {
+				case deployed:
+					gitdeploy.PruneBuilds(root, appName, 3)
+				case keep:
+					fmt.Fprintf(a.stderr, "the fetched tree and its manifest are at %s\n", dir)
+				default:
+					_ = os.RemoveAll(dir)
+				}
+			}()
 			fmt.Fprintf(a.stderr, "fetching %s\n", repo)
 			if err := shallowClone(cmd.Context(), repo, branch, dir); err != nil {
 				return err
@@ -81,33 +101,33 @@ manifest it writes is an ordinary one: read it, change it, commit it.`,
 			}
 			fmt.Fprintf(a.stderr, "%s looks like a %s app (%s)\n", appName, found.Kind, found.Why)
 
-			s := manifest.Scaffold{App: appName, Kind: found.Kind, Host: host, Port: port, Postgres: postgres}
+			s := manifest.Scaffold{App: appName, Kind: found.Kind, Host: host, Port: port, Postgres: postgres, Dir: found.Dir, Existing: true}
 			body, err := s.Render()
 			if err != nil {
 				return err
-			}
-			// The scaffold always writes public/; this tree may keep its
-			// files somewhere else. Re-parse rather than trust the edit.
-			if found.Kind == manifest.Static && found.Dir != "public" {
-				body = []byte(strings.Replace(string(body), "    dir: public\n", "    dir: "+found.Dir+"\n", 1))
-				if _, err := manifest.Parse(body); err != nil {
-					return fmt.Errorf("pointing the site at %s produced a manifest that will not load: %w", found.Dir, err)
-				}
 			}
 			path := filepath.Join(dir, manifest.FileName)
 			if err := os.WriteFile(path, body, 0o644); err != nil {
 				return err
 			}
-			fmt.Fprintf(a.stderr, "wrote %s\n\n", manifest.FileName)
+			fmt.Fprintf(a.stderr, "wrote %s\n", manifest.FileName)
+			if next := s.Next(); len(next) > 0 {
+				fmt.Fprintln(a.stderr, "still to do:")
+				for _, step := range next {
+					fmt.Fprintf(a.stderr, "  - %s\n", step)
+				}
+			}
+			fmt.Fprintln(a.stderr)
 
-			in := apps.DeployInput{Source: dir, Revision: time.Now().UTC().Format("20060102-150405")}
+			in := apps.DeployInput{Source: dir, Revision: apps.NewRevision(time.Now())}
 			if err := a.operate(cmd.Context(), apps.DeployKind, in, planOnly); err != nil {
 				return err
 			}
 			if planOnly {
 				return nil
 			}
-			fmt.Fprintf(a.stdout, "\n%s is live. Its manifest is at %s; copy it into the repository so the next deploy uses yours.\n", appName, path)
+			deployed = true
+			fmt.Fprintf(a.prose(), "\n%s is live. Its manifest is at %s; copy it into the repository so the next deploy uses yours.\n", appName, path)
 			return nil
 		},
 	}
@@ -116,18 +136,19 @@ manifest it writes is an ordinary one: read it, change it, commit it.`,
 	cmd.Flags().StringVar(&branch, "branch", "main", "the branch to launch")
 	cmd.Flags().BoolVar(&postgres, "postgres", false, "give the app a database, and DATABASE_URL to reach it")
 	cmd.Flags().IntVar(&port, "port", 0, fmt.Sprintf("the port a web app listens on (default %d)", manifest.DefaultPort))
-	cmd.Flags().BoolVar(&keep, "keep", false, "leave the fetched tree behind even if the launch is only planned")
+	cmd.Flags().BoolVar(&keep, "keep", false, "leave the fetched tree and the manifest bedrock wrote behind after a --plan or a failure, to read them")
 	a.mutatingFlags(cmd, &planOnly)
 	return cmd
 }
 
 // shallowClone brings one branch down, without history and without ever
 // stopping to ask for a password: a launch that needs credentials should
-// fail saying so rather than hang.
+// fail saying so rather than hang. The branch was checked by the caller;
+// the -- keeps a repository from being read as a flag either way.
 func shallowClone(ctx context.Context, repo, branch, dir string) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	clone := exec.CommandContext(ctx, "git", "clone", "--quiet", "--depth", "1", "--branch", branch, repo, dir)
+	clone := exec.CommandContext(ctx, "git", "clone", "--quiet", "--depth", "1", "--branch", branch, "--", repo, dir)
 	clone.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if out, err := clone.CombinedOutput(); err != nil {
 		return fmt.Errorf("git clone %s %s: %s", repo, branch, strings.TrimSpace(string(out)))
@@ -139,22 +160,12 @@ func shallowClone(ctx context.Context, repo, branch, dir string) error {
 
 var repoName = regexp.MustCompile(`([a-zA-Z0-9][a-zA-Z0-9._-]*?)(\.git)?/?$`)
 
-// appNameFromRepo reads the app's name out of a repository URL, lowercased
-// and with anything a manifest will not accept turned into a hyphen.
+// appNameFromRepo reads the app's name out of a repository URL, as a
+// manifest will accept it.
 func appNameFromRepo(repo string) string {
 	m := repoName.FindStringSubmatch(strings.TrimSpace(repo))
 	if m == nil {
 		return ""
 	}
-	name := strings.ToLower(m[1])
-	var b strings.Builder
-	for _, r := range name {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-		default:
-			b.WriteRune('-')
-		}
-	}
-	return strings.Trim(b.String(), "-")
+	return apps.DNSLabel(m[1])
 }

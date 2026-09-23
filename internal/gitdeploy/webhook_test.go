@@ -120,3 +120,12 @@ func TestAWebhookFetchesTheBranchAndDeploysIt(t *testing.T) {
 		t.Fatalf("after disable: %d", w.Code)
 	}
 }
+
+func TestValuesFromRequestsAreBoundedBeforeTheyAreLogged(t *testing.T) {
+	if got := logSafe("203.0.113.9\nfake: line"); got != "203.0.113.9 fake: line" {
+		t.Fatalf("got %q", got)
+	}
+	if got := logSafe(strings.Repeat("x", 100)); len(got) != 83 || !strings.HasSuffix(got, "...") {
+		t.Fatalf("got %q", got)
+	}
+}

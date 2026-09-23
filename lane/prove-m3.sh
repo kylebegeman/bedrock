@@ -4,18 +4,23 @@
 # show that a revision failing its check never goes live, and show a wrong
 # DNS record reported in plain words.
 #
-# Needs DNS: *.lane.begam.in pointing at the box, DNS-only.
+# Needs DNS: *.$LANE_DOMAIN pointing at the box, DNS-only.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 . "$here/hostinger.env"
+: "${LANE_DOMAIN:?set LANE_DOMAIN in lane/hostinger.env; see hostinger.env.example}"
+: "${LANE_ZONE:?set LANE_ZONE in lane/hostinger.env; see hostinger.env.example}"
+export LANE_DOMAIN LANE_ZONE
 ssh_opts=(-i "$KEY" -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes
   -o UserKnownHostsFile="$here/known_hosts" -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
 box="root@$HOST"
 run() { ssh "${ssh_opts[@]}" "$box" "$@"; }
 put() { scp -q "${ssh_opts[@]}" "$1" "$box:$2"; }
 fetch() { curl -sS --max-time 20 "$@"; }
+# The fixtures name lane.example.com; the box answers for $LANE_DOMAIN.
+localize() { run "sed -i 's/lane\\.example\\.com/$LANE_DOMAIN/g' $*"; }
 quiet() { grep -v '^  \.\.\.  ' ; }
 
 # hello_manifest <greeting> <check text> <host> writes the web fixture's
@@ -56,16 +61,17 @@ run 'bedrock host reconcile --yes' | tail -2
 echo "== copy the fixtures"
 run 'rm -rf /srv/lane && mkdir -p /srv/lane'
 (cd "$here/fixtures" && COPYFILE_DISABLE=1 tar czf - hello site) | run 'tar xzf - -C /srv/lane 2>/dev/null'
+localize /srv/lane/hello/bedrock.yaml /srv/lane/site/bedrock.yaml
 
 echo "== deploy the static site"
 run 'bedrock deploy /srv/lane/site --yes' | quiet
 echo "-- from the outside:"
-fetch https://site.lane.begam.in/ | sed -n '3p'
+fetch https://site.$LANE_DOMAIN/ | sed -n '3p'
 
 echo "== deploy the web app"
-hello_manifest hello "hello from bedrock" hello.lane.begam.in
+hello_manifest hello "hello from bedrock" hello.$LANE_DOMAIN
 run 'bedrock deploy /srv/lane/hello --yes' | quiet
-first=$(fetch https://hello.lane.begam.in/)
+first=$(fetch https://hello.$LANE_DOMAIN/)
 echo "-- from the outside: $first"
 case "$first" in "hello from bedrock, revision 2"*) ;; *) echo "M3 NOT proven: first revision" >&2; exit 1 ;; esac
 
@@ -73,30 +79,30 @@ echo "== ps and logs"
 run 'bedrock ps; bedrock logs hello --tail 2'
 
 echo "== a second revision"
-hello_manifest "hi again" "hi again from bedrock" hello.lane.begam.in
+hello_manifest "hi again" "hi again from bedrock" hello.$LANE_DOMAIN
 run 'bedrock deploy /srv/lane/hello --yes' | quiet | tail -5
-second=$(fetch https://hello.lane.begam.in/)
+second=$(fetch https://hello.$LANE_DOMAIN/)
 echo "-- from the outside: $second"
 case "$second" in "hi again from bedrock, revision 2"*) ;; *) echo "M3 NOT proven: second revision" >&2; exit 1 ;; esac
 
 echo "== roll back"
 run 'bedrock rollback hello --yes' | quiet | tail -5
-third=$(fetch https://hello.lane.begam.in/)
+third=$(fetch https://hello.$LANE_DOMAIN/)
 echo "-- from the outside: $third"
 case "$third" in "hello from bedrock, revision 2"*) ;; *) echo "M3 NOT proven: rollback" >&2; exit 1 ;; esac
 [[ "${third#*revision }" == "${first#*revision }" ]] || { echo "M3 NOT proven: the rollback isn't the first revision" >&2; exit 1; }
 
 echo "== a revision that fails its check never goes live"
-hello_manifest "broken" "this never appears" hello.lane.begam.in
+hello_manifest "broken" "this never appears" hello.$LANE_DOMAIN
 run 'bedrock deploy /srv/lane/hello --yes' 2>&1 | quiet | tail -4 || true
-fourth=$(fetch https://hello.lane.begam.in/)
+fourth=$(fetch https://hello.$LANE_DOMAIN/)
 echo "-- from the outside: $fourth"
 case "$fourth" in "hello from bedrock, revision 2"*) ;; *) echo "M3 NOT proven: the failing revision went live" >&2; exit 1 ;; esac
 
 echo "== a wrong DNS record, in plain words"
-hello_manifest hello "hello from bedrock" begam.in
+hello_manifest hello "hello from bedrock" "$LANE_ZONE"
 run 'bedrock deploy /srv/lane/hello --yes' 2>&1 | quiet | tail -3 || true
-hello_manifest hello "hello from bedrock" hello.lane.begam.in
+hello_manifest hello "hello from bedrock" hello.$LANE_DOMAIN
 
 echo "== history"
 run 'bedrock history --limit 7'

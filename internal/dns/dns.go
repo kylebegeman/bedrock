@@ -75,6 +75,9 @@ type Outcome struct {
 	Proxied bool
 	// Zone is the zone the record is in.
 	Zone string
+	// Removed names the CNAME and AAAA records taken out of the A record's
+	// way, when the host was taken over on purpose.
+	Removed []string
 }
 
 // Depth is how many labels a host has below its zone: one for
@@ -92,7 +95,11 @@ func (o Outcome) String() string {
 	if o.Proxied {
 		mode = "proxied"
 	}
-	return fmt.Sprintf("%s %s (%s, %s)", o.Host, o.Action, o.Content, mode)
+	s := fmt.Sprintf("%s %s (%s, %s)", o.Host, o.Action, o.Content, mode)
+	if len(o.Removed) > 0 {
+		s += "; removed " + strings.Join(o.Removed, ", ")
+	}
+	return s
 }
 
 // ErrElsewhere means a record exists and points at another machine. A
@@ -118,6 +125,7 @@ func (m *Manager) Ensure(ctx context.Context, app, host string, mode manifest.DN
 	proxied := mode == manifest.DNSProxied
 	want := cloudflare.Record{Type: "A", Name: host, Content: ip, Proxied: proxied, Comment: Comment(app, m.Hostname)}
 	var a *cloudflare.Record
+	var removed []string
 	for i := range records {
 		switch records[i].Type {
 		case "A":
@@ -131,13 +139,14 @@ func (m *Manager) Ensure(ctx context.Context, app, host string, mode manifest.DN
 			if err := m.CF.Delete(ctx, z.ID, records[i].ID); err != nil {
 				return Outcome{}, err
 			}
+			removed = append(removed, records[i].Type+" "+records[i].Content)
 		}
 	}
 	if a == nil {
 		if _, err := m.CF.Create(ctx, z.ID, want); err != nil {
 			return Outcome{}, err
 		}
-		return Outcome{Host: host, Action: "made", Content: ip, Proxied: proxied, Zone: z.Name}, nil
+		return Outcome{Host: host, Action: "made", Content: ip, Proxied: proxied, Zone: z.Name, Removed: removed}, nil
 	}
 	if a.Content != ip && !take {
 		where := a.Content
@@ -147,18 +156,20 @@ func (m *Manager) Ensure(ctx context.Context, app, host string, mode manifest.DN
 		return Outcome{}, fmt.Errorf("%s %w: at %s, not this machine (%s); when it is time to move it, run bedrock dns point %s", host, ErrElsewhere, where, ip, host)
 	}
 	if a.Content == ip && a.Proxied == proxied && a.Comment == want.Comment {
-		return Outcome{Host: host, Action: "kept", Content: ip, Proxied: proxied, Zone: z.Name}, nil
+		return Outcome{Host: host, Action: "kept", Content: ip, Proxied: proxied, Zone: z.Name, Removed: removed}, nil
 	}
 	want.ID = a.ID
 	if err := m.CF.Update(ctx, z.ID, want); err != nil {
 		return Outcome{}, err
 	}
-	return Outcome{Host: host, Action: "updated", Content: ip, Proxied: proxied, Zone: z.Name}, nil
+	return Outcome{Host: host, Action: "updated", Content: ip, Proxied: proxied, Zone: z.Name, Removed: removed}, nil
 }
 
-// Remove deletes the records bedrock made for an app on this machine. A
-// record that has since moved to another machine stays.
+// Remove deletes the records bedrock made for an app on this machine: the
+// ones carrying its comment that still name this machine. A record that
+// has since been pointed elsewhere, by bedrock or by hand, stays.
 func (m *Manager) Remove(ctx context.Context, app string, hosts []string) ([]string, error) {
+	mine := m.mine()
 	var removed []string
 	for _, host := range hosts {
 		z, err := m.zone(ctx, host)
@@ -173,7 +184,7 @@ func (m *Manager) Remove(ctx context.Context, app string, hosts []string) ([]str
 			return removed, err
 		}
 		for _, r := range records {
-			if r.Comment != Comment(app, m.Hostname) {
+			if r.Comment != Comment(app, m.Hostname) || !mine[r.Content] {
 				continue
 			}
 			if err := m.CF.Delete(ctx, z.ID, r.ID); err != nil {
@@ -206,11 +217,16 @@ type Route struct {
 
 // Look reports every route's record without changing anything.
 func (m *Manager) Look(ctx context.Context, routes []Route) ([]Status, error) {
-	ip, _ := m.IPv4()
+	ip, ipErr := m.IPv4()
 	mine := m.mine()
 	var out []Status
 	for _, r := range routes {
 		st := Status{Host: r.Host, App: r.App, Mode: modeWord(r.Mode)}
+		if ipErr != nil {
+			st.Verdict = ipErr.Error()
+			out = append(out, st)
+			continue
+		}
 		z, err := m.zone(ctx, r.Host)
 		if errors.Is(err, cloudflare.ErrNoZone) {
 			st.Verdict = "not in a zone this token sees"

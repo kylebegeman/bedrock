@@ -43,7 +43,7 @@ func ThroughDaemon(socket string) Deployer {
 // Deploy deploys a source tree, writing its steps to out the way the CLI
 // shows them without a terminal. It reports whether the deploy succeeded.
 func Deploy(ctx context.Context, d Deployer, source, commit string, out io.Writer) (bool, error) {
-	in := app.DeployInput{Source: source, Revision: time.Now().UTC().Format("20060102-150405"), Commit: commit}
+	in := app.DeployInput{Source: source, Revision: app.NewRevision(time.Now()), Commit: commit}
 	r := ui.New(out, false, false)
 	receipt, err := d(ctx, in, r.Event)
 	if err != nil {

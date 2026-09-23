@@ -94,3 +94,56 @@ func TestOpeningAnOlderStoreAddsNewColumns(t *testing.T) {
 		t.Fatalf("column not usable: %+v", again)
 	}
 }
+
+func TestRemovingAnAppForgetsItsRunsSignalsIncidentAndHookButNotItsBackups(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	now := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	for _, app := range []string{"hello", "other"} {
+		if err := s.SaveRevision(ctx, Revision{App: app, ID: "r1", Status: RevisionActive, Manifest: json.RawMessage(`{}`), CreatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.StartJobRun(ctx, JobRun{App: app, Workload: "w", Revision: "r1", Kind: "cron", StartedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.AddSignal(ctx, Signal{Hour: now, App: app, Key: "w", Metric: SignalCPUPercent, Value: 1, Samples: 1}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.OpenIncident(ctx, Incident{Key: "app:" + app, Subject: app, Severity: SeverityCritical, Message: "down", OpenedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SaveGitHook(ctx, GitHook{App: app, Repo: "r", Branch: "main", CreatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.StartBackupRun(ctx, app, BackupRunBackup, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.RemoveApp(ctx, "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if runs, _ := s.JobRuns(ctx, "hello", "", 10); len(runs) != 0 {
+		t.Fatalf("job runs survived: %+v", runs)
+	}
+	if sigs, _ := s.Signals(ctx, "hello", now.Add(-time.Hour)); len(sigs) != 0 {
+		t.Fatalf("signals survived: %+v", sigs)
+	}
+	if inc, _ := s.OpenIncidentByKey(ctx, "app:hello"); inc != nil {
+		t.Fatalf("the incident survived: %+v", inc)
+	}
+	if h, _ := s.GitHookFor(ctx, "hello"); h != nil {
+		t.Fatalf("the webhook survived: %+v", h)
+	}
+	if runs, _ := s.BackupRuns(ctx, "hello", "", 10); len(runs) != 1 {
+		t.Fatalf("the backup history should stay: %+v", runs)
+	}
+	if runs, _ := s.JobRuns(ctx, "other", "", 10); len(runs) != 1 {
+		t.Fatalf("another app's runs went: %+v", runs)
+	}
+	if inc, _ := s.OpenIncidentByKey(ctx, "app:other"); inc == nil {
+		t.Fatal("another app's incident went")
+	}
+	if h, _ := s.GitHookFor(ctx, "other"); h == nil {
+		t.Fatal("another app's webhook went")
+	}
+}

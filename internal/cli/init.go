@@ -66,7 +66,7 @@ func newInit(a *app) *cobra.Command {
 					fmt.Fprintf(a.stdout, "  - %s\n", step)
 				}
 			}
-			fmt.Fprintf(a.stdout, "\nThen: bedrock deploy %s\n", s.App)
+			fmt.Fprintf(a.stdout, "\nThen: bedrock deploy %s\n", dir)
 			return nil
 		},
 	}

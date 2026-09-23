@@ -1,71 +1,41 @@
 # Contributing To Bedrock
 
-Thanks for helping improve Bedrock. This project is contract-first, fixture-first,
-and safety-first: public examples should use synthetic apps, mutating flows
-should be previewable, and JSON surfaces should stay stable for agents.
+Bedrock is one Go program (Go 1.26, no cgo) that runs a machine. Changes
+are small, proven where they can be, and written in plain prose: an error
+says what to do next, a plan says what will change.
 
-## Development Setup
+## Development
 
-```bash
-python3 -m venv .venv
-.venv/bin/python -m ensurepip --upgrade
-.venv/bin/python -m pip install -e ".[test]"
-
-make validate-examples
-make validate-manifests
-make validate-fixtures
-make validate-adoption-fixtures
-make validate-fixture-plugins
-make render-examples
-make render-manifests
-make test
-make compile
-make docs-check
-make open-source-audit-strict
+```sh
+make check   # gofmt, go vet, go test ./...
+make build   # bin/bedrock for this Mac
+make linux   # bin/bedrock-linux-amd64 for the machines
 ```
 
-Use the narrowest meaningful command while working, then run the relevant
-bundle above before opening a pull request.
+CI runs `make check` and cross-builds for linux/amd64 and darwin/arm64 on
+every push and pull request. The tests use the standard library only, real
+SQLite stores in temporary directories, and fakes for the machine, Docker's
+API and Cloudflare's; `go test ./...` touches no network and no real
+Docker. A feature is proven on the lane, a real machine that is wiped and
+rebuilt for the purpose; see [lane/README.md](lane/README.md).
 
-## Contribution Rules
+## What a change looks like
 
-- Keep app examples synthetic. Use `example.com`, fixture apps, or local demo
-  names. Do not add real hostnames, personal paths, private IPs, `.env` values,
-  production data, provider tokens, or customer data.
-- Prefer fixture coverage before live-provider coverage. Real deployments,
-  host registries, and product migrations belong in private operator material
-  until they are intentionally adopted.
-- Preserve dry-run-first behavior for risky operations. Mutating commands need
-  clear plans, confirmation tokens, receipts, and redacted outputs.
-- Keep JSON envelopes schema-versioned and agent-friendly. Avoid changing
-  output contracts without tests and docs.
-- Follow the existing Python style: type hints on function signatures,
-  direct functions over clever abstraction, and explicit boundary validation.
+- Fixture apps and `example.com` hostnames in tests and docs; never a real
+  hostname, address, path, credential or production value.
+- Anything that changes a machine is an operation: planned as steps,
+  journaled, finished with a receipt. It takes `--plan` and `--digest`, and
+  its plan must not depend on the moment it was made.
+- Secret values never reach an argument, a log, a receipt or a message;
+  only their names do.
+- A `--json` output shape is a contract: change one deliberately and say so
+  in the commit.
+- Tests are sentences that name the behaviour, such as
+  `TestAPlannedPreviewCopiesNoSecrets`.
+- Commit subjects are sentences too, and the body says why.
 
-## Developer Certificate Of Origin
+## Pull requests
 
-Bedrock uses the Developer Certificate of Origin instead of a CLA. Every commit
-must include a DCO sign-off:
-
-```bash
-git commit -s -m "feat: describe the change"
-```
-
-That adds a line like:
-
-```text
-Signed-off-by: Your Name <you@example.com>
-```
-
-By signing off, you certify that you have the right to submit the contribution
-under the project license. See <https://developercertificate.org/> for the full
-DCO text.
-
-## Pull Request Checklist
-
-- Tests or docs were updated for behavior changes.
-- `make open-source-audit-strict` passes.
-- No secrets, private hostnames, personal paths, or production values were added.
-- Any CLI, manifest, API, JSON, receipt, or runtime contract change has a
-  changelog entry under `docs/changelog/`.
-- The pull request explains user impact, safety impact, and verification.
+Run `make check`, say what changes for a person using bedrock and how it
+was verified, and keep a pull request to one subject. Bedrock is licensed
+under the Apache License 2.0; a contribution is licensed the same way.

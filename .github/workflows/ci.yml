@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [next, master]
+    branches: [next]
   pull_request:
 
 permissions:
@@ -18,12 +18,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: gofmt
-        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
-      - name: go vet
-        run: go vet ./...
-      - name: go test
-        run: go test ./...
+      - name: make check
+        run: make check
       - name: Build for the machines (linux/amd64)
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /dev/null ./cmd/bedrock
       - name: Build for the Mac (darwin/arm64)

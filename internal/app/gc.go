@@ -16,6 +16,7 @@ import (
 // GCKind removes what bedrock created and no longer needs: containers and
 // images of revisions that are neither active nor kept for rollback, and
 // the build cache. It never touches anything without bedrock's label.
+const GCKind = "app.gc"
 
 // DefaultBuildCacheMax is how much build cache a machine keeps.
 //
@@ -25,7 +26,6 @@ import (
 // far below what an unbounded cache reaches. Raise it with --keep-cache on
 // a machine that rebuilds something huge and has the disk to spare.
 const DefaultBuildCacheMax = 8 << 30 // 8 GiB
-const GCKind = "app.gc"
 
 // GC is the Definition for GCKind.
 type GC struct {
@@ -137,8 +137,12 @@ func (g GC) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, error)
 		if keep < 0 {
 			keep = 0
 		}
+		change := "drop build cache older than a day"
+		if keep > 0 {
+			change += ", then keep at most " + megabytes(keep)
+		}
 		plan.Steps = append(plan.Steps, kernel.Step{
-			Name: "build-cache", Change: fmt.Sprintf("drop build cache older than a day, then keep at most %s", megabytes(keep)),
+			Name: "build-cache", Change: change,
 			Apply: func(ctx context.Context, out io.Writer) error {
 				freed, err := docker.PruneBuildCache(ctx, 24*time.Hour, keep)
 				if freed > 0 {

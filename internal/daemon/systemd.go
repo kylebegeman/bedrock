@@ -17,6 +17,14 @@ import (
 // UnitPath is where the daemon's systemd unit lives.
 const UnitPath = "/etc/systemd/system/bedrock.service"
 
+// unitTemplate is the daemon's unit. It has no sandboxing directives, on
+// purpose: the daemon is root that runs Docker, apt, ufw and systemctl for
+// the machine, and each would break one of them. PrivateTmp hides build
+// contexts from dockerd, ProtectHome stops a deploy from /root, and
+// ProtectSystem, ProtectKernelTunables and ProtectKernelModules stop host
+// setup installing packages, setting sysctls through ufw and loading the
+// modules Docker needs. The limit on open files is the one bound it can
+// take: sockets, the store, Docker's streams and every probe at once.
 const unitTemplate = `[Unit]
 Description=Bedrock host daemon
 Documentation=https://github.com/kylebegeman/bedrock
@@ -39,6 +47,7 @@ RuntimeDirectory=bedrock
 RuntimeDirectoryMode=0750
 KillMode=mixed
 TimeoutStopSec=60
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target
@@ -74,19 +83,24 @@ func Install(ctx context.Context, out io.Writer) error {
 	if err := os.MkdirAll(host.LibDir, 0o755); err != nil {
 		return err
 	}
-	for path, content := range map[string]string{UnitPath: fmt.Sprintf(unitTemplate, exe), RollbackUnitPath: rollbackUnit} {
-		if current, _ := os.ReadFile(path); string(current) != content {
-			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-				return err
-			}
-			fmt.Fprintf(out, "wrote %s\n", path)
-		}
-	}
-	if current, _ := os.ReadFile(host.RollbackScript); string(current) != host.RollbackScriptContent {
-		if err := os.WriteFile(host.RollbackScript, []byte(host.RollbackScriptContent), 0o755); err != nil {
+	// Each file is replaced whole: a unit or a rollback script systemd
+	// reads half-written is worse than the old one.
+	env := host.RealEnv()
+	for _, f := range []struct {
+		path, content string
+		mode          os.FileMode
+	}{
+		{UnitPath, fmt.Sprintf(unitTemplate, exe), 0o644},
+		{RollbackUnitPath, rollbackUnit, 0o644},
+		{host.RollbackScript, host.RollbackScriptContent, 0o755},
+	} {
+		changed, err := env.WriteFile(f.path, f.content, f.mode)
+		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "wrote %s\n", host.RollbackScript)
+		if changed {
+			fmt.Fprintf(out, "wrote %s\n", f.path)
+		}
 	}
 	for _, args := range [][]string{{"daemon-reload"}, {"enable", "bedrock.service"}, {"restart", "bedrock.service"}} {
 		if err := systemctl(ctx, args...); err != nil {
@@ -104,7 +118,11 @@ func Install(ctx context.Context, out io.Writer) error {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("the daemon didn't answer on %s within 20s; see journalctl -u bedrock", DefaultSocket)
 		}
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
 }
 

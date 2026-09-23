@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	apps "github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/host"
 	"github.com/kylebegeman/bedrock/internal/integration"
 )
 
@@ -26,7 +25,7 @@ same bucket prefix and the same backup password. A machine reading its own
 bucket instead of the source's finds nothing there, which looks like an app
 with no data rather than like a failure.
 
-  on the source:  bedrock move out <app> > handoff.json
+  on the source:  bedrock move out <app> --yes > handoff.json
   on the target:  bedrock move in <app> --handoff handoff.json
                   bedrock deploy <source>
                   bedrock dns point <host>          # once it answers
@@ -40,24 +39,33 @@ until you tear it down, which is what makes the window a real one.`,
 }
 
 func newMoveOut(a *app) *cobra.Command {
-	var skipBackup bool
+	var (
+		skipBackup bool
+		planOnly   bool
+	)
 	cmd := &cobra.Command{
 		Use:   "out <app>",
 		Short: "Back an app up and write the handoff the target machine reads.",
 		Long: "Back an app up and write the handoff the target machine reads.\n\n" +
-			"The handoff goes to standard output and carries no secrets, so it can be\n" +
+			"The backup is a maintenance window, so it is planned, asked about and\n" +
+			"applied like any other operation; --digest names its plan. The handoff\n" +
+			"goes to standard output alone and carries no secrets, so it can be\n" +
 			"redirected to a file, read, and copied to the other machine.\n\n" +
 			"The app is left running. A move is only safe because the source is still\n" +
 			"there to go back to.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
+			if !planOnly {
+				// Standard output is the handoff's; the backup's plan, the
+				// question and its steps go beside it.
+				a.narrate = a.stderr
+			}
 			if !skipBackup {
 				// The snapshot named in the handoff has to be the last one,
 				// or the target restores data the source has since moved on
 				// from. Taking it here is what makes that true.
-				a.yes = true
-				if err := a.operate(cmd.Context(), apps.BackupKind, apps.BackupInput{App: name}, false); err != nil {
+				if err := a.operate(cmd.Context(), apps.BackupKind, apps.BackupInput{App: name}, planOnly); err != nil {
 					return err
 				}
 			}
@@ -66,7 +74,21 @@ func newMoveOut(a *app) *cobra.Command {
 				return err
 			}
 			defer store.Close()
-			h, err := apps.NewHandoff(cmd.Context(), store, a.secretsStore(), name, thisMachine(cmd.Context()))
+			h, err := apps.NewHandoff(cmd.Context(), store, a.secretsStore(), name, thisMachine())
+			if planOnly {
+				switch {
+				case errors.Is(err, apps.ErrNoSnapshot) && !skipBackup:
+					fmt.Fprintf(a.stderr, "then a handoff for %s naming the snapshot that backup makes\n", name)
+					return nil
+				case err != nil:
+					return err
+				}
+				fmt.Fprintln(a.stderr, "then a handoff, which as it stands would say:")
+				for _, line := range h.Describe() {
+					fmt.Fprintln(a.stderr, "  "+line)
+				}
+				return nil
+			}
 			if err != nil {
 				return err
 			}
@@ -80,6 +102,7 @@ func newMoveOut(a *app) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&skipBackup, "no-backup", false, "use the last good backup instead of taking a fresh one")
+	a.mutatingFlags(cmd, &planOnly)
 	return cmd
 }
 
@@ -111,9 +134,11 @@ func newMoveIn(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			st, stErr := integration.LoadStorage(a.secretsStore())
-			if stErr != nil {
-				st = nil
+			// A storage integration that is not set is one Check explains;
+			// one that can't be read is a fault of its own.
+			st, err := integration.LoadStorage(a.secretsStore())
+			if err != nil && !errors.Is(err, integration.ErrNotSet) {
+				return err
 			}
 			if err := h.Check(name, st); err != nil {
 				return err
@@ -123,7 +148,7 @@ func newMoveIn(a *app) *cobra.Command {
 			}
 			fmt.Fprintln(a.stderr)
 			if !h.HasData {
-				fmt.Fprintf(a.stdout, "%s keeps no data; deploy it here and move its DNS.\n", name)
+				fmt.Fprintf(a.prose(), "%s keeps no data; deploy it here and move its DNS.\n", name)
 				return nil
 			}
 			if err := a.operate(cmd.Context(), apps.RestoreKind, apps.RestoreInput{App: name, Snapshot: h.Snapshot}, planOnly); err != nil {
@@ -132,7 +157,7 @@ func newMoveIn(a *app) *cobra.Command {
 			if planOnly {
 				return nil
 			}
-			fmt.Fprintf(a.stdout, "\n%s's data is here. Next: deploy it, check it answers, then point %s at this machine.\n",
+			fmt.Fprintf(a.prose(), "\n%s's data is here. Next: deploy it, check it answers, then point %s at this machine.\n",
 				name, hostsOrIts(h.Hosts))
 			return nil
 		},
@@ -142,22 +167,20 @@ func newMoveIn(a *app) *cobra.Command {
 	return cmd
 }
 
+// hostsOrIts names an app's hostnames, or stands in for them when it has
+// none to name.
 func hostsOrIts(hosts []string) string {
 	if len(hosts) == 0 {
 		return "its hostnames"
 	}
-	out := hosts[0]
-	for _, h := range hosts[1:] {
-		out += ", " + h
-	}
-	return out
+	return strings.Join(hosts, ", ")
 }
 
 // thisMachine names the source in a handoff. It is for the record only, so
 // a machine that cannot say its own name does not stop a move.
-func thisMachine(ctx context.Context) string {
-	name, _ := host.RealEnv().Run(ctx, "hostname")
-	return strings.TrimSpace(name)
+func thisMachine() string {
+	name, _ := os.Hostname()
+	return name
 }
 
 func newMoveSecrets(a *app) *cobra.Command {

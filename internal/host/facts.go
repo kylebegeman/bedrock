@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -231,8 +232,9 @@ func (f Facts) Allows(port string) bool {
 	return false
 }
 
-// Addresses returns the machine's global addresses, the ones DNS should
-// point at.
+// Addresses returns the machine's public addresses, the ones DNS should
+// point at: what has global scope and isn't private, carrier-grade NAT
+// (100.64/10) or the machine's own.
 func Addresses(ctx context.Context, env Env) []string {
 	out, err := env.Run(ctx, "ip", "-o", "addr", "show", "scope", "global")
 	if err != nil {
@@ -241,12 +243,18 @@ func Addresses(ctx context.Context, env Env) []string {
 	var addrs []string
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) >= 4 && (fields[2] == "inet" || fields[2] == "inet6") {
-			addr := strings.SplitN(fields[3], "/", 2)[0]
-			if !strings.HasPrefix(addr, "172.") && !strings.HasPrefix(addr, "192.168.") && !strings.HasPrefix(addr, "10.") {
-				addrs = append(addrs, addr)
-			}
+		if len(fields) < 4 || (fields[2] != "inet" && fields[2] != "inet6") {
+			continue
 		}
+		addr, err := netip.ParseAddr(strings.SplitN(fields[3], "/", 2)[0])
+		if err != nil || addr.IsPrivate() || addr.IsLoopback() || addr.IsLinkLocalUnicast() || carrierNAT.Contains(addr) {
+			continue
+		}
+		addrs = append(addrs, addr.String())
 	}
 	return addrs
 }
+
+// carrierNAT is the range a provider's NAT hands out: reachable by no one
+// outside, however global its scope.
+var carrierNAT = netip.MustParsePrefix("100.64.0.0/10")

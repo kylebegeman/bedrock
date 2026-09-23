@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -131,5 +132,36 @@ func TestConcurrentChangesLoseNothing(t *testing.T) {
 	values, version, err := s.LoadCurrent("app")
 	if err != nil || len(values) != 20 || version != 20 {
 		t.Fatalf("%d names in version %d (%v): every change must build on the one before", len(values), version, err)
+	}
+}
+
+func TestRemovingAnAppDropsEverySealedVersionAndSparesBedrocks(t *testing.T) {
+	dir := t.TempDir()
+	s := &Store{Dir: filepath.Join(dir, "secrets"), KeyPath: filepath.Join(dir, "key")}
+	if _, _, _, err := s.EnsureKey(); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []string{"one", "two"} {
+		if _, err := s.Set("hello", "TOKEN", v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.RemoveApp("hello"); err != nil {
+		t.Fatal(err)
+	}
+	if versions, _ := s.Versions("hello"); len(versions) != 0 {
+		t.Fatalf("versions survived: %+v", versions)
+	}
+	if current, _ := s.Current("hello"); current != 0 {
+		t.Fatalf("current version %d after removal", current)
+	}
+	if _, err := os.Stat(s.appDir("hello")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the app's directory is still there: %v", err)
+	}
+	if err := s.RemoveApp("bedrock"); err == nil {
+		t.Fatal("bedrock's own secrets were removable")
+	}
+	if err := s.RemoveApp("never-here"); err != nil {
+		t.Fatalf("removing an app that has no secrets: %v", err)
 	}
 }

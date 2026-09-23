@@ -6,7 +6,7 @@ workloads:
     kind: static
     dir: public
     routes:
-      - host: site.lane.begam.in
+      - host: site.lane.example.com
 checks:
-  - url: https://site.lane.begam.in/
+  - url: https://site.lane.example.com/
     contains: A static site served by bedrock

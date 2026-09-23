@@ -138,7 +138,8 @@ func copyTree(from, to string) error {
 	})
 }
 
-// EnsureBuildLog trims a build's noisy progress into what a person wants.
+// TrimBuildLine keeps a build's useful lines and drops the progress noise;
+// it reports whether the line is worth showing.
 func TrimBuildLine(line string) (string, bool) {
 	line = strings.TrimSpace(line)
 	switch {

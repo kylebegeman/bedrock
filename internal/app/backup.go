@@ -33,6 +33,9 @@ type Backup struct {
 	StateDir string
 	// Hostname names the machine, for its own backup.
 	Hostname func() string
+	// Profile is the machine's profile file, kept in its own backup when
+	// there is one.
+	Profile string
 }
 
 // BackupInput says what to back up: an app, or bedrock's own name for the
@@ -217,7 +220,7 @@ func (b Backup) appPlan(st *integration.Storage, rev *state.Revision, m *manifes
 					if err != nil {
 						return err
 					}
-					fmt.Fprintf(out, "database dumped: %s\n", humanBytes(size))
+					fmt.Fprintf(out, "database dumped: %s\n", HumanBytes(size))
 				}
 				var err error
 				summary, err = r.Backup(ctx, app, mounts, restic.DataRoot)
@@ -227,7 +230,7 @@ func (b Backup) appPlan(st *integration.Storage, rev *state.Revision, m *manifes
 				return run.fail(err)
 			}
 			_ = b.Store.RecordIntegrationUse(ctx, integration.StorageName, "backup "+app, time.Now().UTC())
-			fmt.Fprintf(out, "snapshot %s: %d files, %s, %s new\n", short(summary.SnapshotID), summary.TotalFiles, humanBytes(summary.TotalBytes), humanBytes(summary.DataAdded))
+			fmt.Fprintf(out, "snapshot %s: %d files, %s, %s new\n", short(summary.SnapshotID), summary.TotalFiles, HumanBytes(summary.TotalBytes), HumanBytes(summary.DataAdded))
 			return nil
 		},
 	})
@@ -261,7 +264,7 @@ func (b Backup) appPlan(st *integration.Storage, rev *state.Revision, m *manifes
 					summary.TotalFiles, summary.TotalBytes = latest.Summary.TotalFiles, latest.Summary.TotalBytes
 				}
 			}
-			detail := fmt.Sprintf("%d files, %s", summary.TotalFiles, humanBytes(summary.TotalBytes))
+			detail := fmt.Sprintf("%d files, %s", summary.TotalFiles, HumanBytes(summary.TotalBytes))
 			if m.PostgresVersion() != "" {
 				detail = "database and " + detail
 			}
@@ -308,9 +311,14 @@ func (b Backup) machinePlan(st *integration.Storage) (*kernel.Plan, error) {
 					return run.fail(fmt.Errorf("copy the secrets: %s", strings.TrimSpace(string(out))))
 				}
 			}
-			for _, f := range []string{"/etc/bedrock/host.json", b.Secrets.KeyPath + ".pub"} {
+			for _, f := range []string{b.Profile, b.Secrets.KeyPath + ".pub"} {
+				if f == "" {
+					continue
+				}
 				if data, err := os.ReadFile(f); err == nil {
-					_ = os.WriteFile(filepath.Join(staging, filepath.Base(f)), data, 0o600)
+					if err := os.WriteFile(filepath.Join(staging, filepath.Base(f)), data, 0o600); err != nil {
+						return run.fail(err)
+					}
 				}
 			}
 			info, _ := json.MarshalIndent(map[string]any{"hostname": hostname, "bedrock": version.Current().Version, "taken_at": time.Now().UTC()}, "", "  ")
@@ -346,7 +354,7 @@ func (b Backup) machinePlan(st *integration.Storage) (*kernel.Plan, error) {
 				return run.fail(err)
 			}
 			_ = b.Store.RecordIntegrationUse(ctx, integration.StorageName, "backup of the machine", time.Now().UTC())
-			fmt.Fprintf(out, "snapshot %s: %d files, %s\n", short(summary.SnapshotID), summary.TotalFiles, humanBytes(summary.TotalBytes))
+			fmt.Fprintf(out, "snapshot %s: %d files, %s\n", short(summary.SnapshotID), summary.TotalFiles, HumanBytes(summary.TotalBytes))
 			return nil
 		},
 	})
@@ -423,6 +431,7 @@ func dirExists(dir string) bool {
 	return err == nil && info.IsDir()
 }
 
+// short is a snapshot's id as restic shows it: its first eight characters.
 func short(id string) string {
 	if len(id) > 8 {
 		return id[:8]
@@ -430,8 +439,8 @@ func short(id string) string {
 	return id
 }
 
-// humanBytes says a size the way people do.
-func humanBytes(n int64) string {
+// HumanBytes says a size the way people do.
+func HumanBytes(n int64) string {
 	const unit = 1024
 	if n < unit {
 		return fmt.Sprintf("%d B", n)

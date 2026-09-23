@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -67,5 +68,22 @@ func TestSupportedSystems(t *testing.T) {
 		if got := Supported(f); got != c.want {
 			t.Errorf("%s %s %s: got %v want %v", c.id, c.version, c.arch, got, c.want)
 		}
+	}
+}
+
+func TestAddressesKeepOnlyThePublicOnes(t *testing.T) {
+	m := newFakeMachine(t)
+	m.answers["ip -o addr show scope global"] = strings.Join([]string{
+		"2: eth0    inet 172.64.1.1/24 brd 172.64.1.255 scope global eth0",
+		"2: eth0    inet 172.16.0.1/12 scope global eth0",
+		"3: docker0 inet 10.0.0.5/8 scope global docker0",
+		"2: eth0    inet 192.168.1.9/24 scope global eth0",
+		"2: eth0    inet 100.64.0.1/10 scope global eth0",
+		"2: eth0    inet6 fd00::1/64 scope global",
+		"2: eth0    inet6 2001:db8::1/64 scope global",
+	}, "\n")
+	got := Addresses(context.Background(), m.env())
+	if want := []string{"172.64.1.1", "2001:db8::1"}; strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("addresses %v, want %v", got, want)
 	}
 }

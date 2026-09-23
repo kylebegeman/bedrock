@@ -6,7 +6,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/kylebegeman/bedrock/internal/kernel"
 	"github.com/kylebegeman/bedrock/internal/state"
@@ -93,7 +95,7 @@ func TestErrorsComeBackAsErrors(t *testing.T) {
 	if _, err := client.Plan(ctx, "no.such.kind", json.RawMessage(`{}`)); err == nil || err.Error() != `unknown operation kind "no.such.kind"` {
 		t.Fatalf("unknown kind: %v", err)
 	}
-	if _, err := client.Receipt(ctx, "op-nope"); err == nil || err.Error() != "no such operation" {
+	if _, err := client.Receipt(ctx, "op-nope"); err == nil || err.Error() != "not found" {
 		t.Fatalf("missing receipt: %v", err)
 	}
 	if _, err := client.Run(ctx, kernel.ExerciseKind, json.RawMessage(`{"dir":""}`), func(kernel.Event) {}); err == nil {
@@ -118,4 +120,23 @@ func TestListenReplacesAStaleSocket(t *testing.T) {
 	if _, err := Listen(socket); err == nil {
 		t.Fatal("a live socket must not be replaced")
 	}
+}
+
+func TestOnlyOneLocalOperationRunsAtATime(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	unlock, err := lockOperations(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	if _, err := lockOperations(ctx, path); err == nil || !strings.Contains(err.Error(), "another bedrock operation is running on this machine") {
+		t.Fatalf("a second operation got the lock: %v", err)
+	}
+	unlock()
+	again, err := lockOperations(context.Background(), path)
+	if err != nil {
+		t.Fatalf("the lock was not let go: %v", err)
+	}
+	again()
 }

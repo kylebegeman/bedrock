@@ -20,11 +20,11 @@ type Detected struct {
 	Why string
 }
 
-// StaticDirs are the places a built site is conventionally left, in the
+// staticDirs are the places a built site is conventionally left, in the
 // order they are believed. A repository with more than one of these is
 // ambiguous only in theory: the first is the answer, and the manifest it
 // writes can be edited.
-var StaticDirs = []string{"public", "dist", "build", "site", "_site"}
+var staticDirs = []string{"public", "dist", "build", "site", "_site"}
 
 // Detect says what a source tree should be deployed as.
 //
@@ -41,7 +41,7 @@ func Detect(dir string) (*Detected, error) {
 	if regular(filepath.Join(dir, "Dockerfile")) {
 		return &Detected{Kind: manifest.Web, Why: "Dockerfile"}, nil
 	}
-	for _, name := range StaticDirs {
+	for _, name := range staticDirs {
 		if directory(filepath.Join(dir, name)) && hasIndex(filepath.Join(dir, name)) {
 			return &Detected{Kind: manifest.Static, Dir: name, Why: name + "/index.html"}, nil
 		}

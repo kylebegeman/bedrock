@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/kylebegeman/bedrock/internal/manifest"
@@ -24,13 +25,13 @@ const maxAppName = 40
 //
 // Every route is put behind a sign-in, and there is no flag to turn it off.
 // A preview is unreleased work at a hostname anyone can work out from a
-// branch name, it runs with the parent's hand-set secrets so it can start
-// at all, and it can be seeded from the parent's data. Any one of those is
-// reason enough; together they make an open preview indefensible.
+// branch name, and it runs with the parent's hand-set secrets so it can
+// start at all. Either is reason enough; together they make an open
+// preview indefensible.
 //
 // Its database starts empty and is built by whatever the app runs to
-// migrate itself, rather than copied from production by default. A preview
-// is for seeing a branch work, and most branches need a schema rather than
+// migrate itself, rather than copied from production. A preview is for
+// seeing a branch work, and most branches need a schema rather than
 // somebody's real rows.
 //
 // Checks are dropped. A deploy runs them twice, once against the containers
@@ -50,29 +51,43 @@ func PreviewOf(parent *manifest.Manifest, branch, domain string) (*manifest.Mani
 		return nil, fmt.Errorf("%q isn't a domain to put previews under, such as preview.example.com", domain)
 	}
 
+	// Nothing is shared with the parent: its manifest is still in use, and
+	// nothing here may be rewritten underneath it.
 	preview := *parent
-	preview.App = PreviewName(parent.App, branch)
+	preview.App = previewName(parent.App, branch)
 	preview.Description = fmt.Sprintf("Preview of %s at %s", parent.App, branch)
 	preview.Checks = nil
-	off := true
-	if parent.Backup != nil {
-		copied := *parent.Backup
-		preview.Backup = &copied
-	} else {
-		preview.Backup = &manifest.Backup{}
+	preview.Backup = &manifest.Backup{Off: true}
+	if parent.Backup != nil && parent.Backup.Keep != nil {
+		keep := *parent.Backup.Keep
+		preview.Backup.Keep = &keep
 	}
-	preview.Backup.Off = off
-	preview.Backup.Schedule, preview.Backup.Drill, preview.Backup.Verify = "", "", nil
-
-	// Workloads are copied rather than shared: the parent's manifest is
-	// still in use and its routes must not be rewritten underneath it.
+	if parent.Data != nil {
+		data := *parent.Data
+		if data.Postgres != nil {
+			pg := *data.Postgres
+			pg.Env, pg.Secrets = maps.Clone(pg.Env), append([]string(nil), pg.Secrets...)
+			data.Postgres = &pg
+		}
+		if data.Objects != nil {
+			objects := *data.Objects
+			data.Objects = &objects
+		}
+		data.Volumes = maps.Clone(data.Volumes)
+		preview.Data = &data
+	}
+	if parent.Secrets != nil {
+		secrets := *parent.Secrets
+		secrets.Generate, secrets.Derive = maps.Clone(secrets.Generate), maps.Clone(secrets.Derive)
+		preview.Secrets = &secrets
+	}
 	preview.Workloads = make(map[string]manifest.Workload, len(parent.Workloads))
 	claimed := map[string]bool{}
 	for name, w := range parent.Workloads {
 		copied := w
 		copied.Routes = nil
 		for _, r := range w.Routes {
-			host := PreviewHost(r.Host, branch, domain)
+			host := previewHost(r.Host, branch, domain)
 			if !manifest.ValidHost(host) {
 				return nil, fmt.Errorf("%s would become %q, which isn't a hostname; use a shorter branch name", r.Host, host)
 			}
@@ -97,11 +112,26 @@ func PreviewOf(parent *manifest.Manifest, branch, domain string) (*manifest.Mani
 	return &preview, nil
 }
 
-// PreviewName is what a branch's preview of an app is called. It is
+// SetRouteDNS makes every route of an app keep its record one way, for a
+// preview whose parent's routes say another: a parent whose records are
+// kept by hand has none for a preview's hostnames.
+func SetRouteDNS(m *manifest.Manifest, mode manifest.DNSMode) {
+	for name, w := range m.Workloads {
+		routes := make([]manifest.Route, len(w.Routes))
+		for i, r := range w.Routes {
+			r.DNS = mode
+			routes[i] = r
+		}
+		w.Routes = routes
+		m.Workloads[name] = w
+	}
+}
+
+// previewName is what a branch's preview of an app is called. It is
 // derived rather than chosen so that the same branch always maps to the
 // same app, and deploying a branch twice updates it instead of making a
 // second one.
-func PreviewName(app, branch string) string {
+func previewName(app, branch string) string {
 	name := app + PreviewSuffix + DNSLabel(branch)
 	if len(name) <= maxAppName {
 		return name
@@ -114,7 +144,7 @@ func PreviewName(app, branch string) string {
 	return strings.TrimRight(name[:maxAppName-len(tail)], "-") + tail
 }
 
-// PreviewHost is where a branch's copy of one of an app's hostnames
+// previewHost is where a branch's copy of one of an app's hostnames
 // answers: the branch, the first label of the original hostname, and the
 // domain previews live under.
 //
@@ -122,7 +152,7 @@ func PreviewName(app, branch string) string {
 // hostnames keeps them apart. Collapsing loom.example.com and
 // runner.loom.example.com onto one preview hostname would put two
 // workloads on the same route.
-func PreviewHost(host, branch, domain string) string {
+func previewHost(host, branch, domain string) string {
 	first, _, _ := strings.Cut(host, ".")
 	return DNSLabel(branch) + "." + DNSLabel(first) + "." + domain
 }

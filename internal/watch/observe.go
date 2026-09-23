@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,8 +46,10 @@ type Prober struct {
 	// Root is the filesystem whose free space matters.
 	Root string
 
+	// mu keeps rounds from overlapping.
 	mu sync.Mutex
-	// restarts is written by one goroutine per app in a round.
+	// restartsMu guards restarts, which one goroutine per app writes in a
+	// round.
 	restartsMu sync.Mutex
 	restarts   map[string]int
 }
@@ -68,7 +69,7 @@ func (p *Prober) Observe(ctx context.Context) []Condition {
 		p.restarts = map[string]int{}
 	}
 	var conditions []Condition
-	conditions = append(conditions, p.host(ctx)...)
+	conditions = append(conditions, p.host()...)
 
 	e, err := p.Connect(ctx)
 	if err != nil {
@@ -175,11 +176,11 @@ func (p *Prober) app(ctx context.Context, e *docker.Engine, rev state.Revision) 
 		}
 	}
 	for _, host := range m.Hosts() {
-		expiry, ok := edge.CertificateExpiry(ctx, host, EdgeAddress)
-		if !ok {
+		ready, why, expiry, found := edge.Certificate(ctx, host, EdgeAddress)
+		if !found {
 			continue // the edge condition covers a dead edge
 		}
-		if ready, why := edge.CertificateReady(ctx, host, EdgeAddress); !ready {
+		if !ready {
 			problems = append(problems, fmt.Sprintf("%s has no valid certificate: %s", host, why))
 			worse(state.SeverityCritical)
 			continue
@@ -209,7 +210,8 @@ func (p *Prober) deploying(ctx context.Context, appName string) bool {
 		return false
 	}
 	for _, op := range ops {
-		if (op.Kind == app.DeployKind || op.Kind == app.RollbackKind) && !op.Status.Final() && strings.HasPrefix(op.Target, appName+" ") {
+		// The target is the app; before 0.7.8 it was "app revision".
+		if (op.Kind == app.DeployKind || op.Kind == app.RollbackKind) && !op.Status.Final() && (op.Target == appName || strings.HasPrefix(op.Target, appName+" ")) {
 			return true
 		}
 	}
@@ -305,18 +307,18 @@ func (p *Prober) watches(ctx context.Context) []Condition {
 }
 
 // host looks at disk and memory.
-func (p *Prober) host(_ context.Context) []Condition {
+func (p *Prober) host() []Condition {
 	var out []Condition
 	if free, total, ok := DiskFree(p.Root); ok {
 		pct := float64(free) / float64(total) * 100
 		if free < DiskFreeMin || pct < DiskFreePercentMin {
-			out = append(out, Condition{Key: "host:disk", Subject: "disk", Severity: state.SeverityCritical, Message: fmt.Sprintf("only %s free of %s (%.0f%%) on %s", HumanBytes(free), HumanBytes(total), pct, p.Root)})
+			out = append(out, Condition{Key: "host:disk", Subject: "disk", Severity: state.SeverityCritical, Message: fmt.Sprintf("only %s free of %s (%.0f%%) on %s", app.HumanBytes(int64(free)), app.HumanBytes(int64(total)), pct, p.Root)})
 		}
 	}
 	if available, total, ok := Memory(); ok {
 		pct := float64(available) / float64(total) * 100
 		if pct < MemoryAvailableMin {
-			out = append(out, Condition{Key: "host:memory", Subject: "memory", Severity: state.SeverityWarning, Message: fmt.Sprintf("only %s of %s available (%.0f%%)", HumanBytes(available), HumanBytes(total), pct)})
+			out = append(out, Condition{Key: "host:memory", Subject: "memory", Severity: state.SeverityWarning, Message: fmt.Sprintf("only %s of %s available (%.0f%%)", app.HumanBytes(int64(available)), app.HumanBytes(int64(total)), pct)})
 		}
 	}
 	return out
@@ -353,28 +355,4 @@ func Memory() (available, total uint64, ok bool) {
 		}
 	}
 	return available, total, total > 0
-}
-
-// HumanBytes says a size the way people do.
-func HumanBytes(n uint64) string {
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
-	}
-	div, exp := uint64(unit), 0
-	for m := n / unit; m >= unit; m /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
-}
-
-// sortedKeys lists a map's keys in order.
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }

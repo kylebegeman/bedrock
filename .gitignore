@@ -1,6 +1,7 @@
 /bin/
 /dist/
 /lane/known_hosts
+/lane/hostinger.env
 *.test
 coverage.out
 .DS_Store

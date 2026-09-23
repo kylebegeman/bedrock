@@ -101,15 +101,10 @@ func (e *Engine) ImageUser(ctx context.Context, ref string) (string, error) {
 	return res.Config.User, nil
 }
 
-// ExecTo runs a command in a running container, streaming its stdout to
-// w. Its stderr comes back as text, for errors.
-func (e *Engine) ExecTo(ctx context.Context, container string, w io.Writer, cmd ...string) (string, error) {
-	return e.ExecToEnv(ctx, container, nil, w, cmd...)
-}
-
-// ExecToEnv is ExecTo with environment variables for the command. Their
-// values reach docker through its environment, never its arguments,
-// which any user of the machine can read.
+// ExecToEnv runs a command in a running container, streaming its stdout to
+// w, with environment variables for the command. Their values reach docker
+// through its environment, never its arguments, which any user of the
+// machine can read. The command's stderr comes back as text, for errors.
 func (e *Engine) ExecToEnv(ctx context.Context, container string, env map[string]string, w io.Writer, cmd ...string) (string, error) {
 	c := exec.CommandContext(ctx, "docker", execArgs(container, env, false, cmd)...)
 	c.Env = execEnv(env)
@@ -152,12 +147,6 @@ func execEnv(env map[string]string) []string {
 		out = append(out, k+"="+v)
 	}
 	return out
-}
-
-// VolumeExists reports whether a volume is there.
-func (e *Engine) VolumeExists(ctx context.Context, name string) bool {
-	_, err := e.cli.VolumeInspect(ctx, name, client.VolumeInspectOptions{})
-	return err == nil
 }
 
 // VolumeMountpoint is where a volume's files live on the machine.

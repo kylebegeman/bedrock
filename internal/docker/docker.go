@@ -128,11 +128,13 @@ func (e *Engine) Networks(ctx context.Context, prefix string) ([]string, error) 
 
 // Spec is a container bedrock wants running.
 type Spec struct {
-	Name   string
-	Image  string
-	Cmd    []string
-	Env    []string
-	Labels map[string]string
+	Name  string
+	Image string
+	// Entrypoint replaces the image's own; nil keeps it.
+	Entrypoint []string
+	Cmd        []string
+	Env        []string
+	Labels     map[string]string
 	// Networks the container joins; the first is its primary.
 	Networks []string
 	// Publish maps host ports, as "127.0.0.1:2019:2019/tcp" or "443:443/udp".
@@ -239,7 +241,7 @@ func (e *Engine) Run(ctx context.Context, spec Spec) error {
 	if len(spec.Networks) > 0 {
 		endpoints[spec.Networks[0]] = &network.EndpointSettings{Aliases: spec.Aliases}
 	}
-	config := &container.Config{Image: spec.Image, Cmd: spec.Cmd, Env: spec.Env, Labels: labels, ExposedPorts: exposed, User: spec.User}
+	config := &container.Config{Image: spec.Image, Entrypoint: spec.Entrypoint, Cmd: spec.Cmd, Env: spec.Env, Labels: labels, ExposedPorts: exposed, User: spec.User}
 	if spec.NoHealthcheck {
 		config.Healthcheck = &container.HealthConfig{Test: []string{"NONE"}}
 	}
@@ -455,7 +457,8 @@ func (e *Engine) HasImage(ctx context.Context, ref string) bool {
 	return err == nil
 }
 
-// Pull fetches an image, writing progress lines to out.
+// Pull fetches an image and says so on out once it is there; the pull's
+// own progress is not worth a step's output.
 func (e *Engine) Pull(ctx context.Context, ref string, out io.Writer) error {
 	resp, err := e.cli.ImagePull(ctx, ref, client.ImagePullOptions{})
 	if err != nil {

@@ -42,7 +42,7 @@ func TestADockerfileWinsOverEverything(t *testing.T) {
 }
 
 func TestABuiltSiteIsStatic(t *testing.T) {
-	for _, name := range StaticDirs {
+	for _, name := range staticDirs {
 		dir := tree(t, map[string]string{name + "/index.html": "<h1>hi</h1>"})
 		got, err := Detect(dir)
 		if err != nil {

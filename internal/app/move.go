@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"time"
 
@@ -74,7 +73,7 @@ func NewHandoff(ctx context.Context, store *state.Store, sec *secrets.Store, app
 	}
 	h := &Handoff{
 		App: app, From: from, HasData: m.HasData(),
-		Hosts: Hosts(m), Repo: m.Repo, Revision: rev.ID, At: time.Now().UTC(),
+		Hosts: m.Hosts(), Repo: m.Repo, Revision: rev.ID, At: time.Now().UTC(),
 	}
 	st, err := integration.LoadStorage(sec)
 	if err == nil && st.BucketPrefix != "" {
@@ -94,23 +93,6 @@ func NewHandoff(ctx context.Context, store *state.Store, sec *secrets.Store, app
 	}
 	h.Snapshot, h.TakenAt = run.Snapshot, run.SnapshotAt
 	return h, nil
-}
-
-// Hosts is every hostname an app's manifest routes, in order and without
-// repeats.
-func Hosts(m *manifest.Manifest) []string {
-	seen := map[string]bool{}
-	var hosts []string
-	for _, name := range m.WorkloadNames() {
-		for _, r := range m.Workloads[name].Routes {
-			if !seen[r.Host] {
-				seen[r.Host] = true
-				hosts = append(hosts, r.Host)
-			}
-		}
-	}
-	sort.Strings(hosts)
-	return hosts
 }
 
 // Check reports whether this machine can act on the handoff, naming what is

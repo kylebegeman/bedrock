@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -298,5 +299,41 @@ func TestStepsKnowTheirAttempt(t *testing.T) {
 	}
 	if len(rec.attempts) != 1 || rec.attempts[0] != 1 {
 		t.Fatalf("attempts: %v", rec.attempts)
+	}
+}
+
+func TestAJournalThatNoLongerFitsItsPlanEndsTheOperation(t *testing.T) {
+	store := newStore(t)
+	e := New(store, registry(), "test")
+	ctx := context.Background()
+	dir := t.TempDir()
+	input := exercise(t, dir, 3, 0, Resume)
+	plan, view, err := e.plan(ctx, ExerciseKind, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planJSON, err := json.Marshal(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A journal with one step where the plan has three.
+	now := e.now()
+	if err := store.CreateOperation(ctx, state.NewOperation{ID: "op-short", Kind: ExerciseKind, Target: plan.Target, Input: input, Plan: planJSON,
+		PlanDigest: view.Digest, Recovery: string(plan.Recovery), StepNames: []string{"step-1"}, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	op, err := store.Claim(ctx, "op-short", "test", now, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := e.apply(ctx, op, plan, view, func(Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Status != state.Failed || !strings.Contains(receipt.Error, "holds 1 step(s) for a plan of 3") {
+		t.Fatalf("receipt: %s %q", receipt.Status, receipt.Error)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "step-1")); err == nil {
+		t.Fatal("a step ran against a journal that doesn't fit")
 	}
 }

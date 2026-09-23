@@ -90,7 +90,13 @@ func EnsureRepo(app string) (string, error) {
 	hook := "#!/bin/sh\n# Written by bedrock: a push to the deploy branch deploys, and a failed deploy refuses the push.\nexec " + Binary + " git hook " + app + "\n"
 	path := filepath.Join(dir, "hooks", "pre-receive")
 	if current, _ := os.ReadFile(path); string(current) != hook {
-		if err := os.WriteFile(path, []byte(hook), 0o755); err != nil {
+		// Replaced whole: git runs whatever is there on the next push.
+		tmp := path + ".tmp"
+		if err := os.WriteFile(tmp, []byte(hook), 0o755); err != nil {
+			return "", err
+		}
+		if err := os.Rename(tmp, path); err != nil {
+			_ = os.Remove(tmp)
 			return "", err
 		}
 	}

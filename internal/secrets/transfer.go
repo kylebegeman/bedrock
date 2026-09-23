@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
 	"sort"
 	"time"
 
@@ -14,10 +13,23 @@ import (
 	"filippo.io/age/armor"
 )
 
-var transferApp = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
+// MaxTransferBytes bounds one sealed secret; MaxBundleBytes a whole app's.
+// An app with more than that is not moving its configuration, it is
+// moving its data, and data belongs in a volume.
+const (
+	MaxTransferBytes = 64 * 1024
+	MaxBundleBytes   = 1 << 20
+)
 
-const MaxTransferBytes = 64 * 1024
+// transferLife is how long a sealed transfer stays readable. It is meant
+// to be produced and consumed in the same sitting, not kept.
+const transferLife = 10 * time.Minute
 
+// timeNow is the clock transfers are stamped and checked by, so a test can
+// prove one stops working rather than waiting ten minutes to find out.
+var timeNow = time.Now
+
+// transfer is one secret sealed for another machine.
 type transfer struct {
 	App     string    `json:"app"`
 	Name    string    `json:"name"`
@@ -25,18 +37,38 @@ type transfer struct {
 	Expires time.Time `json:"expires"`
 }
 
-// Export seals exactly one secret for another machine. Only ciphertext leaves
-// this store; the receiver must also specify the expected app and secret name.
+// secretBundle is every secret an app holds, sealed for another machine.
+type secretBundle struct {
+	App     string            `json:"app"`
+	Values  map[string]string `json:"values"`
+	Expires time.Time         `json:"expires"`
+}
+
+// transferable reports whether an app's secrets may leave the store this
+// way: any app's but bedrock's own, whose integration credentials belong
+// to the machine.
+func transferable(app string) bool { return appPattern.MatchString(app) && app != reservedApp }
+
+// fresh reports whether a transfer's stamp is within its life: not yet
+// expired, and not from further ahead than any clock could honestly be.
+func fresh(expires time.Time) bool {
+	now := timeNow()
+	return expires.After(now) && !expires.After(now.Add(transferLife+time.Minute))
+}
+
+// Export seals exactly one secret for another machine. Only ciphertext
+// leaves this store; the receiver must also name the expected app and
+// secret.
 func (s *Store) Export(from, name, to, recipient string) (string, error) {
-	if !transferApp.MatchString(from) || !transferApp.MatchString(to) || from == "bedrock" || to == "bedrock" {
+	if !transferable(from) || !transferable(to) {
 		return "", errors.New("integration credentials cannot be transferred")
 	}
 	if !ValidName(name) {
 		return "", errors.New("invalid secret name")
 	}
-	r, err := age.ParseX25519Recipient(recipient)
+	r, err := parseRecipient(recipient)
 	if err != nil {
-		return "", errors.New("invalid receiving machine recipient")
+		return "", err
 	}
 	values, _, err := s.LoadCurrent(from)
 	if err != nil {
@@ -46,55 +78,29 @@ func (s *Store) Export(from, name, to, recipient string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("%s has no secret named %s", from, name)
 	}
-	data, err := json.Marshal(transfer{App: to, Name: name, Value: value, Expires: time.Now().Add(10 * time.Minute)})
+	data, err := json.Marshal(transfer{App: to, Name: name, Value: value, Expires: timeNow().Add(transferLife)})
 	if err != nil {
 		return "", errors.New("cannot encode secret transfer")
 	}
 	if len(data) > MaxTransferBytes/2 {
 		return "", errors.New("secret is too large to transfer")
 	}
-	var buf bytes.Buffer
-	armored := armor.NewWriter(&buf)
-	w, err := age.Encrypt(armored, r)
-	if err != nil {
-		return "", err
-	}
-	if _, err = w.Write(data); err != nil {
-		return "", err
-	}
-	if err = w.Close(); err != nil {
-		return "", err
-	}
-	if err = armored.Close(); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
+	return seal(data, r)
 }
 
-// Import accepts only authenticated ciphertext for this machine and the named
-// destination. Parse failures deliberately never include decrypted bytes.
+// Import accepts only authenticated ciphertext for this machine and the
+// named destination. Parse failures deliberately never include decrypted
+// bytes.
 func (s *Store) Import(app, name string, input io.Reader) (int, error) {
-	if !transferApp.MatchString(app) || app == "bedrock" || !ValidName(name) {
+	if !transferable(app) || !ValidName(name) {
 		return 0, errors.New("invalid secret transfer destination")
 	}
-	id, err := s.identity()
+	data, err := s.unseal(input, MaxTransferBytes, "transfer")
 	if err != nil {
 		return 0, err
 	}
-	encrypted, err := io.ReadAll(io.LimitReader(input, MaxTransferBytes+1))
-	if err != nil || len(encrypted) > MaxTransferBytes {
-		return 0, errors.New("invalid or oversized secret transfer")
-	}
-	r, err := age.Decrypt(armor.NewReader(bytes.NewReader(encrypted)), id)
-	if err != nil {
-		return 0, errors.New("secret transfer is not sealed for this machine")
-	}
-	data, err := io.ReadAll(io.LimitReader(r, MaxTransferBytes+1))
-	if err != nil || len(data) > MaxTransferBytes {
-		return 0, errors.New("invalid secret transfer")
-	}
 	var t transfer
-	if json.Unmarshal(data, &t) != nil || t.App != app || t.Name != name || !t.Expires.After(time.Now()) || t.Expires.After(time.Now().Add(11*time.Minute)) {
+	if json.Unmarshal(data, &t) != nil || t.App != app || t.Name != name || !fresh(t.Expires) {
 		return 0, errors.New("secret transfer is expired or does not match the destination")
 	}
 	current, version, err := s.LoadCurrent(app)
@@ -107,21 +113,6 @@ func (s *Store) Import(app, name string, input io.Reader) (int, error) {
 	return s.Set(app, name, t.Value)
 }
 
-// MaxBundleBytes bounds a whole app's secrets. An app with more than this
-// is not moving its configuration, it is moving its data, and data belongs
-// in a volume.
-const MaxBundleBytes = 1 << 20
-
-// timeNow is the clock the bundle expiry reads, so a test can prove a
-// bundle stops working rather than waiting ten minutes to find out.
-var timeNow = time.Now
-
-type secretBundle struct {
-	App     string            `json:"app"`
-	Values  map[string]string `json:"values"`
-	Expires time.Time         `json:"expires"`
-}
-
 // ExportBundle seals every secret an app holds for another machine, so an
 // app can be moved without opening the sealed store by hand.
 //
@@ -131,16 +122,13 @@ type secretBundle struct {
 // it cannot open. Sealing to the target's recipient is what lets that
 // travel without the values passing through a terminal, a log or a shell
 // history on the way.
-//
-// The bundle expires quickly for the same reason a single transfer does: it
-// is meant to be produced and consumed in the same sitting, not kept.
 func (s *Store) ExportBundle(app, recipient string) (string, error) {
-	if !transferApp.MatchString(app) || app == "bedrock" {
+	if !transferable(app) {
 		return "", errors.New("integration credentials cannot be transferred")
 	}
-	r, err := age.ParseX25519Recipient(recipient)
+	r, err := parseRecipient(recipient)
 	if err != nil {
-		return "", errors.New("invalid receiving machine recipient")
+		return "", err
 	}
 	values, _, err := s.LoadCurrent(app)
 	if err != nil {
@@ -149,59 +137,32 @@ func (s *Store) ExportBundle(app, recipient string) (string, error) {
 	if len(values) == 0 {
 		return "", fmt.Errorf("%s holds no secrets", app)
 	}
-	data, err := json.Marshal(secretBundle{App: app, Values: values, Expires: timeNow().Add(10 * time.Minute)})
+	data, err := json.Marshal(secretBundle{App: app, Values: values, Expires: timeNow().Add(transferLife)})
 	if err != nil {
 		return "", errors.New("cannot encode secret bundle")
 	}
 	if len(data) > MaxBundleBytes/2 {
 		return "", fmt.Errorf("%s's secrets are too large to transfer", app)
 	}
-	var buf bytes.Buffer
-	armored := armor.NewWriter(&buf)
-	w, err := age.Encrypt(armored, r)
-	if err != nil {
-		return "", err
-	}
-	if _, err = w.Write(data); err != nil {
-		return "", err
-	}
-	if err = w.Close(); err != nil {
-		return "", err
-	}
-	if err = armored.Close(); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
+	return seal(data, r)
 }
 
-// ImportBundle accepts only authenticated ciphertext sealed for this machine
-// and naming this app. It returns the names it stored, never the values, and
-// parse failures deliberately never include decrypted bytes.
+// ImportBundle accepts only authenticated ciphertext sealed for this
+// machine and naming this app. It returns the names it stored, never the
+// values, and parse failures deliberately never include decrypted bytes.
 //
 // A name already holding the same value is left alone rather than written
 // again, so importing twice does not churn the version history.
 func (s *Store) ImportBundle(app string, input io.Reader) ([]string, error) {
-	if !transferApp.MatchString(app) || app == "bedrock" {
+	if !transferable(app) {
 		return nil, errors.New("invalid secret transfer destination")
 	}
-	id, err := s.identity()
+	data, err := s.unseal(input, MaxBundleBytes, "bundle")
 	if err != nil {
 		return nil, err
 	}
-	encrypted, err := io.ReadAll(io.LimitReader(input, MaxBundleBytes+1))
-	if err != nil || len(encrypted) > MaxBundleBytes {
-		return nil, errors.New("invalid or oversized secret bundle")
-	}
-	r, err := age.Decrypt(armor.NewReader(bytes.NewReader(encrypted)), id)
-	if err != nil {
-		return nil, errors.New("secret bundle is not sealed for this machine")
-	}
-	data, err := io.ReadAll(io.LimitReader(r, MaxBundleBytes+1))
-	if err != nil || len(data) > MaxBundleBytes {
-		return nil, errors.New("invalid secret bundle")
-	}
 	var b secretBundle
-	if json.Unmarshal(data, &b) != nil || b.App != app || !b.Expires.After(timeNow()) || b.Expires.After(timeNow().Add(11*time.Minute)) {
+	if json.Unmarshal(data, &b) != nil || b.App != app || !fresh(b.Expires) {
 		return nil, errors.New("secret bundle is expired or does not match the destination")
 	}
 	current, _, err := s.LoadCurrent(app)
@@ -229,17 +190,18 @@ func (s *Store) ImportBundle(app string, input io.Reader) ([]string, error) {
 	return stored, nil
 }
 
-// CopyAll copies every secret an app holds to another app on this machine,
-// and returns the names it wrote.
+// CopyAll copies every secret an app holds to another app on this
+// machine, and returns the names it wrote.
 //
-// This is for a preview, which runs the parent app's code and so needs the
-// hand-set values that code expects. Anything the target already holds with
-// the same value is left alone, so running it again writes no new version.
+// This is for a preview, which runs the parent app's code and so needs
+// the hand-set values that code expects. Anything the target already holds
+// with the same value is left alone, so running it again writes no new
+// version.
 //
 // It stays on one machine and never touches bedrock's own integration
 // credentials, which belong to the machine rather than to any app.
 func (s *Store) CopyAll(from, to string) ([]string, error) {
-	if !transferApp.MatchString(from) || !transferApp.MatchString(to) || from == "bedrock" || to == "bedrock" {
+	if !transferable(from) || !transferable(to) {
 		return nil, errors.New("integration credentials cannot be copied")
 	}
 	if from == to {
@@ -271,4 +233,56 @@ func (s *Store) CopyAll(from, to string) ([]string, error) {
 		return nil, err
 	}
 	return names, nil
+}
+
+func parseRecipient(recipient string) (age.Recipient, error) {
+	r, err := age.ParseX25519Recipient(recipient)
+	if err != nil {
+		return nil, errors.New("invalid receiving machine recipient")
+	}
+	return r, nil
+}
+
+// seal encrypts data to a recipient and armors it: the one form that
+// leaves the store.
+func seal(data []byte, r age.Recipient) (string, error) {
+	var buf bytes.Buffer
+	armored := armor.NewWriter(&buf)
+	w, err := age.Encrypt(armored, r)
+	if err != nil {
+		return "", err
+	}
+	if _, err := w.Write(data); err != nil {
+		return "", err
+	}
+	if err := w.Close(); err != nil {
+		return "", err
+	}
+	if err := armored.Close(); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+// unseal reads at most limit bytes of armored ciphertext sealed to this
+// machine and returns what it held, itself at most limit bytes. What is
+// wrong with a rejected input is never said in terms of its contents.
+func (s *Store) unseal(input io.Reader, limit int, what string) ([]byte, error) {
+	id, err := s.identity()
+	if err != nil {
+		return nil, err
+	}
+	encrypted, err := io.ReadAll(io.LimitReader(input, int64(limit)+1))
+	if err != nil || len(encrypted) > limit {
+		return nil, fmt.Errorf("invalid or oversized secret %s", what)
+	}
+	r, err := age.Decrypt(armor.NewReader(bytes.NewReader(encrypted)), id)
+	if err != nil {
+		return nil, fmt.Errorf("secret %s is not sealed for this machine", what)
+	}
+	data, err := io.ReadAll(io.LimitReader(r, int64(limit)+1))
+	if err != nil || len(data) > limit {
+		return nil, fmt.Errorf("invalid secret %s", what)
+	}
+	return data, nil
 }
