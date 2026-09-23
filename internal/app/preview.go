@@ -41,6 +41,10 @@ const maxAppName = 40
 //
 // Backups are turned off. The data is a copy of something already backed
 // up, and a preview exists to be thrown away.
+//
+// Ports published on the machine are dropped. The parent already holds
+// them, so a preview that kept them could never start, and a branch has no
+// business answering on the machine's own address anyway.
 func PreviewOf(parent *manifest.Manifest, branch, domain string) (*manifest.Manifest, error) {
 	label := DNSLabel(branch)
 	if label == "" {
@@ -71,6 +75,7 @@ func PreviewOf(parent *manifest.Manifest, branch, domain string) (*manifest.Mani
 	for name, w := range parent.Workloads {
 		copied := w
 		copied.Routes = nil
+		copied.Ports = nil
 		for _, r := range w.Routes {
 			host := PreviewHost(r.Host, branch, domain)
 			if !manifest.ValidHost(host) {

@@ -335,16 +335,9 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 					if image == "" {
 						return d.abort(e, fmt.Errorf("no image recorded for %s", name))
 					}
-					spec, err := containerSpec(&m, name, w, rev.ID, image, values)
+					spec, err := drillSpec(&m, rev.ID, name, image, values, d.names)
 					if err != nil {
 						return d.abort(e, err)
-					}
-					spec.Name = d.names.containers[name]
-					spec.Networks = []string{d.names.network}
-					spec.Restart = false
-					spec.Mounts = nil
-					for _, mt := range w.Mounts {
-						spec.Mounts = append(spec.Mounts, d.names.volumes[mt.Volume]+":"+mt.Path)
 					}
 					if _, err := isolate(ctx, e, &spec, w, image); err != nil {
 						return d.abort(e, err)
@@ -395,4 +388,24 @@ func (dr Drill) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 		},
 	})
 	return plan, nil
+}
+
+// drillSpec is a workload's container started on the restored data: on
+// the drill's own network and volumes, and published nowhere on the
+// machine, where the app's running containers already hold its ports.
+func drillSpec(m *manifest.Manifest, revision, name, image string, values map[string]string, names drillNames) (docker.Spec, error) {
+	w := m.Workloads[name]
+	spec, err := containerSpec(m, name, w, revision, image, values)
+	if err != nil {
+		return spec, err
+	}
+	spec.Name = names.containers[name]
+	spec.Networks = []string{names.network}
+	spec.Restart = false
+	spec.Publish = nil
+	spec.Mounts = nil
+	for _, mt := range w.Mounts {
+		spec.Mounts = append(spec.Mounts, names.volumes[mt.Volume]+":"+mt.Path)
+	}
+	return spec, nil
 }

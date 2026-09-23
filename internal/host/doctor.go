@@ -138,6 +138,18 @@ func Diagnose(f Facts) []Result {
 	default:
 		add("firewall", Pass, "active: ssh, 80, 443", "")
 	}
+	// Docker opens a published port itself, ahead of ufw's rules, so the
+	// firewall neither opens nor closes it. A rule for it is how ufw status
+	// comes to say what is actually open.
+	for _, p := range f.Published {
+		whose := fmt.Sprintf("%s's %s", p.App, p.Workload)
+		if f.Allows(p.Port) {
+			add("port "+p.Port, Pass, "published by "+whose+", allowed in ufw", "")
+		} else {
+			add("port "+p.Port, Warn, "published by "+whose+" past ufw, which has no rule for it",
+				"ufw allow "+p.Port+", so the firewall says what is open; Docker publishes it either way")
+		}
+	}
 	switch {
 	case f.SSH.PasswordAuth && f.SSH.RootKeys == 0:
 		add("ssh", Fail, "password login on, root has no key", "add a key to /root/.ssh/authorized_keys, then "+setup)

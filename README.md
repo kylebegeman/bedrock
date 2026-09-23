@@ -201,6 +201,44 @@ bedrock.worker.yaml` deploys the other one, and `bedrock secret copy <app> NAME
 
 </details>
 
+<details>
+<summary><b>A port on the machine itself, past the edge</b></summary>
+
+<br>
+
+Traffic that isn't HTTP on a hostname, such as Headscale's STUN, is published
+on the machine's own address instead of routed through the edge:
+
+```yaml
+app: headscale
+workloads:
+  server:
+    kind: web
+    image: headscale/headscale:0.26
+    port: 8080
+    routes: [{host: hs.example.com}]
+    singleton: true              # required: two copies can't hold one port
+    ports:
+      - port: 3478               # the container's port
+        protocol: udp            # tcp (the default) or udp
+        # host_port: 3478        # the machine's port; default the same
+        # address: 203.0.113.4   # one of the machine's addresses; default all
+```
+
+Only web and worker workloads publish ports, and only as singletons: a deploy
+starts the new container beside the old one, and the two can't hold one port,
+so a singleton's old container stops first. 22, 80, 443 and 5000 are the
+machine's own. A port another app on the machine already publishes is refused
+while the deploy is still a plan, and the plan lists what it will publish.
+One-off jobs, drills and previews publish nothing.
+
+Docker opens a published port ahead of ufw's rules, so the firewall neither
+opens nor closes it. `bedrock doctor` lists every port an app publishes and
+warns about one ufw has no rule for; `ufw allow 3478/udp` makes the firewall
+say what is open.
+
+</details>
+
 ## How apps are kept apart
 
 Each app runs as if it were alone on the machine.

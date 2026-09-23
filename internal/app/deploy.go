@@ -141,6 +141,12 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 		}
 		images = rev.Images
 	}
+	// A port another app already holds on the machine would fail the new
+	// container at start, after the build and the releases. Refuse it
+	// while it is still only a plan.
+	if err := checkPublishedPorts(ctx, store, m); err != nil {
+		return nil, err
+	}
 	containers := map[string]string{}
 	for _, name := range m.WorkloadNames() {
 		if m.Workloads[name].LongRunning() {
@@ -372,7 +378,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 		})
 	}
 	add(kernel.Step{
-		Name: "start", Change: fmt.Sprintf("start %d container(s) for revision %s", len(containers), revision),
+		Name: "start", Change: fmt.Sprintf("start %d container(s) for revision %s", len(containers), revision) + publishedSummary(m),
 		Note: secretsNote(m),
 		Apply: func(ctx context.Context, out io.Writer) (startErr error) {
 			e, err := connect(ctx)
@@ -787,6 +793,9 @@ func containerSpec(m *manifest.Manifest, name string, w manifest.Workload, revis
 	for _, mt := range w.Mounts {
 		spec.Mounts = append(spec.Mounts, docker.VolumeName(m.App, mt.Volume)+":"+mt.Path)
 	}
+	for _, p := range w.Ports {
+		spec.Publish = append(spec.Publish, publishSpec(p))
+	}
 	if w.Resources.Memory != "" {
 		bytes, err := parseSize(w.Resources.Memory)
 		if err != nil {
@@ -798,6 +807,16 @@ func containerSpec(m *manifest.Manifest, name string, w manifest.Workload, revis
 		spec.NanoCPUs = int64(w.Resources.CPUs * 1e9)
 	}
 	return spec, nil
+}
+
+// publishSpec writes a published port the way docker.Spec takes it, such as
+// 3478:3478/udp or [::1]:8443:443/tcp.
+func publishSpec(p manifest.PublishedPort) string {
+	host := strconv.Itoa(p.OnHost())
+	if p.Address != "" {
+		host = net.JoinHostPort(p.Address, host)
+	}
+	return fmt.Sprintf("%s:%d/%s", host, p.Port, p.Proto())
 }
 
 // ParseSize reads a size written the way a manifest writes one: 512k, 256m,
@@ -1319,6 +1338,55 @@ func secretsNote(m *manifest.Manifest) string {
 	}
 	slices.Sort(names)
 	return "secrets: " + strings.Join(slices.Compact(names), ", ")
+}
+
+// publishedSummary names the ports a deploy publishes on the machine, for
+// the plan: they are reached past the edge, and past ufw, so a plan that
+// opens one says so.
+func publishedSummary(m *manifest.Manifest) string {
+	var parts []string
+	for _, p := range m.PublishedPorts() {
+		parts = append(parts, fmt.Sprintf("%s for %s", p, p.Workload))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return ", publishing " + strings.Join(parts, ", ") + " on the machine, past the edge and the firewall (bedrock doctor lists them)"
+}
+
+// checkPublishedPorts refuses a port on the machine that another app's
+// running revision already publishes. The app's own active revision is
+// not in the way: only singletons publish, and they stop first.
+func checkPublishedPorts(ctx context.Context, store *state.Store, m *manifest.Manifest) error {
+	mine := m.PublishedPorts()
+	if len(mine) == 0 {
+		return nil
+	}
+	active, err := store.ActiveRevisions(ctx)
+	if err != nil {
+		return err
+	}
+	var clashes []string
+	for _, rev := range active {
+		if rev.App == m.App {
+			continue
+		}
+		var other manifest.Manifest
+		if err := json.Unmarshal(rev.Manifest, &other); err != nil {
+			return fmt.Errorf("revision %s/%s manifest: %w", rev.App, rev.ID, err)
+		}
+		for _, theirs := range other.PublishedPorts() {
+			for _, p := range mine {
+				if p.Overlaps(theirs.PublishedPort) {
+					clashes = append(clashes, fmt.Sprintf("%s (for %s) is already published by %s's %s", p, p.Workload, rev.App, theirs.Workload))
+				}
+			}
+		}
+	}
+	if len(clashes) > 0 {
+		return fmt.Errorf("%s can't publish what another app on this machine holds: %s", m.App, strings.Join(clashes, "; "))
+	}
+	return nil
 }
 
 func secretsSummary(m *manifest.Manifest) string {
