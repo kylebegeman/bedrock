@@ -55,6 +55,22 @@ type Guard struct {
 	HeaderValue string
 }
 
+// StreamCloseDelay is how long a connection upgraded through the edge, such
+// as a WebSocket or Tailscale's control protocol, outlives the configuration
+// it was opened under.
+//
+// Every deploy and every daemon start loads a whole new configuration, and
+// Caddy's default is to close every upgraded connection the moment the old
+// one is unloaded, so a deploy of any one app would cut every client of
+// every app at the same instant and have them all reconnect together. With
+// a delay, a stream that ends on its own within five minutes never notices
+// the reload, and the ones still open are closed then rather than in the
+// middle of the deploy that caused it. A deploy reloads more than once, so
+// the delay is minutes rather than seconds, and it is bounded because the
+// streams are closed in the end all the same: clients such as Tailscale's
+// reconnect on their own. The guard's probe is never upgraded and has none.
+const StreamCloseDelay = "5m"
+
 // Config is Caddy's JSON, built from routes. Every host gets automatic
 // HTTPS because it appears in a host matcher.
 func Config(routes []Route) ([]byte, error) {
@@ -75,7 +91,7 @@ func Config(routes []Route) ([]byte, error) {
 		sort.Slice(rs, func(i, j int) bool { return len(rs[i].Path) > len(rs[j].Path) })
 		var sub []map[string]any
 		for _, r := range rs {
-			handle := []map[string]any{{"handler": "reverse_proxy", "upstreams": []map[string]any{{"dial": r.Dial}}}}
+			handle := []map[string]any{{"handler": "reverse_proxy", "upstreams": []map[string]any{{"dial": r.Dial}}, "stream_close_delay": StreamCloseDelay}}
 			if r.Guard != nil {
 				// A guard that decides on the status alone can be talked
 				// into a yes by any server that answers 200 for a path it
