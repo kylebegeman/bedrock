@@ -355,6 +355,15 @@ through the backup bucket both machines read, and `bedrock move secrets`
 seals its secrets for the target. The source keeps serving until DNS is
 pointed at the target and the source is removed.
 
+`bedrock remove <app>` takes an app off the machine and keeps its volumes,
+database and sealed secrets, so it can come back with what it had. `--data`
+removes those too, and `--secrets` forgets only the secrets. An app removed
+without its data can be cleared later: `bedrock remove <app> --data` for an
+app that is no longer on the machine finds what it left behind (its sealed
+secrets, volumes, database and networks), names each one in the plan and
+removes them. Its backups in the storage bucket are never touched, and are
+the only way back.
+
 ## A sign-in in front of a route
 
 A route marked `auth: loom` is put behind a Loom Core's sign-in by the edge:

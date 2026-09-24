@@ -36,12 +36,13 @@ type Remove struct {
 // RemoveInput says which app, and whether its data goes too.
 type RemoveInput struct {
 	App string `json:"app"`
-	// Data also removes the app's volumes and database. There is no way
-	// back from that except a backup.
+	// Data also removes the app's volumes, database and sealed secrets.
+	// There is no way back from that except a backup. For an app that is
+	// no longer on the machine, it removes whatever of it is left.
 	Data bool `json:"data,omitempty"`
-	// Secrets also forgets the app's sealed secrets. Without it they stay,
-	// so the app can be restored or deployed again with what it had; a
-	// preview removed with Data forgets its own, which were copies.
+	// Secrets forgets the app's sealed secrets while its data stays.
+	// Without it or Data they stay, so the app can be restored or deployed
+	// again with what it had.
 	Secrets bool `json:"secrets,omitempty"`
 }
 
@@ -73,8 +74,13 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 	if err != nil {
 		return nil, err
 	}
+	stateDir := r.StateDir
+	if stateDir == "" {
+		stateDir = defaultStateDir
+	}
 	if len(revs) == 0 {
-		return nil, fmt.Errorf("%s isn't on this machine", in.App)
+		// Removed before, without its data: what it left can still go.
+		return r.planLeftovers(ctx, in, stateDir)
 	}
 	// The active revision's manifest says what the app keeps; failing
 	// that, the newest one's. One that doesn't parse would leave records
@@ -85,16 +91,13 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 			described = rev
 		}
 	}
-	x := &removal{r: r, in: in, revs: revs, stateDir: r.StateDir}
+	x := &removal{r: r, in: in, revs: revs, stateDir: stateDir}
 	if err := json.Unmarshal(described.Manifest, &x.m); err != nil {
 		return nil, fmt.Errorf("revision %s of %s: its manifest doesn't parse: %w", described.ID, in.App, err)
 	}
-	if x.stateDir == "" {
-		x.stateDir = defaultStateDir
-	}
-	// A preview's secrets are copies of its parent's; with its data gone
-	// there is nothing left for them to open.
-	x.secrets = in.Secrets || (in.Data && x.m.Preview != nil)
+	// With its data gone, the secrets that opened it go too: left behind,
+	// they are keys to nothing on this machine that nothing removes.
+	x.secrets = in.Secrets || in.Data
 	plan := &kernel.Plan{Target: in.App, Recovery: kernel.Resume}
 	plan.Steps = append(plan.Steps, x.unrouteStep(), x.dnsStep(), x.containersStep())
 	if in.Data {
@@ -226,7 +229,7 @@ func (x *removal) removeContainer(ctx context.Context, e *docker.Engine, c docke
 
 func (x *removal) dataStep() kernel.Step {
 	return kernel.Step{
-		Name: "data", Change: "remove the app's volumes, database and object store (no way back except a backup)",
+		Name: "data", Change: "remove the app's volumes, database and object store (no way back except a backup; its backups in the storage bucket stay)",
 		Apply: func(ctx context.Context, out io.Writer) error {
 			e, err := docker.Connect(ctx)
 			if err != nil {
@@ -255,10 +258,10 @@ func (x *removal) dataStep() kernel.Step {
 func (x *removal) forgetStep() kernel.Step {
 	change := "remove the app's network and forget it"
 	switch {
-	case x.in.Secrets:
-		change += ", and its secrets"
-	case x.secrets:
+	case x.secrets && x.m.Preview != nil:
 		change += ", and the secrets it was given as a preview"
+	case x.secrets:
+		change += ", and its sealed secrets (only a machine backup made before now, bedrock backup bedrock, keeps them)"
 	}
 	return kernel.Step{
 		Name: "forget", Change: change,

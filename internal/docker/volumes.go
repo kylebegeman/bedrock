@@ -227,6 +227,25 @@ func cliOutput(ctx context.Context, stdin io.Reader, name string, args ...string
 	return text, nil
 }
 
+// Volumes lists the names of the volumes whose names start with prefix,
+// sorted. Bedrock labels the volumes it makes, but Docker makes one
+// without a label when a container mounts a name that isn't there yet,
+// so the name is what is matched.
+func (e *Engine) Volumes(ctx context.Context, prefix string) ([]string, error) {
+	res, err := e.cli.VolumeList(ctx, client.VolumeListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, v := range res.Items {
+		if strings.HasPrefix(v.Name, prefix) {
+			out = append(out, v.Name)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // RemoveVolume deletes a volume and reports whether there was one.
 func (e *Engine) RemoveVolume(ctx context.Context, name string) (bool, error) {
 	_, err := e.cli.VolumeRemove(ctx, name, client.VolumeRemoveOptions{Force: true})

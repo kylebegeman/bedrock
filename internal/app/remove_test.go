@@ -10,7 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/docker/dockertest"
 	"github.com/kylebegeman/bedrock/internal/integration"
+	"github.com/kylebegeman/bedrock/internal/kernel"
 	"github.com/kylebegeman/bedrock/internal/state"
 )
 
@@ -34,7 +37,7 @@ func seedManifest(t *testing.T, store *state.Store, app, manifest string) {
 	}
 }
 
-func TestRemovingAPreviewWithItsDataForgetsItsSecrets(t *testing.T) {
+func TestRemovingWithDataForgetsTheSecrets(t *testing.T) {
 	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -63,13 +66,16 @@ func TestRemovingAPreviewWithItsDataForgetsItsSecrets(t *testing.T) {
 	if c := forget(RemoveInput{App: "site-pr-nav"}); strings.Contains(c, "secrets") {
 		t.Fatalf("a preview kept for its data lost its secrets: %q", c)
 	}
-	if c := forget(RemoveInput{App: "api-pr-tools", Data: true}); strings.Contains(c, "secrets") {
-		t.Fatalf("an app named like a preview lost its secrets: %q", c)
+	if c := forget(RemoveInput{App: "api-pr-tools", Data: true}); strings.Contains(c, "as a preview") {
+		t.Fatalf("an app named like a preview was taken for one: %q", c)
 	}
-	if c := forget(RemoveInput{App: "site", Data: true}); strings.Contains(c, "secrets") {
-		t.Fatalf("an app removed with its data lost its secrets unasked: %q", c)
+	if c := forget(RemoveInput{App: "site", Data: true}); !strings.Contains(c, ", and its sealed secrets") {
+		t.Fatalf("an app removed with its data kept the secrets that opened it: %q", c)
 	}
-	if c := forget(RemoveInput{App: "site", Secrets: true}); !strings.Contains(c, ", and its secrets") {
+	if c := forget(RemoveInput{App: "site"}); strings.Contains(c, "secrets") {
+		t.Fatalf("an app removed without its data lost its secrets: %q", c)
+	}
+	if c := forget(RemoveInput{App: "site", Secrets: true}); !strings.Contains(c, ", and its sealed secrets") {
 		t.Fatalf("--secrets was not honoured: %q", c)
 	}
 }
@@ -138,5 +144,99 @@ func TestForgettingAnAppClearsWhatTheMachineKeptForIt(t *testing.T) {
 	}
 	if current, _ := sec.Current("hello"); current != 0 {
 		t.Fatalf("the app's secrets survived --secrets: version %d", current)
+	}
+}
+
+// The machine as it was once loom and loom-runner had been removed without
+// their data, and some of their volumes cleared by hand: secrets, a volume
+// or two, networks and a staging directory, and no revision of either.
+func TestWhatARemovedAppLeftCanGoWithItsData(t *testing.T) {
+	ctx := context.Background()
+	fake := dockertest.New(t)
+	owned := map[string]string{docker.LabelOwner: docker.OwnerValue}
+	for _, v := range []string{"bedrock-loom-postgres", "bedrock-loom-files", "bedrock-loom.drill.files", "bedrock-loom-runner-state", "bedrock-loomy-files", "bedrock-edge-data", "bedrock-hello-postgres"} {
+		fake.AddVolume(v, owned)
+	}
+	for _, n := range []string{"bedrock-loom", "bedrock.edge.loom", "bedrock-loom-runner", "bedrock-hello"} {
+		fake.AddNetwork(n, owned)
+	}
+	fake.AddNetwork("bedrock-loom.drill", nil) // not bedrock's: no label
+	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	seedApp(t, store, "hello")
+	sec := newSecrets(t)
+	a, b := "a", "b"
+	if _, err := sec.SetAll("loom", map[string]*string{"API_KEY": &a, "BEDROCK_POSTGRES_PASSWORD": &b}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sec.Set("loom-runner", "TOKEN", "t"); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := t.TempDir()
+	for _, d := range []string{"apps/loom/postgres-init", "builds/loom", "apps/loom-runner"} {
+		if err := os.MkdirAll(filepath.Join(stateDir, d), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := Remove{Store: store, Secrets: sec, StateDir: stateDir}
+	plan := func(in string) (*kernel.Plan, error) {
+		return r.Plan(ctx, json.RawMessage(in))
+	}
+
+	if _, err := plan(`{"app":"loom"}`); err == nil || !strings.Contains(err.Error(), "sealed secrets (2 names)") || !strings.Contains(err.Error(), "bedrock remove loom --data") {
+		t.Fatalf("without --data: %v", err)
+	}
+	if _, err := plan(`{"app":"loom","secrets":true}`); err == nil || !strings.Contains(err.Error(), "--data") {
+		t.Fatalf("--secrets alone: %v", err)
+	}
+	if _, err := plan(`{"app":"gone","data":true}`); err == nil || !strings.Contains(err.Error(), "nothing of it is left") {
+		t.Fatalf("an app that left nothing: %v", err)
+	}
+	for _, reserved := range []string{"edge", "bedrock", "../loom"} {
+		if _, err := plan(`{"app":"` + reserved + `","data":true}`); err == nil || !strings.Contains(err.Error(), "isn't the name of an app") {
+			t.Fatalf("%s: %v", reserved, err)
+		}
+	}
+	// hello is still deployed, so its remove is the ordinary one.
+	if p, err := plan(`{"app":"hello","data":true}`); err != nil || p.Steps[0].Name != "unroute" {
+		t.Fatalf("a deployed app took the leftovers path: %v", err)
+	}
+
+	p, err := plan(`{"app":"loom","data":true}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "plan-remove-leftovers", strings.ReplaceAll(planText(p), stateDir, "<state>"))
+	var out strings.Builder
+	for _, st := range p.Steps {
+		if err := st.Apply(ctx, &out); err != nil {
+			t.Fatalf("%s: %v", st.Name, err)
+		}
+	}
+	if got := strings.Join(fake.VolumeNames(), " "); got != "bedrock-edge-data bedrock-hello-postgres bedrock-loom-runner-state bedrock-loomy-files" {
+		t.Fatalf("volumes left: %s", got)
+	}
+	if got := strings.Join(fake.NetworkNames(), " "); got != "bedrock-hello bedrock-loom-runner bedrock-loom.drill" {
+		t.Fatalf("networks left: %s", got)
+	}
+	if v, _ := sec.Current("loom"); v != 0 {
+		t.Fatalf("loom's secrets survived: version %d", v)
+	}
+	if v, _ := sec.Current("loom-runner"); v == 0 {
+		t.Fatal("loom-runner's secrets went with loom's")
+	}
+	for _, d := range []string{"apps/loom", "builds/loom"} {
+		if _, err := os.Stat(filepath.Join(stateDir, d)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s survived: %v", d, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "apps/loom-runner")); err != nil {
+		t.Fatalf("loom-runner's directory went: %v", err)
+	}
+	if _, err := plan(`{"app":"loom","data":true}`); err == nil || !strings.Contains(err.Error(), "nothing of it is left") {
+		t.Fatalf("a second purge found something: %v", err)
 	}
 }

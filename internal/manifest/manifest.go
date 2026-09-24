@@ -1174,6 +1174,10 @@ func (m *Manifest) ManagedHosts() map[string]DNSMode {
 	return out
 }
 
+// ValidApp reports whether a string could name an app: the manifest's
+// rule for a name, and not one bedrock keeps for itself.
+func ValidApp(name string) bool { return namePattern.MatchString(name) && !reservedApps[name] }
+
 // ValidHost reports whether a string is a hostname a route can use, by the
 // same rule a manifest is validated against.
 func ValidHost(host string) bool { return hostPattern.MatchString(host) }

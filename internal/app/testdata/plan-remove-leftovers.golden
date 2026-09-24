@@ -1,0 +1,5 @@
+target loom, resume
+ 1 volumes: remove loom's volumes: bedrock-loom-files, bedrock-loom-postgres (its database), bedrock-loom.drill.files (no way back except a backup)
+ 2 networks: remove loom's networks: bedrock-loom, bedrock.edge.loom
+ 3 secrets: forget loom's sealed secrets: 2 names at version 1 (only a machine backup made before now, bedrock backup bedrock, keeps them)
+ 4 forget: forget whatever else the machine keeps about loom: <state>/apps/loom, <state>/builds/loom; its backups in the storage bucket stay, and are the only way to bring its data back

@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -62,8 +63,11 @@ type HostConfig struct {
 type Server struct {
 	mu         sync.Mutex
 	containers map[string]*Container // by name
-	calls      []string
-	next       int
+	// volumes and networks are by name, with their labels.
+	volumes  map[string]map[string]string
+	networks map[string]map[string]string
+	calls    []string
+	next     int
 	// OnCreate, when set, sees each container as it is created, before the
 	// response, while whatever it was created from still exists.
 	OnCreate func(c Container)
@@ -73,7 +77,7 @@ type Server struct {
 // Docker client's environment at it.
 func New(t *testing.T) *Server {
 	t.Helper()
-	s := &Server{containers: map[string]*Container{}}
+	s := &Server{containers: map[string]*Container{}, volumes: map[string]map[string]string{}, networks: map[string]map[string]string{}}
 	srv := httptest.NewServer(s)
 	t.Cleanup(srv.Close)
 	t.Setenv("DOCKER_HOST", "tcp"+strings.TrimPrefix(srv.URL, "http"))
@@ -121,6 +125,43 @@ func (s *Server) Update(name string, change func(*Container)) {
 	}
 }
 
+// AddVolume puts a volume on the stand-in, with the labels it was made with.
+func (s *Server) AddVolume(name string, labels map[string]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.volumes[name] = labels
+}
+
+// AddNetwork puts a network on the stand-in, with the labels it was made with.
+func (s *Server) AddNetwork(name string, labels map[string]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.networks[name] = labels
+}
+
+// VolumeNames lists the volumes the stand-in holds, sorted.
+func (s *Server) VolumeNames() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return sortedNames(s.volumes)
+}
+
+// NetworkNames lists the networks the stand-in holds, sorted.
+func (s *Server) NetworkNames() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return sortedNames(s.networks)
+}
+
+func sortedNames(m map[string]map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for name := range m {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Calls lists every request so far, as "METHOD /path" without the API
 // version.
 func (s *Server) Calls() []string {
@@ -164,12 +205,38 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.create(w, r)
 	case strings.HasPrefix(path, "/containers/"):
 		s.container(w, r, strings.TrimPrefix(path, "/containers/"))
+	case path == "/networks" && r.Method == http.MethodGet:
+		s.mu.Lock()
+		items := []map[string]any{}
+		for _, name := range sortedNames(s.networks) {
+			items = append(items, map[string]any{"Name": name, "Labels": s.networks[name]})
+		}
+		s.mu.Unlock()
+		writeJSON(w, http.StatusOK, items)
+	case strings.HasPrefix(path, "/networks/") && r.Method == http.MethodDelete:
+		s.mu.Lock()
+		delete(s.networks, strings.TrimPrefix(path, "/networks/"))
+		s.mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
 	case strings.HasPrefix(path, "/networks/") && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{"Name": strings.TrimPrefix(path, "/networks/"), "Labels": map[string]string{}})
 	case path == "/networks/create":
 		writeJSON(w, http.StatusCreated, map[string]any{"Id": "n1"})
 	case path == "/volumes/create":
 		writeJSON(w, http.StatusCreated, map[string]any{"Name": "v1"})
+	case path == "/volumes" && r.Method == http.MethodGet:
+		s.mu.Lock()
+		items := []map[string]any{}
+		for _, name := range sortedNames(s.volumes) {
+			items = append(items, map[string]any{"Name": name, "Labels": s.volumes[name], "Driver": "local"})
+		}
+		s.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{"Volumes": items, "Warnings": []string{}})
+	case strings.HasPrefix(path, "/volumes/") && r.Method == http.MethodDelete:
+		s.mu.Lock()
+		delete(s.volumes, strings.TrimPrefix(path, "/volumes/"))
+		s.mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
 	default:
 		w.WriteHeader(http.StatusNoContent)
 	}

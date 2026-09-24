@@ -327,6 +327,25 @@ func (s *Store) RemoveApp(app string) error {
 	return os.RemoveAll(s.appDir(app))
 }
 
+// Apps lists the apps that hold secrets here, bedrock's own left out:
+// the ones deployed, and any an app left behind when it was removed.
+func (s *Store) Apps() ([]string, error) {
+	entries, err := os.ReadDir(s.Dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() && appPattern.MatchString(e.Name()) && e.Name() != reservedApp {
+			out = append(out, e.Name())
+		}
+	}
+	return out, nil
+}
+
 // Versions lists an app's versions, newest first, without values.
 func (s *Store) Versions(app string) ([]VersionInfo, error) {
 	entries, err := os.ReadDir(s.appDir(app))

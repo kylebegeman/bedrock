@@ -52,7 +52,7 @@ func newDrillNames(stateDir string, m *manifest.Manifest) drillNames {
 	app := m.App
 	// A dot can't appear in an app's name, so these never collide with
 	// another app's volumes, which the cleanup would otherwise remove.
-	prefix := "bedrock-" + app + ".drill"
+	prefix := drillPrefix(app)
 	n := drillNames{
 		dir:            filepath.Join(stateDir, "drills", app),
 		network:        prefix,

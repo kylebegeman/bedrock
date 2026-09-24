@@ -431,13 +431,20 @@ func newRemove(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "remove <app>",
 		Short: "Take an app off this machine. Its volumes, database and secrets stay unless asked.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Take an app off this machine. Its volumes, database and sealed secrets
+stay unless asked, so it can be restored or deployed again with what it had.
+
+--data removes them too, the secrets included. For an app that is no longer
+on this machine, --data removes whatever it left behind: its sealed secrets,
+volumes, database and networks. Its backups in the storage bucket stay, and
+are the only way back.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.operate(cmd.Context(), apps.RemoveKind, apps.RemoveInput{App: args[0], Data: data, Secrets: forgetSecrets}, planOnly)
 		},
 	}
-	cmd.Flags().BoolVar(&data, "data", false, "also remove the app's volumes and database; only a backup brings them back")
-	cmd.Flags().BoolVar(&forgetSecrets, "secrets", false, "also forget the app's sealed secrets; a preview removed with --data forgets its own")
+	cmd.Flags().BoolVar(&data, "data", false, "also remove the app's volumes, database and sealed secrets, or what a removed app left; only a backup brings them back")
+	cmd.Flags().BoolVar(&forgetSecrets, "secrets", false, "also forget the app's sealed secrets, keeping its volumes and database")
 	a.mutatingFlags(cmd, &planOnly)
 	return cmd
 }
