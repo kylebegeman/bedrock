@@ -21,6 +21,15 @@ const HelperImage = "alpine:3.21"
 // VolumeName names an app's volume.
 func VolumeName(app, volume string) string { return "bedrock-" + app + "-" + volume }
 
+// AppVolume is the name an app's manifest gives a Docker volume: the
+// inverse of VolumeName, or the volume's own name when it isn't the app's.
+func AppVolume(app, volume string) string {
+	if name, ok := strings.CutPrefix(volume, "bedrock-"+app+"-"); ok && name != "" {
+		return name
+	}
+	return volume
+}
+
 // EnsureVolume creates a named volume if it doesn't exist.
 func (e *Engine) EnsureVolume(ctx context.Context, name string) error {
 	_, err := e.cli.VolumeCreate(ctx, client.VolumeCreateOptions{Name: name, Labels: map[string]string{LabelOwner: OwnerValue}})

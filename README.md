@@ -379,8 +379,9 @@ deploy a guarded route rather than serve it open, and previews rely on it.
 
 The daemon watches every app and the machine once a minute: containers
 running, health paths and checks answering through the edge, certificates
-valid and renewing, disk and memory, backups fresh and drills passing, and
-any URL added with `bedrock watch add` (the other machine's sites, say). A
+valid and renewing, disk and memory, backups fresh and drills passing, each
+workload able to write the volumes it mounts (checked hourly), and any URL
+added with `bedrock watch add` (the other machine's sites, say). A
 problem has to hold for three rounds before it becomes an alert, one alert
 per app, and you hear once when it starts, once a day while it lasts, and
 once when it recovers.
@@ -417,7 +418,15 @@ inconsistent snapshot.
 `bedrock drill` uses an internal network with no outbound access, starts all
 long-running workloads before probing readiness, and never runs release or cron
 jobs. Privileged workloads cannot be safely drilled, and workloads that require
-external services may fail their drill readiness check.
+external services may fail their drill readiness check. A drill also fails when
+a restored volume holds files its workload's user can't write, such as a
+database copied in by hand as root: that app would answer its health check and
+then fail its first save.
+
+A workload that can't write its own volume is the same problem on the live app.
+The daemon raises it as an alert, and `bedrock doctor` names the files and the
+`chown` and restart that give them back. Bedrock never changes the ownership of
+files inside a volume on its own.
 
 Restore the app's original secrets from the sealed machine backup before
 restoring data on a new machine. Bedrock refuses to generate replacement keys

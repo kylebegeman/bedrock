@@ -4,10 +4,12 @@ import (
 	"context"
 	"net"
 	"net/netip"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/kylebegeman/bedrock/internal/docker"
 	"github.com/kylebegeman/bedrock/internal/edge"
 )
 
@@ -57,9 +59,12 @@ type Facts struct {
 	} `json:"registry"`
 	// Published are the ports apps publish on the machine's public
 	// addresses, which Docker opens whatever ufw says.
-	Published     []PublishedPort `json:"published,omitempty"`
-	EdgeRunning   bool            `json:"edge_running"`
-	DaemonAnswers bool            `json:"daemon_answers"`
+	Published []PublishedPort `json:"published,omitempty"`
+	// Data are the volumes app workloads mount writable, and what in each
+	// the workload's user can't write.
+	Data          []DataAccess `json:"data,omitempty"`
+	EdgeRunning   bool         `json:"edge_running"`
+	DaemonAnswers bool         `json:"daemon_answers"`
 	// PushUser is whether the bedrock user, which receives pushes, exists.
 	PushUser bool `json:"push_user"`
 }
@@ -89,6 +94,23 @@ type PublishedPort struct {
 	// as the edge, have no workload.
 	App      string `json:"app"`
 	Workload string `json:"workload"`
+}
+
+// DataAccess is one volume a running workload mounts writable, walked for
+// the files and directories its user can't write.
+type DataAccess struct {
+	App       string `json:"app"`
+	Workload  string `json:"workload"`
+	Container string `json:"container"`
+	// User is who the workload runs as, uid:gid.
+	User string `json:"user"`
+	// Volume is the manifest's name for it; Source is where it lives on
+	// the machine.
+	Volume string `json:"volume"`
+	Source string `json:"source"`
+	// Unwritable is what the walk found; Error is set when it couldn't walk.
+	Unwritable docker.Unwritable `json:"unwritable"`
+	Error      string            `json:"error,omitempty"`
 }
 
 // Whose names what publishes the port, the way the doctor reads: the edge
@@ -187,6 +209,7 @@ func (f *Facts) gatherDocker(ctx context.Context, env Env) {
 		if out, err := env.Run(ctx, "docker", "ps", "--filter", "label=bedrock.app", "--format", publishedFormat); err == nil {
 			f.Published = parsePublished(out)
 		}
+		f.Data = gatherData(ctx, env)
 	}
 }
 
@@ -300,6 +323,61 @@ func parsePublished(text string) []PublishedPort {
 			}
 			seen[key] = true
 			out = append(out, PublishedPort{Port: port, Container: name, App: app, Workload: workload})
+		}
+	}
+	return out
+}
+
+// dataFormat is what docker inspect says about each app container: its
+// name, app, workload and user, then each named volume it mounts.
+const dataFormat = "{{.Name}}\t{{index .Config.Labels \"bedrock.app\"}}\t{{index .Config.Labels \"bedrock.workload\"}}\t{{.Config.User}}" +
+	"{{range .Mounts}}{{if eq .Type \"volume\"}}\t{{.Name}}={{.Source}}={{.RW}}{{end}}{{end}}"
+
+// gatherData walks the volumes each running app workload mounts writable,
+// as the workload's user. Root, a user bedrock didn't set, bedrock's own
+// containers and a drill's scratch copies are left out.
+func gatherData(ctx context.Context, env Env) []DataAccess {
+	names, err := env.Run(ctx, "docker", "ps", "--filter", "label=bedrock.app", "--format", "{{.Names}}")
+	if err != nil || strings.TrimSpace(names) == "" {
+		return nil
+	}
+	out, err := env.Run(ctx, "docker", append([]string{"inspect", "--format", dataFormat}, strings.Fields(names)...)...)
+	if err != nil {
+		return nil
+	}
+	data := parseData(out)
+	for i := range data {
+		u, _ := docker.ParseUser(data[i].User)
+		x, err := docker.UnwritableBy(filepath.Join(env.Root, data[i].Source), u)
+		if err != nil {
+			data[i].Error = err.Error()
+			continue
+		}
+		data[i].Unwritable = x
+	}
+	return data
+}
+
+// parseData reads dataFormat lines into one entry per writable volume.
+func parseData(text string) []DataAccess {
+	var out []DataAccess
+	for _, line := range strings.Split(text, "\n") {
+		fields := strings.Split(strings.TrimSpace(line), "\t")
+		if len(fields) < 4 {
+			continue
+		}
+		name, app, workload, user := strings.TrimPrefix(fields[0], "/"), fields[1], fields[2], fields[3]
+		u, ok := docker.ParseUser(user)
+		if !ok || u.Root() || workload == "" || workload == "drill" || strings.Contains(name, ".drill") {
+			continue
+		}
+		for _, mount := range fields[4:] {
+			parts := strings.Split(mount, "=")
+			if len(parts) != 3 || parts[2] != "true" || parts[1] == "" {
+				continue
+			}
+			out = append(out, DataAccess{App: app, Workload: workload, Container: name, User: u.Spec(),
+				Volume: docker.AppVolume(app, parts[0]), Source: parts[1]})
 		}
 	}
 	return out

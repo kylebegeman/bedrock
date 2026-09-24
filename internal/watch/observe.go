@@ -33,6 +33,10 @@ const (
 	CertificateWarn = 14 * 24 * time.Hour
 	// BackupStale is how old the last good backup may be.
 	BackupStale = 36 * time.Hour
+	// DataCheckEvery is how often a workload's volumes are walked for
+	// files it can't write. A walk reads every entry, so rounds between
+	// walks reuse the last answer.
+	DataCheckEvery = time.Hour
 	// EdgeAddress is where the machine's own edge answers TLS.
 	EdgeAddress = "127.0.0.1:443"
 )
@@ -52,6 +56,15 @@ type Prober struct {
 	// round.
 	restartsMu sync.Mutex
 	restarts   map[string]int
+	// dataMu guards data, the last walk of each container's volumes.
+	dataMu sync.Mutex
+	data   map[string]dataScan
+}
+
+// dataScan is one walk of one volume a container mounts.
+type dataScan struct {
+	at      time.Time
+	problem string
 }
 
 // NewProber returns a prober for this machine.
@@ -68,6 +81,7 @@ func (p *Prober) Observe(ctx context.Context) []Condition {
 	if p.restarts == nil {
 		p.restarts = map[string]int{}
 	}
+	p.forgetOldScans(p.Now())
 	var conditions []Condition
 	conditions = append(conditions, p.host()...)
 
@@ -168,6 +182,11 @@ func (p *Prober) app(ctx context.Context, e *docker.Engine, rev state.Revision) 
 				worse(state.SeverityCritical)
 			}
 		}
+		// A workload that answers can still be unable to save anything.
+		for _, why := range p.dataProblems(rev.App, name, info, now) {
+			problems = append(problems, why)
+			worse(state.SeverityCritical)
+		}
 	}
 	for _, c := range m.Checks {
 		if err := app.RunCheck(ctx, c); err != nil {
@@ -201,6 +220,55 @@ func (p *Prober) app(ctx context.Context, e *docker.Engine, rev state.Revision) 
 		}
 	}
 	return severity, problems
+}
+
+// dataProblems walks the volumes a running workload mounts for files and
+// directories its user can't write, at most once per DataCheckEvery for
+// each volume. Root, or a user bedrock didn't set, needs no walk; a
+// volume that can't be walked says nothing rather than something wrong.
+func (p *Prober) dataProblems(appName, workload string, info *docker.Info, now time.Time) []string {
+	u, ok := docker.ParseUser(info.User)
+	if !ok || u.Root() {
+		return nil
+	}
+	var out []string
+	for _, v := range info.Volumes {
+		if !v.RW || v.Source == "" {
+			continue
+		}
+		key := info.Name + " " + v.Name
+		p.dataMu.Lock()
+		scan, seen := p.data[key]
+		p.dataMu.Unlock()
+		if !seen || now.Sub(scan.at) >= DataCheckEvery {
+			scan = dataScan{at: now}
+			if x, err := docker.UnwritableBy(v.Source, u); err == nil {
+				scan.problem = x.Problem(workload, u, docker.AppVolume(appName, v.Name))
+			}
+			p.dataMu.Lock()
+			if p.data == nil {
+				p.data = map[string]dataScan{}
+			}
+			p.data[key] = scan
+			p.dataMu.Unlock()
+		}
+		if scan.problem != "" {
+			out = append(out, scan.problem+"; bedrock doctor says how to give them back")
+		}
+	}
+	return out
+}
+
+// forgetOldScans drops walks of containers that are gone, which stop
+// being refreshed once a deploy replaces them.
+func (p *Prober) forgetOldScans(now time.Time) {
+	p.dataMu.Lock()
+	defer p.dataMu.Unlock()
+	for key, scan := range p.data {
+		if now.Sub(scan.at) > 2*DataCheckEvery {
+			delete(p.data, key)
+		}
+	}
 }
 
 // deploying reports whether a deploy or rollback of the app is under way.

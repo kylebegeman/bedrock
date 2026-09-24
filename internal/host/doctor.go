@@ -3,6 +3,8 @@ package host
 import (
 	"fmt"
 	"strings"
+
+	"github.com/kylebegeman/bedrock/internal/docker"
 )
 
 // Verdict is how a check came out.
@@ -49,7 +51,7 @@ func Supported(f Facts) bool {
 // is broken; warns are worth fixing.
 func Diagnose(f Facts) []Result {
 	var out []Result
-	for _, check := range []func(Facts) []Result{diagnoseSystem, diagnoseResources, diagnoseServices, diagnoseAccess, diagnoseUpkeep} {
+	for _, check := range []func(Facts) []Result{diagnoseSystem, diagnoseResources, diagnoseServices, diagnoseData, diagnoseAccess, diagnoseUpkeep} {
 		out = append(out, check(f)...)
 	}
 	return out
@@ -145,6 +147,34 @@ func diagnoseServices(f Facts) []Result {
 		} else {
 			r.add("edge", Fail, "not running", runSetup)
 		}
+	}
+	return r
+}
+
+// diagnoseData fails each volume holding files its workload can't write:
+// the app answers, but can't save. The fix gives them to the workload's
+// user and restarts it; the doctor changes nothing itself.
+func diagnoseData(f Facts) []Result {
+	if len(f.Data) == 0 {
+		return nil
+	}
+	var r results
+	clean := 0
+	for _, d := range f.Data {
+		name := "data " + d.App + "/" + d.Volume
+		switch {
+		case d.Error != "":
+			r.add(name, Warn, "couldn't walk it: "+d.Error, "")
+		case d.Unwritable.Count > 0:
+			u, _ := docker.ParseUser(d.User)
+			r.add(name, Fail, d.Unwritable.Problem(d.App+"'s "+d.Workload, u, d.Volume),
+				fmt.Sprintf("chown -R %s %s, then docker restart %s", d.User, d.Source, d.Container))
+		default:
+			clean++
+		}
+	}
+	if clean > 0 {
+		r.add("data", Pass, fmt.Sprintf("%d volume(s) writable by the workloads that mount them", clean), "")
 	}
 	return r
 }

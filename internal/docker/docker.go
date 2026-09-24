@@ -366,6 +366,20 @@ type Info struct {
 	// IPs by network.
 	IPs    map[string]string
 	Labels map[string]string
+	// User is who the container runs as, as Docker keeps it; bedrock sets
+	// it as uid:gid.
+	User string
+	// Volumes are the named volumes it mounts.
+	Volumes []VolumeMount
+}
+
+// VolumeMount is a named volume mounted into a container, with where it
+// lives on the machine.
+type VolumeMount struct {
+	Name        string
+	Source      string
+	Destination string
+	RW          bool
 }
 
 // Inspect describes a container by name or ID.
@@ -377,7 +391,12 @@ func (e *Engine) Inspect(ctx context.Context, name string) (*Info, error) {
 	c := res.Container
 	info := &Info{ID: c.ID, Name: strings.TrimPrefix(c.Name, "/"), IPs: map[string]string{}, Restarts: c.RestartCount}
 	if c.Config != nil {
-		info.Image, info.Labels = c.Config.Image, c.Config.Labels
+		info.Image, info.Labels, info.User = c.Config.Image, c.Config.Labels, c.Config.User
+	}
+	for _, m := range c.Mounts {
+		if m.Type == "volume" {
+			info.Volumes = append(info.Volumes, VolumeMount{Name: m.Name, Source: m.Source, Destination: m.Destination, RW: m.RW})
+		}
 	}
 	if c.State != nil {
 		info.Running, info.Status, info.ExitCode = c.State.Running, string(c.State.Status), c.State.ExitCode

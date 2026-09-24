@@ -392,10 +392,44 @@ func (d *drillState) startScratch(ctx context.Context, e *docker.Engine, name st
 	if err != nil {
 		return err
 	}
-	if _, err := isolate(ctx, e, &spec, w, image); err != nil {
+	u, err := isolate(ctx, e, &spec, w, image)
+	if err != nil {
+		return err
+	}
+	mountpoint := func(volume string) (string, error) { return e.VolumeMountpoint(ctx, volume) }
+	if err := restoredWritable(name, w, u, d.names.volumes, mountpoint); err != nil {
 		return err
 	}
 	return e.Run(ctx, spec)
+}
+
+// restoredWritable fails the drill when a workload can't write what was
+// restored into its volumes. Such a backup brings back an app that answers
+// its health check and then fails its first save, which is no recovery.
+func restoredWritable(name string, w manifest.Workload, u docker.User, volumes map[string]string, mountpoint func(string) (string, error)) error {
+	var problems []string
+	seen := map[string]bool{}
+	for _, mt := range w.Mounts {
+		if seen[mt.Volume] {
+			continue
+		}
+		seen[mt.Volume] = true
+		dir, err := mountpoint(volumes[mt.Volume])
+		if err != nil {
+			return fmt.Errorf("finding %s's restored volume %s: %w", name, mt.Volume, err)
+		}
+		x, err := docker.UnwritableBy(dir, u)
+		if err != nil {
+			return fmt.Errorf("checking %s's restored volume %s: %w", name, mt.Volume, err)
+		}
+		if why := x.Problem(name, u, mt.Volume); why != "" {
+			problems = append(problems, why)
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s; the backup holds files the app can't save to, and bedrock doctor names the live ones and how to give them back", strings.Join(problems, "; "))
 }
 
 func (d *drillState) cleanupStep() kernel.Step {

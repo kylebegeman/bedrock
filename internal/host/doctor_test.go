@@ -2,6 +2,9 @@ package host
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -214,5 +217,57 @@ func TestTheCloudflareGuardDoesNotCoverAPublishedPort(t *testing.T) {
 	f.WebFrom = WebFromAnyone
 	if got := byName(diagnosePublished(f))["port 3478/udp"]; strings.Contains(got.Detail, "Cloudflare") {
 		t.Fatalf("a machine open to anyone has no guard to mention: %+v", got)
+	}
+}
+
+// A workload that answers but can't write its volume is the doctor's to
+// name, with the chown and restart that fix it; the doctor changes nothing.
+func TestTheDoctorFailsAVolumeItsWorkloadCantWriteAndSaysHowToGiveItBack(t *testing.T) {
+	m := setUpBox(t)
+	user := fmt.Sprintf("%d:%d", os.Getuid()+1, os.Getgid()+1)
+	stuck := "/var/lib/docker/volumes/bedrock-hello-data/_data"
+	clean := "/var/lib/docker/volumes/bedrock-notes-files/_data"
+	m.write(stuck+"/hello.sqlite", "x")
+	m.write(clean+"/open.txt", "x")
+	for _, dir := range []string{stuck, clean} {
+		if err := os.Chmod(filepath.Join(m.root, dir), 0o777); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(filepath.Join(m.root, clean, "open.txt"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	names := "bedrock-hello-web-r1\nbedrock-notes-web-r1\nbedrock-hello.drill.web\nbedrock-root-web-r1\nbedrock-edge"
+	m.answers["docker ps --filter label=bedrock.app --format {{.Names}}"] = names
+	m.answers["docker inspect --format "+dataFormat+" "+strings.ReplaceAll(names, "\n", " ")] = strings.Join([]string{
+		"/bedrock-hello-web-r1\thello\tweb\t" + user + "\tbedrock-hello-data=" + stuck + "=true",
+		"/bedrock-notes-web-r1\tnotes\tweb\t" + user + "\tbedrock-notes-files=" + clean + "=true\tbedrock-notes-seed=" + stuck + "=false",
+		"/bedrock-hello.drill.web\thello\tweb\t" + user + "\tbedrock-hello.drill.data=" + stuck + "=true",
+		"/bedrock-root-web-r1\troot\tweb\t0:0\tbedrock-root-data=" + stuck + "=true",
+		"/bedrock-edge\tedge\t\t\tbedrock-edge-data=" + stuck + "=true",
+	}, "\n")
+
+	f := Gather(context.Background(), m.env(), "")
+	if len(f.Data) != 2 {
+		t.Fatalf("two writable app volumes, the rest left out: %+v", f.Data)
+	}
+	r := byName(Diagnose(f))
+	got := r["data hello/data"]
+	if got.Verdict != Fail || !strings.Contains(got.Detail, "hello's web runs as "+user+" and can't write 1 file or directory in volume data, such as hello.sqlite") {
+		t.Fatalf("the stuck volume: %+v", got)
+	}
+	if got.Fix != "chown -R "+user+" "+stuck+", then docker restart bedrock-hello-web-r1" {
+		t.Fatalf("fix: %q", got.Fix)
+	}
+	if pass := r["data"]; pass.Verdict != Pass || !strings.HasPrefix(pass.Detail, "1 volume(s) writable") {
+		t.Fatalf("the clean volume: %+v", pass)
+	}
+	if Worst(Diagnose(f)) != Fail {
+		t.Fatal("an app that can't save is a failure")
+	}
+	for _, cmd := range m.ran {
+		if strings.HasPrefix(cmd, "chown") || strings.Contains(cmd, "restart") {
+			t.Fatalf("the doctor changed something: %s", cmd)
+		}
 	}
 }

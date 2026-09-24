@@ -43,6 +43,19 @@ type Container struct {
 	ExitAfter int
 	// Logs is what the container has written.
 	Logs string
+	// User is who it runs as, as Docker keeps it.
+	User string
+	// Mounts are what inspect lists under Mounts.
+	Mounts []Mount
+}
+
+// Mount is one of a container's mounts as inspect lists it.
+type Mount struct {
+	Type        string
+	Name        string
+	Source      string
+	Destination string
+	RW          bool
 }
 
 // HostConfig is the part of a container's host configuration tests look at.
@@ -323,7 +336,8 @@ func (s *Server) container(w http.ResponseWriter, r *http.Request, rest string) 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"Id": c.ID, "Name": "/" + c.Name, "RestartCount": c.RestartCount,
 			"State":           map[string]any{"Status": status, "Running": c.Running, "ExitCode": c.ExitCode},
-			"Config":          map[string]any{"Image": c.Image, "Labels": c.Labels},
+			"Config":          map[string]any{"Image": c.Image, "Labels": c.Labels, "User": c.User},
+			"Mounts":          c.Mounts,
 			"NetworkSettings": map[string]any{"Networks": map[string]any{}},
 		})
 	case action == "logs":
