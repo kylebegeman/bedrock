@@ -89,6 +89,7 @@ func Registry(store *state.Store, sec *secrets.Store, socket, stateDir string) k
 	addresses := func(ctx context.Context) []string { return host.Addresses(ctx, env) }
 	reg.Add(app.Remove{Store: store, Secrets: sec, Addresses: addresses, StateDir: stateDir})
 	reg.Add(app.Point{Store: store, Secrets: sec, Addresses: addresses, CloudflareOnly: cloudflareOnly})
+	reg.Add(app.Drop{Store: store, Secrets: sec, Addresses: addresses})
 	reg.Add(app.Backup{Store: store, Secrets: sec, StateDir: stateDir, Hostname: hostname, Profile: host.ProfilePath})
 	reg.Add(app.Drill{Store: store, Secrets: sec, StateDir: stateDir})
 	reg.Add(app.RestoreDef{Store: store, Secrets: sec, StateDir: stateDir})

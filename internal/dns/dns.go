@@ -196,6 +196,101 @@ func (m *Manager) Remove(ctx context.Context, app string, hosts []string) ([]str
 	return removed, nil
 }
 
+// Drop is what dropping a name's record deletes: every A and AAAA record
+// at exactly that name, each of which points at this machine.
+type Drop struct {
+	Host    string
+	Zone    string
+	Records []cloudflare.Record
+}
+
+func (d Drop) String() string {
+	parts := make([]string, len(d.Records))
+	for i, r := range d.Records {
+		parts[i] = r.Type + " " + r.Content
+		if r.Comment != "" {
+			parts[i] += " (" + r.Comment + ")"
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// Droppable finds the records a drop of host would delete. Only records
+// named exactly host count, so a wildcard that covers it is never one of
+// them unless the wildcard's own name is the one given. Where a record
+// points is what decides, never its comment: one at the name that points
+// anywhere but this machine, a CNAME included, refuses the whole drop, so
+// a name another machine answers for is never cleared from here.
+func (m *Manager) Droppable(ctx context.Context, host string) (Drop, error) {
+	z, err := m.zone(ctx, host)
+	if err != nil {
+		return Drop{}, err
+	}
+	records, err := m.CF.Records(ctx, z.ID, host)
+	if err != nil {
+		return Drop{}, err
+	}
+	mine := m.mine()
+	d := Drop{Host: host, Zone: z.Name}
+	for _, r := range records {
+		if r.Name != host {
+			continue
+		}
+		switch r.Type {
+		case "A", "AAAA":
+			if !mine[r.Content] {
+				return Drop{}, fmt.Errorf("%s %w: its %s record names %s, not this machine; bedrock drops only a record that points here", host, ErrElsewhere, r.Type, r.Content)
+			}
+			d.Records = append(d.Records, r)
+		case "CNAME":
+			return Drop{}, fmt.Errorf("%s is a CNAME to %s, not a record that points at this machine; bedrock drops only those", host, r.Content)
+		}
+	}
+	if len(d.Records) == 0 {
+		return Drop{}, fmt.Errorf("%s has no A or AAAA record in %s", host, z.Name)
+	}
+	// The API's order is its own; a plan's words must not move with it.
+	sort.Slice(d.Records, func(i, j int) bool {
+		a, b := d.Records[i], d.Records[j]
+		return a.Type < b.Type || (a.Type == b.Type && a.Content < b.Content)
+	})
+	return d, nil
+}
+
+// DropRecords deletes what Droppable found, reading each record again
+// first: one that has changed since, or no longer points here, stops the
+// drop, and one already gone is passed over.
+func (m *Manager) DropRecords(ctx context.Context, d Drop) ([]string, error) {
+	z, err := m.zone(ctx, d.Host)
+	if err != nil {
+		return nil, err
+	}
+	records, err := m.CF.Records(ctx, z.ID, d.Host)
+	if err != nil {
+		return nil, err
+	}
+	now := map[string]cloudflare.Record{}
+	for _, r := range records {
+		now[r.ID] = r
+	}
+	mine := m.mine()
+	var dropped []string
+	for _, want := range d.Records {
+		r, ok := now[want.ID]
+		if !ok {
+			continue
+		}
+		if r.Name != d.Host || r.Type != want.Type || r.Content != want.Content || !mine[r.Content] {
+			return dropped, fmt.Errorf("%s's %s record changed since the plan (it names %s now); nothing more is deleted", d.Host, r.Type, r.Content)
+		}
+		if err := m.CF.Delete(ctx, z.ID, r.ID); err != nil {
+			return dropped, err
+		}
+		dropped = append(dropped, r.Type+" "+r.Content)
+	}
+	return dropped, nil
+}
+
 // Status is one host's record as bedrock sees it.
 type Status struct {
 	Host    string `json:"host"`
@@ -311,8 +406,8 @@ func wildcardFor(host string) string {
 	return "*." + parent
 }
 
-// covers reports whether a wildcard record's name covers a host.
-func covers(wildcard, host string) bool {
+// Covers reports whether a wildcard record's name covers a host.
+func Covers(wildcard, host string) bool {
 	suffix := strings.TrimPrefix(wildcard, "*")
 	return strings.HasPrefix(wildcard, "*.") && strings.HasSuffix(host, suffix) && host != suffix[1:]
 }
@@ -325,6 +420,9 @@ type Finding struct {
 	Content string `json:"content,omitempty"`
 	Comment string `json:"comment,omitempty"`
 	What    string `json:"what"`
+	// Droppable marks a record that points here with no route here to
+	// answer for it: what bedrock dns drop deletes.
+	Droppable bool `json:"droppable,omitempty"`
 }
 
 // Audit looks at every record in the zones the routes live in and reports
@@ -370,7 +468,7 @@ func (m *Manager) Audit(ctx context.Context, routes []Route) ([]Finding, error) 
 			if strings.HasPrefix(r.Name, "*.") {
 				used := false
 				for host := range routed {
-					if covers(r.Name, host) {
+					if Covers(r.Name, host) {
 						used = true
 						if mine[r.Content] {
 							answered[host] = true
@@ -378,7 +476,7 @@ func (m *Manager) Audit(ctx context.Context, routes []Route) ([]Finding, error) 
 					}
 				}
 				if mine[r.Content] && !used {
-					f.What = "a wildcard pointing at this machine that no route here uses"
+					f.What, f.Droppable = "a wildcard pointing at this machine that no route here uses", true
 					findings = append(findings, f)
 				}
 				continue
@@ -389,9 +487,9 @@ func (m *Manager) Audit(ctx context.Context, routes []Route) ([]Finding, error) 
 			}
 			switch {
 			case mine[r.Content] && !hasRoute && byBedrock:
-				f.What = fmt.Sprintf("made by bedrock for %s on %s, which no longer routes it", app, machine)
+				f.What, f.Droppable = fmt.Sprintf("made by bedrock for %s on %s, which no longer routes it", app, machine), true
 			case mine[r.Content] && !hasRoute:
-				f.What = "points at this machine without a route: nothing answers for it"
+				f.What, f.Droppable = "points at this machine without a route: nothing answers for it", true
 			case hasRoute && r.Type == "CNAME":
 				f.What = fmt.Sprintf("routed by %s here but is a CNAME to %s", route.App, r.Content)
 			case hasRoute && !mine[r.Content] && byBedrock && machine != m.Hostname:

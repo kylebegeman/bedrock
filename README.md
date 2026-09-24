@@ -298,7 +298,10 @@ A route with `dns: direct` or `dns: proxied` gets its Cloudflare record from
 the deploy, which refuses a record that points at another machine; `bedrock
 dns point <host>` moves one on purpose. Retiring a route, or the app, removes
 its record. `bedrock dns` explains every host; `bedrock dns audit` finds
-records that point here with nothing routed.
+records that point here with nothing routed, and `bedrock dns drop <host>`
+deletes one: only the A and AAAA records at exactly that name, only when
+each points at this machine, and only when no app here routes the host. A
+wildcard goes only when it is named itself.
 
 An app is told who its visitor is in `X-Forwarded-For` and `X-Real-IP`: one
 address each, whatever the request claimed. Behind Cloudflare's proxy that

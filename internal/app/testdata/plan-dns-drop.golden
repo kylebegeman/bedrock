@@ -1,0 +1,2 @@
+target loom.begam.in, resume
+ 1 drop: delete loom.begam.in's record in begam.in (A 187.127.249.208), which points at this machine; no app here routes loom.begam.in

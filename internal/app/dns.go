@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/kylebegeman/bedrock/internal/cloudflare"
@@ -223,6 +224,115 @@ func (p Point) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, err
 			return nil
 		},
 	}}}, nil
+}
+
+// DropKind deletes a record that points at this machine for a host no
+// app here routes: what bedrock dns audit finds and nothing else removes,
+// such as an app's name after the app was removed by hand.
+const DropKind = "dns.drop"
+
+// Drop is the Definition for DropKind.
+type Drop struct {
+	Store     *state.Store
+	Secrets   *secrets.Store
+	Addresses func(ctx context.Context) []string
+}
+
+// DropInput names the host whose record goes.
+type DropInput struct {
+	Host string `json:"host"`
+}
+
+// Kind implements kernel.Definition.
+func (Drop) Kind() string { return DropKind }
+
+// Plan implements kernel.Definition. It reads the records when it plans,
+// so the plan names each one it deletes and its digest pins them.
+func (d Drop) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, error) {
+	var in DropInput
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return nil, fmt.Errorf("drop input: %w", err)
+	}
+	host := strings.TrimSuffix(strings.ToLower(in.Host), ".")
+	under, wildcard := strings.CutPrefix(host, "*.")
+	if !manifest.ValidHost(under) {
+		return nil, fmt.Errorf("%q isn't a hostname, or a wildcard such as *.example.com", in.Host)
+	}
+	// Any revision counts, not only the active one: a rollback would
+	// bring the route back to a name with no record.
+	routed, err := routedHosts(ctx, d.Store)
+	if err != nil {
+		return nil, err
+	}
+	for _, h := range sortedKeys(routed) {
+		if h == host {
+			return nil, fmt.Errorf("%s routes %s on this machine; its record goes when the route is retired or the app is removed", routed[h], host)
+		}
+		if wildcard && dns.Covers(host, h) {
+			return nil, fmt.Errorf("%s covers %s, which %s routes on this machine; bedrock drops a wildcard only when no route here falls under it", host, h, routed[h])
+		}
+	}
+	if _, err := integration.LoadCloudflare(d.Secrets); err != nil {
+		return nil, fmt.Errorf("dropping a record needs the cloudflare integration: %w", err)
+	}
+	mgr, err := DNSManager(d.Secrets, d.Addresses(ctx))
+	if err != nil {
+		return nil, err
+	}
+	drop, err := mgr.Droppable(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	return &kernel.Plan{Target: host, Recovery: kernel.Resume, Steps: []kernel.Step{{
+		Name:   "drop",
+		Change: dropChange(drop),
+		Apply: func(ctx context.Context, out io.Writer) error {
+			mgr, err := DNSManager(d.Secrets, d.Addresses(ctx))
+			if err != nil {
+				return err
+			}
+			dropped, err := mgr.DropRecords(ctx, drop)
+			for _, r := range dropped {
+				fmt.Fprintf(out, "%s's %s record deleted\n", host, r)
+			}
+			return err
+		},
+	}}}, nil
+}
+
+// dropChange says what a drop deletes, record by record.
+func dropChange(d dns.Drop) string {
+	what, points := "record", "points"
+	if len(d.Records) > 1 {
+		what, points = fmt.Sprintf("%d records", len(d.Records)), "point"
+	}
+	return fmt.Sprintf("delete %s's %s in %s (%s), which %s at this machine; no app here routes %s", d.Host, what, d.Zone, d, points, d.Host)
+}
+
+// routedHosts maps every host any revision on the machine routes to the
+// app that routes it.
+func routedHosts(ctx context.Context, store *state.Store) (map[string]string, error) {
+	apps, err := store.AppNames(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, name := range apps {
+		revs, err := store.Revisions(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		for _, rev := range revs {
+			var m manifest.Manifest
+			if err := json.Unmarshal(rev.Manifest, &m); err != nil {
+				return nil, fmt.Errorf("revision %s of %s: its manifest doesn't parse, so what it routes is unknown: %w", rev.ID, name, err)
+			}
+			for _, h := range m.Hosts() {
+				out[h] = name
+			}
+		}
+	}
+	return out, nil
 }
 
 // Routes lists every host the active revisions route, with its mode.

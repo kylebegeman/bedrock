@@ -24,7 +24,7 @@ func newDNS(a *app) *cobra.Command {
 			return a.showDNS(cmd.Context())
 		},
 	}
-	cmd.AddCommand(newDNSAudit(a), newDNSPoint(a))
+	cmd.AddCommand(newDNSAudit(a), newDNSPoint(a), newDNSDrop(a))
 	return cmd
 }
 
@@ -139,7 +139,16 @@ func newDNSAudit(a *app) *cobra.Command {
 				}
 				fmt.Fprintf(w, "%s\t%s\t%s\n", f.Host, record, f.What)
 			}
-			return w.Flush()
+			if err := w.Flush(); err != nil {
+				return err
+			}
+			for _, f := range findings {
+				if f.Droppable {
+					fmt.Fprintln(a.stdout, "bedrock dns drop <host> deletes a record that points here with no route here, once you are sure nothing needs it")
+					break
+				}
+			}
+			return nil
 		},
 	}
 }
@@ -160,4 +169,26 @@ func newDNSPoint(a *app) *cobra.Command {
 	point.Flags().BoolVar(&proxied, "proxied", false, "put the host behind Cloudflare's proxy")
 	a.mutatingFlags(point, &planOnly)
 	return point
+}
+
+func newDNSDrop(a *app) *cobra.Command {
+	var planOnly bool
+	drop := &cobra.Command{
+		Use:   "drop <host>",
+		Short: "Delete a record that points here for a host no app on this machine routes.",
+		Long: `Delete a record that points here for a host no app on this machine routes,
+such as one bedrock dns audit finds after an app was removed.
+
+Only the A and AAAA records at exactly that name go, and only when every
+record there points at this machine: a record that names another machine,
+or a CNAME, refuses the drop. A wildcard that covers the host is never
+touched; name the wildcard itself, such as '*.example.com', to drop it,
+and only when no route here falls under it.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.operate(cmd.Context(), apps.DropKind, apps.DropInput{Host: args[0]}, planOnly)
+		},
+	}
+	a.mutatingFlags(drop, &planOnly)
+	return drop
 }

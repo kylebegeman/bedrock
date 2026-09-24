@@ -177,6 +177,7 @@ Usage:
 
 Available Commands:
   audit       Records that point here without a route, records bedrock left behind, routes whose records point elsewhere.
+  drop        Delete a record that points here for a host no app on this machine routes.
   point       Make a host's record name this machine, taking it from wherever it points now (moving day).
 
 Global Flags:
@@ -190,6 +191,28 @@ Records that point here without a route, records bedrock left behind, routes who
 
 Usage:
   bedrock dns audit [flags]
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock dns drop (hidden false)
+Delete a record that points here for a host no app on this machine routes.
+Delete a record that points here for a host no app on this machine routes,
+such as one bedrock dns audit finds after an app was removed.
+
+Only the A and AAAA records at exactly that name go, and only when every
+record there points at this machine: a record that names another machine,
+or a CNAME, refuses the drop. A wildcard that covers the host is never
+touched; name the wildcard itself, such as '*.example.com', to drop it,
+and only when no route here falls under it.
+Usage:
+  bedrock dns drop <host> [flags]
+
+Flags:
+      --digest string   apply only if the plan is still the one with this digest; implies --yes
+      --plan            show the plan and change nothing
+      --yes             apply without asking
 
 Global Flags:
       --json               print JSON, one object per line
