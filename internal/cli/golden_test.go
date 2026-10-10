@@ -23,6 +23,8 @@ func TestEveryCommandsHelpStaysWhatItWas(t *testing.T) {
 	// one machine to the next.
 	t.Setenv("BEDROCK_STATE_DIR", "~/.bedrock")
 	t.Setenv("BEDROCK_SOCKET", "/run/bedrock/bedrock.sock")
+	t.Setenv("BEDROCK_TARGETS_FILE", "~/.bedrock/targets.json")
+	t.Setenv("BEDROCK_BOOTSTRAP_DIR", "~/.bedrock/bootstrap")
 	root := newRoot(io.Discard, io.Discard)
 	var b strings.Builder
 	var walk func(c *cobra.Command)

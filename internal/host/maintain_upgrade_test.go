@@ -100,13 +100,15 @@ func TestUpgradeStagesSwitchesRestartsAndVerifies(t *testing.T) {
 	m.write("/tmp/bedrock-new", "new binary")
 	// The candidate reports the build this test process will "become".
 	m.answers["/tmp/bedrock-new version --json"] = `{"version":"0.7.0-test","commit":"aaaaaaaaaaaa","go":"go1.26","os":"linux","arch":"amd64"}`
+	m.answers["/tmp/bedrock-new capabilities --json"] = `{"api_version":1,"manifest_version":1,"state_version":1,"min_state_version":0,"max_state_version":1,"capabilities":["kernel.plan.v1","kernel.apply.v1","kernel.expect.v1","state.migrations.v1","upgrade.checkpoint.v1"]}`
 	running := m.runningVersion()
 	running.Commit = "000000000000"
 	env := m.env()
 	env.RunningVersion = func() version.Info { return running }
 	reg := kernel.Registry{}
-	reg.Add(Upgrade{Env: env})
-	engine := kernel.New(openStore(t), reg, "test")
+	store := openStore(t)
+	reg.Add(Upgrade{Env: env, Store: store})
+	engine := kernel.New(store, reg, "test")
 
 	view, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/bedrock-new"))
 	if err != nil {
@@ -148,11 +150,13 @@ func TestUpgradeResumedOnTheNewBuildSucceeds(t *testing.T) {
 	m.write(StagedMarker, "0.7.0-test@aaaaaaaaaaaa\n")
 	m.write("/tmp/bedrock-new", "new binary")
 	m.answers["/tmp/bedrock-new version --json"] = `{"version":"0.7.0-test","commit":"aaaaaaaaaaaa","go":"go1.26","os":"linux","arch":"amd64"}`
+	m.answers["/tmp/bedrock-new capabilities --json"] = `{"api_version":1,"manifest_version":1,"state_version":1,"min_state_version":0,"max_state_version":1,"capabilities":["kernel.plan.v1","kernel.apply.v1","kernel.expect.v1","state.migrations.v1","upgrade.checkpoint.v1"]}`
 	// This process is the new build now. The plan says so in a note, its
 	// digest is unchanged, and the restart step sees no restart to do.
 	reg := kernel.Registry{}
-	reg.Add(Upgrade{Env: m.env()})
-	engine := kernel.New(openStore(t), reg, "test")
+	store := openStore(t)
+	reg.Add(Upgrade{Env: m.env(), Store: store})
+	engine := kernel.New(store, reg, "test")
 	view, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/bedrock-new"))
 	if err != nil || view.Steps[0].Note != "already the running build" {
 		t.Fatalf("%v %+v", err, view)
@@ -184,8 +188,9 @@ func TestUpgradeRefusesWrongBinaries(t *testing.T) {
 	allowEverything(m)
 	m.write(BinaryPath, "old binary")
 	reg := kernel.Registry{}
-	reg.Add(Upgrade{Env: m.env()})
-	engine := kernel.New(openStore(t), reg, "test")
+	store := openStore(t)
+	reg.Add(Upgrade{Env: m.env(), Store: store})
+	engine := kernel.New(store, reg, "test")
 	if _, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/not-bedrock")); err == nil || !strings.Contains(err.Error(), "doesn't run as bedrock") {
 		t.Fatalf("not bedrock: %v", err)
 	}
@@ -204,6 +209,7 @@ func TestVerifyAsksTheDaemonWhenThisProcessIsNotIt(t *testing.T) {
 	m.write(BinaryPath, "old binary")
 	m.write("/tmp/bedrock-new", "new binary")
 	m.answers["/tmp/bedrock-new version --json"] = `{"version":"0.7.0-test","commit":"aaaaaaaaaaaa","go":"go1.26","os":"linux","arch":"amd64"}`
+	m.answers["/tmp/bedrock-new capabilities --json"] = `{"api_version":1,"manifest_version":1,"state_version":1,"min_state_version":0,"max_state_version":1,"capabilities":["kernel.plan.v1","kernel.apply.v1","kernel.expect.v1","state.migrations.v1","upgrade.checkpoint.v1"]}`
 	target := m.runningVersion()
 	old := target
 	old.Commit = "000000000000"
@@ -217,8 +223,9 @@ func TestVerifyAsksTheDaemonWhenThisProcessIsNotIt(t *testing.T) {
 		return old, true
 	}
 	reg := kernel.Registry{}
-	reg.Add(Upgrade{Env: env, DaemonVersion: daemon})
-	engine := kernel.New(openStore(t), reg, "test")
+	store := openStore(t)
+	reg.Add(Upgrade{Env: env, Store: store, DaemonVersion: daemon})
+	engine := kernel.New(store, reg, "test")
 	receipt, err := engine.Run(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/bedrock-new"), func(kernel.Event) {})
 	if err != nil {
 		t.Fatal(err)
@@ -237,6 +244,7 @@ func TestVerifyTrustsItselfWhenNoDaemonAnswers(t *testing.T) {
 	m.write(BinaryPath, "old binary")
 	m.write("/tmp/bedrock-new", "new binary")
 	m.answers["/tmp/bedrock-new version --json"] = `{"version":"0.7.0-test","commit":"aaaaaaaaaaaa","go":"go1.26","os":"linux","arch":"amd64"}`
+	m.answers["/tmp/bedrock-new capabilities --json"] = `{"api_version":1,"manifest_version":1,"state_version":1,"min_state_version":0,"max_state_version":1,"capabilities":["kernel.plan.v1","kernel.apply.v1","kernel.expect.v1","state.migrations.v1","upgrade.checkpoint.v1"]}`
 	env := m.env() // this process already runs the target build
 	reg := kernel.Registry{}
 	reg.Add(Upgrade{Env: env, DaemonVersion: func(context.Context) (version.Info, bool) { return version.Info{}, false }})

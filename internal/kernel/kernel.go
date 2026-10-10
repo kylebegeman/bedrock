@@ -389,7 +389,7 @@ func (e *Engine) apply(ctx context.Context, op *state.Operation, plan *Plan, vie
 		out := newLineWriter(func(line string) {
 			emit(Event{Type: EventStepOutput, Operation: op.ID, At: e.now(), Step: &StepView{Index: i, Name: st.Name}, Line: line})
 		})
-		stepErr := st.Apply(context.WithValue(ctx, attemptKey{}, steps[i].Attempts+1), out)
+		stepErr := st.Apply(context.WithValue(withOperationID(ctx, op.ID), attemptKey{}, steps[i].Attempts+1), out)
 		out.Flush()
 		finished := e.now()
 		status, errText := state.StepSucceeded, ""

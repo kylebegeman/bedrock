@@ -41,7 +41,7 @@ type Signal struct {
 	Samples int       `json:"samples"`
 }
 
-func (s *Store) migrateSignals(ctx context.Context) error {
+func (s *Store) migrateSignals(ctx context.Context, q migrationDB) error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS signals (
   hour    INTEGER NOT NULL,
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS integration_uses (
   purpose TEXT NOT NULL,
   used_at INTEGER NOT NULL
 );`
-	_, err := s.db.ExecContext(ctx, schema)
+	_, err := q.ExecContext(ctx, schema)
 	return err
 }
 

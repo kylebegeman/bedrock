@@ -6,7 +6,7 @@
 # sends a working tree from this Mac.
 #
 # Needs the apps prove-m4.sh and prove-m5.sh leave behind, and begamin's
-# repository on this Mac ($1, or LANE_BEGAMIN_REPO in hostinger.env). It is
+# repository on this Mac ($1, or LANE_BEGAMIN_REPO in the lane configuration). It is
 # cloned into a temporary directory and a lane manifest committed there;
 # nothing is pushed anywhere but the box. Cloudflare's API is a lane
 # fixture (fakeflare) the proof starts on the box; on the real machines the
@@ -14,19 +14,16 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=/dev/null
-. "$here/hostinger.env"
-: "${LANE_DOMAIN:?set LANE_DOMAIN in lane/hostinger.env; see hostinger.env.example}"
-: "${LANE_ZONE:?set LANE_ZONE in lane/hostinger.env; see hostinger.env.example}"
-: "${LANE_SITE_URL:?set LANE_SITE_URL in lane/hostinger.env; see hostinger.env.example}"
+# shellcheck source=lane/common.sh
+. "$here/common.sh"
+: "${LANE_DOMAIN:?set LANE_DOMAIN in the lane configuration; see ssh.env.example}"
+: "${LANE_ZONE:?set LANE_ZONE in the lane configuration; see ssh.env.example}"
+: "${LANE_SITE_URL:?set LANE_SITE_URL in the lane configuration; see ssh.env.example}"
 export LANE_DOMAIN LANE_ZONE LANE_SITE_URL
-begamin_repo="${1:-${LANE_BEGAMIN_REPO:?pass the begamin repository, or set LANE_BEGAMIN_REPO in lane/hostinger.env}}"
+begamin_repo="${1:-${LANE_BEGAMIN_REPO:?pass the begamin repository, or set LANE_BEGAMIN_REPO in the lane configuration}}"
 LANE_ZONE_ID="zone-${LANE_ZONE//./-}" # the stand-in's id for the zone
-ssh_opts=(-i "$KEY" -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes
-  -o UserKnownHostsFile="$here/known_hosts" -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
-box="root@$HOST"
 run() { ssh "${ssh_opts[@]}" "$box" "$@"; }
-put() { scp -q "${ssh_opts[@]}" "$1" "$box:$2"; }
+put() { scp -q "${scp_opts[@]}" "$1" "$box:$2"; }
 fetch() { curl -sS --max-time 30 "$@"; }
 # The fixtures name lane.example.com; the box answers for $LANE_DOMAIN.
 localize() { run "sed -i 's/lane\\.example\\.com/$LANE_DOMAIN/g' $*"; }
@@ -42,15 +39,15 @@ push_key="$work/push-key"
 ssh-keygen -q -t ed25519 -N "" -C "lane push key" -f "$push_key"
 # The throwaway key stops working when the proof ends, however it ends.
 trap 'run "bedrock git deny begamin \"$(cat "$push_key.pub")\"" >/dev/null 2>&1 || true; rm -rf "$work"' EXIT
-push_ssh="ssh -i $push_key -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes -o UserKnownHostsFile=$here/known_hosts -o StrictHostKeyChecking=yes"
+push_ssh=$(printf '%q ' ssh -i "$push_key" -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes -p "$PORT" -o "UserKnownHostsFile=$KNOWN_HOSTS" -o StrictHostKeyChecking=yes)
 
 echo "== build and install; reconcile keeps the bedrock user that receives pushes"
-(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/bedrock-linux-amd64 ./cmd/bedrock \
-  && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/fakeflare-linux-amd64 ./lane/fixtures/fakeflare \
+(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -o bin/bedrock-linux-$LANE_ARCH ./cmd/bedrock \
+  && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -o bin/fakeflare-linux-$LANE_ARCH ./lane/fixtures/fakeflare \
   && go build -trimpath -o bin/bedrock ./cmd/bedrock)
-put "$here/../bin/bedrock-linux-amd64" /usr/local/bin/bedrock.new
+put "$here/../bin/bedrock-linux-$LANE_ARCH" /usr/local/bin/bedrock.new
 run 'mkdir -p /srv/lane/bin'
-put "$here/../bin/fakeflare-linux-amd64" /srv/lane/bin/fakeflare.new
+put "$here/../bin/fakeflare-linux-$LANE_ARCH" /srv/lane/bin/fakeflare.new
 run 'chmod 755 /usr/local/bin/bedrock.new /srv/lane/bin/fakeflare.new && mv -f /usr/local/bin/bedrock.new /usr/local/bin/bedrock && mv -f /srv/lane/bin/fakeflare.new /srv/lane/bin/fakeflare && bedrock daemon install >/dev/null && bedrock version'
 run 'bedrock host reconcile --yes' | quiet | grep -E "pushes|succeeded|failed"
 run 'bedrock ps' | grep -q dragon-writer || fail "run prove-m4.sh and prove-m5.sh first"
@@ -139,7 +136,7 @@ echo "-- still running $after"
 g reset -q --hard HEAD~1
 
 echo "== the same key can't deploy another app, open a shell or run anything else"
-as_key() { ssh -i "$push_key" -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes -o UserKnownHostsFile="$here/known_hosts" "bedrock@$HOST" "$@" 2>&1 </dev/null | tail -1 || true; }
+as_key() { ssh -i "$push_key" -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes -p "$PORT" -o UserKnownHostsFile="$KNOWN_HOSTS" -o StrictHostKeyChecking=yes "bedrock@$HOST" "$@" 2>&1 </dev/null | tail -1 || true; }
 refused=$(as_key "git-receive-pack 'site.git'"); echo "$refused"; [[ "$refused" == *"deploys begamin, not site"* ]] || fail "the key reached another app"
 refused=$(as_key); echo "$refused"; [[ "$refused" == *"opens no shell"* ]] || fail "the key opened a shell"
 refused=$(as_key "cat /etc/passwd"); echo "$refused"; [[ "$refused" == *"isn't something it runs"* ]] || fail "the key ran a command"
@@ -219,10 +216,10 @@ run 'bedrock dns audit --json' | python3 -c 'import json,os,sys; d=os.environ["L
 
 echo "== a GitHub-style webhook deploys a push (the secret stays on the box)"
 run 'rm -rf /srv/lane/upstream && mkdir -p /srv/lane/upstream && git init -q --bare --initial-branch=main /srv/lane/upstream/begamin.git'
-GIT_SSH_COMMAND="ssh ${ssh_opts[*]}" g push -q "root@$HOST:/srv/lane/upstream/begamin.git" HEAD:main
+GIT_SSH_COMMAND="$(printf '%q ' ssh "${ssh_opts[@]}")" g push -q "root@$HOST:/srv/lane/upstream/begamin.git" HEAD:main
 run 'umask 077; bedrock git webhook begamin --repo file:///srv/lane/upstream/begamin.git 2>/root/.lane-webhook.out; awk "/Secret/ {print \$2}" /root/.lane-webhook.out > /root/.lane-webhook-secret; grep -v Secret /root/.lane-webhook.out; rm -f /root/.lane-webhook.out'
 g commit -q --allow-empty -m "lane: deployed by a webhook"
-GIT_SSH_COMMAND="ssh ${ssh_opts[*]}" g push -q "root@$HOST:/srv/lane/upstream/begamin.git" HEAD:main
+GIT_SSH_COMMAND="$(printf '%q ' ssh "${ssh_opts[@]}")" g push -q "root@$HOST:/srv/lane/upstream/begamin.git" HEAD:main
 hooked=$(g rev-parse HEAD)
 run "python3 - <<'PY'
 import hmac, hashlib, json, urllib.request

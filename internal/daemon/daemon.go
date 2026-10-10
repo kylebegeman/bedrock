@@ -80,7 +80,7 @@ func Registry(store *state.Store, sec *secrets.Store, socket, stateDir string) k
 		return app.ReloadEdge(ctx, store, sec)
 	}})
 	reg.Add(host.Maintain{Env: env, Socket: socket})
-	reg.Add(host.Upgrade{Env: env, Socket: socket})
+	reg.Add(host.Upgrade{Env: env, Socket: socket, Store: store})
 	deploy := app.Deploy{Store: store, Secrets: sec, StateDir: stateDir, Addresses: func(ctx context.Context) []string { return host.Addresses(ctx, env) }, CloudflareOnly: cloudflareOnly}
 	reg.Add(deploy)
 	reg.Add(app.Rollback{Deploy: deploy})

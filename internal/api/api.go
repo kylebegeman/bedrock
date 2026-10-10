@@ -18,7 +18,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kylebegeman/bedrock/internal/compat"
 	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/secrets"
 	"github.com/kylebegeman/bedrock/internal/state"
 	"github.com/kylebegeman/bedrock/internal/version"
 )
@@ -77,6 +79,11 @@ type Server struct {
 func (s *Server) Recover(ctx context.Context, emit func(kernel.Event)) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, err := s.lockMachine(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
 	return s.Engine.Recover(ctx, emit)
 }
 
@@ -85,6 +92,11 @@ func (s *Server) Recover(ctx context.Context, emit func(kernel.Event)) (int, err
 func (s *Server) RunLocked(ctx context.Context, kind string, input json.RawMessage, emit func(kernel.Event)) (*kernel.Receipt, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, err := s.lockMachine(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	return s.Engine.Run(ctx, kind, input, emit)
 }
 
@@ -93,6 +105,23 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/version", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, version.Current())
+	})
+	mux.HandleFunc("GET /v1/capabilities", func(w http.ResponseWriter, r *http.Request) {
+		keyPath := ""
+		if s.Store != nil {
+			keyPath = secrets.DefaultStore(filepath.Dir(s.Store.Path())).KeyPath
+		}
+		info, err := compat.Current(keyPath)
+		if err == nil && s.Store != nil {
+			var v int
+			v, err = s.Store.Version(r.Context())
+			info.PersistedStateVersion = &v
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, info)
 	})
 	mux.HandleFunc("GET /v1/operations", s.listOperations)
 	// A distinct route lets filtered clients fail on an older daemon rather
@@ -194,8 +223,25 @@ func (s *Server) runOperation(w http.ResponseWriter, r *http.Request) {
 	// and finishes on the daemon's own clock.
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.Engine.RunExpecting(context.WithoutCancel(r.Context()), req.Kind, req.Input, req.Expect, emit); err != nil {
+	ctx := context.WithoutCancel(r.Context())
+	unlock, err := s.lockMachine(ctx)
+	if err != nil {
 		emit(kernel.Event{Type: kernel.EventError, At: time.Now().UTC(), Message: err.Error()})
+		return
+	}
+	defer unlock()
+	if _, err := s.Engine.RunExpecting(ctx, req.Kind, req.Input, req.Expect, emit); err != nil {
+		problem := problemFor(http.StatusBadRequest, err)
+		// Preserve the event shape used by older clients, adding problem fields.
+		_ = enc.Encode(struct {
+			kernel.Event
+			Code       string `json:"code"`
+			Retryable  bool   `json:"retryable"`
+			APIVersion int    `json:"api_version"`
+		}{kernel.Event{Type: kernel.EventError, At: time.Now().UTC(), Message: err.Error()}, problem.Code, problem.Retryable, compat.APIVersion})
+		if flusher != nil {
+			flusher.Flush()
+		}
 	}
 }
 
@@ -206,7 +252,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func writeError(w http.ResponseWriter, status int, err error) {
-	writeJSON(w, status, map[string]string{"error": err.Error()})
+	writeJSON(w, status, problemFor(status, err))
 }
 
 // Listen opens the daemon's Unix socket, replacing a stale one, readable
@@ -336,3 +382,22 @@ func (l *Local) Output(ctx context.Context, id, step string) (*kernel.OperationO
 
 // Close implements Runner.
 func (l *Local) Close() error { return l.Store.Close() }
+
+// lockMachine shares the local fallback's operation lock, so forcing a separate
+// socket cannot run a second authority alongside the daemon on the same state.
+func (s *Server) lockMachine(ctx context.Context) (func(), error) {
+	if s.Store == nil {
+		return func() {}, nil
+	}
+	return lockOperations(ctx, s.Store.Path())
+}
+
+// Recover resumes a client's dedicated journal under the same execution lock.
+func (l *Local) Recover(ctx context.Context, emit func(kernel.Event)) (int, error) {
+	unlock, err := lockOperations(ctx, l.Store.Path())
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
+	return l.Engine.Recover(ctx, emit)
+}

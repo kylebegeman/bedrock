@@ -24,3 +24,40 @@ jobs:
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /dev/null ./cmd/bedrock
       - name: Build for the Mac (darwin/arm64)
         run: CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -o /dev/null ./cmd/bedrock
+
+  lane:
+    name: Disposable Linux daemon recovery proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      LANE_VM_STATE: ${{ runner.temp }}/bedrock-lane
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Provision a dedicated Linux guest
+        run: lane/vm.sh up
+      - name: Prove daemon recovery
+        run: lane/prove.sh --config "$LANE_VM_STATE/lane.env" --artifacts "$RUNNER_TEMP/lane-proof" m1
+      - name: Capture guest boot diagnostics
+        if: failure()
+        run: |
+          if test -f "$LANE_VM_STATE/machine.json"; then
+            container=$(python3 -c 'import json,os; print(json.load(open(os.environ["LANE_VM_STATE"] + "/machine.json"))["container"])')
+            mkdir -p "$RUNNER_TEMP/lane-proof"
+            docker logs "$container" > "$RUNNER_TEMP/lane-proof/guest-boot.log" 2>&1 || true
+          fi
+      - name: Upload operational proof artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: disposable-linux-proof
+          path: ${{ runner.temp }}/lane-proof
+          if-no-files-found: warn
+      - name: Remove the owned Linux guest
+        if: always()
+        run: |
+          if test -f "$LANE_VM_STATE/machine.json"; then
+            lane/vm.sh down
+          fi

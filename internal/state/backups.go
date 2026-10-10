@@ -34,7 +34,7 @@ type BackupRun struct {
 // Finished reports whether the run ended, one way or the other.
 func (r BackupRun) Finished() bool { return !r.FinishedAt.IsZero() }
 
-func (s *Store) migrateBackups(ctx context.Context) error {
+func (s *Store) migrateBackups(ctx context.Context, q migrationDB) error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS backup_runs (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS backup_runs (
   error       TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS backup_runs_app ON backup_runs (app, kind, started_at DESC);`
-	_, err := s.db.ExecContext(ctx, schema)
+	_, err := q.ExecContext(ctx, schema)
 	return err
 }
 

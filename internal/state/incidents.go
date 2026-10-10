@@ -34,7 +34,7 @@ type Incident struct {
 // Open reports whether the incident is still going.
 func (i Incident) Open() bool { return i.ResolvedAt.IsZero() }
 
-func (s *Store) migrateIncidents(ctx context.Context) error {
+func (s *Store) migrateIncidents(ctx context.Context, q migrationDB) error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS incidents (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS watches (
   url      TEXT PRIMARY KEY,
   added_at INTEGER NOT NULL
 );`
-	_, err := s.db.ExecContext(ctx, schema)
+	_, err := q.ExecContext(ctx, schema)
 	return err
 }
 

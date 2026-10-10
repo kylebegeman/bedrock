@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/kylebegeman/bedrock/internal/compat"
 	"github.com/kylebegeman/bedrock/internal/kernel"
 	"github.com/kylebegeman/bedrock/internal/state"
 	"github.com/kylebegeman/bedrock/internal/version"
@@ -56,6 +57,13 @@ func (c *Client) Reachable(ctx context.Context) bool {
 func (c *Client) Version(ctx context.Context) (version.Info, error) {
 	var info version.Info
 	err := c.getJSON(ctx, "/v1/version", &info)
+	return info, err
+}
+
+// Capabilities describes the connected daemon's supported contracts.
+func (c *Client) Capabilities(ctx context.Context) (compat.Info, error) {
+	var info compat.Info
+	err := c.getJSON(ctx, "/v1/capabilities", &info)
 	return info, err
 }
 
@@ -197,11 +205,20 @@ func (c *Client) stream(ctx context.Context, req RunRequest, each func(kernel.Ev
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64<<10), 4<<20)
 	for scanner.Scan() {
-		var ev kernel.Event
-		if err := json.Unmarshal(scanner.Bytes(), &ev); err != nil {
+		var envelope struct {
+			kernel.Event
+			Code       string `json:"code"`
+			Retryable  bool   `json:"retryable"`
+			APIVersion int    `json:"api_version"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &envelope); err != nil {
 			return fmt.Errorf("bad event from the daemon: %w", err)
 		}
+		ev := envelope.Event
 		if ev.Type == kernel.EventError {
+			if envelope.Code != "" {
+				return &Error{Message: ev.Message, Code: envelope.Code, Retryable: envelope.Retryable, APIVersion: envelope.APIVersion}
+			}
 			return errors.New(ev.Message)
 		}
 		each(ev)
@@ -216,11 +233,9 @@ func (c *Client) stream(ctx context.Context, req RunRequest, each func(kernel.Ev
 }
 
 func apiError(resp *http.Response) error {
-	var body struct {
-		Error string `json:"error"`
-	}
+	var body compat.Problem
 	if err := json.NewDecoder(resp.Body).Decode(&body); err == nil && body.Error != "" {
-		return errors.New(body.Error)
+		return &Error{Message: body.Error, Code: body.Code, Retryable: body.Retryable, APIVersion: body.APIVersion, Status: resp.StatusCode}
 	}
-	return fmt.Errorf("daemon answered %s", resp.Status)
+	return &Error{Message: fmt.Sprintf("daemon answered %s", resp.Status), Code: "daemon_response", Status: resp.StatusCode}
 }

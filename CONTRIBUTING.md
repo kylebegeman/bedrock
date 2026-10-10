@@ -16,8 +16,22 @@ CI runs `make check` and cross-builds for linux/amd64 and darwin/arm64 on
 every push and pull request. The tests use the standard library only, real
 SQLite stores in temporary directories, and fakes for the machine, Docker's
 API and Cloudflare's; `go test ./...` touches no network and no real
-Docker. A feature is proven on the lane, a real machine that is wiped and
-rebuilt for the purpose; see [lane/README.md](lane/README.md).
+Docker. Operational behavior is proven on a disposable Linux machine. Provisioning
+is separate from running proofs, and no proof assumes the historical
+Hostinger target is disposable. See [lane/README.md](lane/README.md).
+
+```sh
+make lane-up                 # dedicated local QEMU guest through Docker
+lane/prove.sh --check m1      # preflight only
+lane/prove.sh m1              # daemon recovery, with reproducible reports
+make lane-down               # remove only that managed VM
+```
+
+`make check` also runs the lane's fail-closed target-safety tests. CI boots a
+fresh Linux guest for the daemon proof and retains its report/failure
+artifacts. Other proofs declare public DNS, storage or sanitized private
+fixture requirements; missing prerequisites are reported as blocked, rather
+than passing. Select proof scopes appropriate to the changed behavior.
 
 ## What a change looks like
 

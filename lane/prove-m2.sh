@@ -7,17 +7,20 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=/dev/null
-. "$here/hostinger.env"
-ssh_opts=(-i "$KEY" -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes
-  -o UserKnownHostsFile="$here/known_hosts" -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
-box="root@$HOST"
+# shellcheck source=lane/common.sh
+. "$here/common.sh"
 run() { ssh "${ssh_opts[@]}" "$box" "$@"; }
-put() { scp -q "${ssh_opts[@]}" "$1" "$box:$2"; }
+put() { scp -q "${scp_opts[@]}" "$1" "$box:$2"; }
 build() { # build <output> <version>
-  (cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-X github.com/kylebegeman/bedrock/internal/version.number=$2" -o "$1" ./cmd/bedrock)
+  (cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -ldflags "-X github.com/kylebegeman/bedrock/internal/version.number=$2" -o "$1" ./cmd/bedrock)
 }
-wait_ssh() { until run true 2>/dev/null; do sleep 5; done; }
+wait_ssh() {
+  local deadline=$((SECONDS + 300))
+  until run true 2>/dev/null; do
+    (( SECONDS < deadline )) || { echo "M2 NOT proven: SSH did not return after reboot" >&2; return 1; }
+    sleep 5
+  done
+}
 last_op() { run 'bedrock history --json --limit 1' | python3 -c "import json,sys; rows=json.load(sys.stdin); print(rows[0]['$1'] if rows else 'none')"; }
 wait_op() { # wait_op <seconds>
   for _ in $(seq 1 "$(( $1 / 5 ))"); do
@@ -29,8 +32,8 @@ wait_op() { # wait_op <seconds>
 }
 
 echo "== build and install"
-build "$here/../bin/bedrock-linux-amd64" "0.7.0-dev"
-put "$here/../bin/bedrock-linux-amd64" /usr/local/bin/bedrock.new
+build "$here/../bin/bedrock-linux-$LANE_ARCH" "0.7.0-dev"
+put "$here/../bin/bedrock-linux-$LANE_ARCH" /usr/local/bin/bedrock.new
 run 'chmod 755 /usr/local/bin/bedrock.new && mv -f /usr/local/bin/bedrock.new /usr/local/bin/bedrock && bedrock daemon install'
 
 echo "== doctor before setup (failures expected)"

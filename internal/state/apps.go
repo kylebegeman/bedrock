@@ -45,7 +45,7 @@ type App struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-func (s *Store) migrateApps(ctx context.Context) error {
+func (s *Store) migrateApps(ctx context.Context, q migrationDB) error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS apps (
   name            TEXT PRIMARY KEY,
@@ -78,19 +78,19 @@ CREATE TABLE IF NOT EXISTS job_runs (
   container   TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS job_runs_app ON job_runs (app, workload, started_at DESC);`
-	if _, err := s.db.ExecContext(ctx, schema); err != nil {
+	if _, err := q.ExecContext(ctx, schema); err != nil {
 		return err
 	}
 	// Columns added after a table first shipped.
-	if err := s.ensureColumn(ctx, "revisions", "secrets_version", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+	if err := ensureColumn(ctx, q, "revisions", "secrets_version", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
-	return s.ensureColumn(ctx, "job_runs", "container", "TEXT NOT NULL DEFAULT ''")
+	return ensureColumn(ctx, q, "job_runs", "container", "TEXT NOT NULL DEFAULT ''")
 }
 
 // ensureColumn adds a column to a table that predates it.
-func (s *Store) ensureColumn(ctx context.Context, table, column, definition string) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT name FROM pragma_table_info(?)`, table)
+func ensureColumn(ctx context.Context, q migrationDB, table, column, definition string) error {
+	rows, err := q.QueryContext(ctx, `SELECT name FROM pragma_table_info(?)`, table)
 	if err != nil {
 		return err
 	}
@@ -107,7 +107,10 @@ func (s *Store) ensureColumn(ctx context.Context, table, column, definition stri
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, definition))
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	_, err = q.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, definition))
 	return err
 }
 

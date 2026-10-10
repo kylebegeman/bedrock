@@ -14,18 +14,26 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kylebegeman/bedrock/internal/compat"
+
 	_ "modernc.org/sqlite" // the pure-Go driver keeps the binary static
 )
 
 // Store is an open state database.
 type Store struct {
-	db   *sql.DB
-	path string
+	db       *sql.DB
+	path     string
+	readOnly bool
 }
 
 // Open opens or creates the database at path, creating its directory with
 // mode 0700. WAL mode lets the daemon write while the CLI reads.
 func Open(path string) (*Store, error) {
+	// Check an existing file through a read-only connection before WAL or
+	// migrations can change it. Older binaries must fail closed on newer state.
+	if _, err := InspectVersion(path); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("state directory: %w", err)
 	}
@@ -56,15 +64,67 @@ func (s *Store) Path() string { return s.path }
 
 // BackupTo writes a consistent copy of the database to path.
 func (s *Store) BackupTo(ctx context.Context, path string) error {
+	sourceAbs, err := filepath.Abs(s.path)
+	if err != nil {
+		return err
+	}
+	targetAbs, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	if sourceAbs == targetAbs {
+		return errors.New("state backup destination is the live database")
+	}
+	if destination, err := os.Stat(path); err == nil {
+		if source, err := os.Stat(s.path); err == nil && os.SameFile(source, destination) {
+			return errors.New("state backup destination refers to the live database")
+		}
+	}
 	_ = os.Remove(path)
-	_, err := s.db.ExecContext(ctx, "VACUUM INTO '"+strings.ReplaceAll(path, "'", "''")+"'")
+	query := "VACUUM INTO '" + strings.ReplaceAll(path, "'", "''") + "'"
+	if s.readOnly {
+		// VACUUM INTO writes only its new destination. mode=ro continues to
+		// protect the source while query_only is relaxed on this held connection.
+		conn, err := s.db.Conn(ctx)
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+		if _, err := conn.ExecContext(ctx, "PRAGMA query_only=OFF"); err != nil {
+			return err
+		}
+		defer conn.ExecContext(context.WithoutCancel(ctx), "PRAGMA query_only=ON")
+		_, err = conn.ExecContext(ctx, query)
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, query)
 	return err
 }
 
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }
 
+type migrationDB interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
 func (s *Store) migrate(ctx context.Context) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var current int
+	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&current); err != nil {
+		return err
+	}
+	if current > compat.StateVersion {
+		return fmt.Errorf("state version %d is newer than this binary supports (%d)", current, compat.StateVersion)
+	}
+	if current == compat.StateVersion {
+		return tx.Commit()
+	}
 	const schema = `
 CREATE TABLE IF NOT EXISTS operations (
   id            TEXT PRIMARY KEY,
@@ -97,16 +157,22 @@ CREATE TABLE IF NOT EXISTS steps (
   finished_at  INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (operation_id, idx)
 );`
-	_, err := s.db.ExecContext(ctx, schema)
+	_, err = tx.ExecContext(ctx, schema)
 	if err != nil {
 		return fmt.Errorf("migrate state: %w", err)
 	}
-	for _, step := range []func(context.Context) error{s.migrateApps, s.migrateBackups, s.migrateIncidents, s.migrateSignals, s.migrateGitHooks} {
-		if err := step(ctx); err != nil {
+	for _, step := range []func(context.Context, migrationDB) error{s.migrateApps, s.migrateBackups, s.migrateIncidents, s.migrateSignals, s.migrateGitHooks, s.migrateReleaseBoundaries} {
+		if err := step(ctx, tx); err != nil {
 			return fmt.Errorf("migrate state: %w", err)
 		}
 	}
-	return nil
+	if _, err := tx.ExecContext(ctx, recoveryImportSchema); err != nil {
+		return fmt.Errorf("migrate state: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", compat.StateVersion)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // OperationStatus is where an operation is in its life.

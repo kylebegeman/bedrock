@@ -1,94 +1,142 @@
-# The lane
+# Disposable operational proofs
 
-The lane is a real machine that gets wiped and rebuilt for every feature, so
-a green check means "this works on a real server", not "the unit tests pass".
+The lane runs operational proofs on a dedicated Linux machine, separately
+from provisioning it. A proof uses the checkout being tested, checks the
+result, and writes a report with commit, dirty-tree status, source-diff hash,
+OS, architecture, selected results, transcripts and failure diagnostics.
+A preflight failure is **blocked**, never a passing proof.
 
-**The lane has no machine right now.** The Hostinger box it used became
-production: it runs the personal sites, begamin, Dragon Writer and Loom
-Core. `reset.sh` refuses to touch a machine that is carrying apps, or one it
-cannot ask, so the lane cannot run until `hostinger.env` points somewhere
-disposable. A second cheap VPS, or a Linux VM on the Mac, both work; nothing
-else in the lane depends on which it is.
+The historical Hostinger machine became production. `hostinger.env` is no
+longer read by proofs or reset. `BEDROCK_LANE_DESTROY` cannot override a
+safety refusal. No command here buys a VPS or contacts that historical target.
 
-## What you need
+## Local Linux VM
 
-- The [Hostinger CLI](https://github.com/hostinger/api-cli) on your PATH,
-  with an API token in `~/.hostinger.yaml` (`api_token: ...`, mode 600).
-  Create the token in hPanel under Profile, then API.
-- `hostinger.env` beside `reset.sh`, copied from `hostinger.env.example`
-  and filled in: the machine's Hostinger ids, its address, the deploy key
-  Hostinger has on file for it (`BEDROCK_LANE_KEY` overrides the key's
-  path), and the names the proofs use: the zone and the domain under it
-  whose wildcard points at the machine, and what the private-app proofs
-  need. It is ignored by git, so none of that is in the repository.
-
-## Commands
+Requirements: Docker running Linux containers, Go from `go.mod`, Python 3,
+OpenSSH client, and outbound access to Ubuntu packages/cloud images. On a
+Mac, Docker Desktop's Linux backend is sufficient. No Lima, privileged
+container, Docker-socket mount or host-directory mount is needed.
 
 ```sh
-lane/reset.sh --status   # the machine's state, nothing changes
-lane/reset.sh            # wipe it, wait, print "ready"
+make lane-up                  # provision a disposable Ubuntu 24.04 QEMU VM
+lane/prove.sh --list           # show each proof and its fixture prerequisites
+lane/prove.sh --check m1       # pinned SSH, identity, architecture, Linux/systemd
+lane/prove.sh m1               # run and write report.md/report.json
+lane/prove.sh m2               # host setup, a real guest reboot, upgrade rollback
+make lane-status              # inspect only the VM owned by this lane
+make lane-down                # remove only that VM and its generated keys
 ```
 
-`reset.sh` reinstalls Ubuntu 24.04 through Hostinger's API, waits for the
-recreate action to succeed, asks Hostinger to install the deploy key on the
-fresh OS, waits for SSH, and pins the new host key in `lane/known_hosts`
-(ignored by git). Everything after that is bedrock's job.
+The provisioner builds a QEMU image with a pinned Ubuntu container base,
+checks the Ubuntu guest image against Canonical's published SHA256SUMS,
+records the exact guest checksum and provider image ID, generates guest/deploy
+SSH keys, and boots a separate guest kernel. SSH is
+forwarded only on localhost. QEMU uses software virtualization, so boot and
+package upgrades take longer than on a VPS. A 24 GiB sparse guest disk and
+3 GiB guest memory are configured. The guest supports systemd and reboot;
+it is not a container pretending to be a host.
 
-Recreating the machine deletes everything on it, including snapshots.
+To reproduce an earlier guest image exactly, retain its Docker image and run
+`LANE_VM_PROVIDER_IMAGE=sha256:<provider-image-id> lane/vm.sh up` with a fresh
+state directory. The image must carry the lane provider label. The report
+records the immutable provider ID and guest checksum. The default build
+checks Canonical's current Ubuntu 24.04 release; it does not claim all future
+Ubuntu point releases have already been tested.
 
-Before doing any of that, `reset.sh` asks the machine what it is carrying and
-refuses to recreate one with apps on it, printing their names. A machine that
-answers with no bedrock on it is fine to take; one that cannot be asked at
-all is not assumed empty. To destroy one that has apps, or one that gives no
-answer, name it exactly:
+Local state lives in `${TMPDIR:-/tmp}/bedrock-lane-$UID`, outside the repo.
+`LANE_VM_STATE` selects another state directory; pass its `lane.env` to
+`lane/prove.sh --config` when using that override. Use a fresh state directory
+for another independent VM. `make lane-reset` deletes and recreates the
+managed VM only, after verifying its saved name and Docker ownership label.
+To inspect an unsuccessful boot, use the exact container name printed by
+`lane/vm.sh up` with `docker logs`. The VM remains available after a failed
+proof for inspection. Remove it with `make lane-down` when finished.
+
+The local loopback VM proves `m1` and `m2`. Public certificate, external DNS
+and public webhook proofs require the dedicated externally reachable SSH
+machine described below. The runner refuses those scopes on the loopback
+VM and names the missing prerequisite.
+
+## Existing dedicated SSH machine
+
+A disposable VPS or independently provisioned VM works without any provider
+API or Hostinger CLI. Copy [ssh.env.example](ssh.env.example) outside the
+repo and supply the address, SSH key and independently verified/pinned host
+key file. Set `LANE_DISPOSABLE=true` and generate a new identity:
 
 ```sh
-BEDROCK_LANE_DESTROY=203.0.113.10 lane/reset.sh
+openssl rand -hex 16
 ```
 
-Naming the host is deliberate. The lane box quietly became the production
-host while `hostinger.env` still pointed at it, which left `make lane-reset`
-one command away from reinstalling the OS under five live apps.
-
-## Proofs
-
-Each proof is a script that runs bedrock on the machine and checks the
-result from the outside. They build the binary, install it, and print what
-they see; a failure says `NOT proven` and stops.
+On the **already identified disposable machine**, its owner installs that
+same identity as a root-owned, mode-600 `/etc/bedrock-lane-id`. The runner
+never writes this marker automatically to an arbitrary SSH target. A
+`/etc/bedrock-production` marker always refuses the target. A missing,
+changed, symlinked or incorrectly permissioned disposable identity refuses
+it. SSH failure, a changed host key, malformed app registry, non-fixture
+apps and unmanaged non-fixture containers also refuse it. The allowed app
+names are the lane fixtures, not a wildcard prefix.
 
 ```sh
-lane/prove-m1.sh              # the kernel: journaling and recovery after a kill
-lane/prove-m2.sh              # the host: setup, a maintenance reboot, an upgrade rolled back
-lane/prove-m3.sh              # deploys: certificates, a second revision, a rollback, a failing check
-lane/prove-m4.sh <staging>    # secrets, cron, one-off commands, begamin and Dragon Writer from their archives
-lane/prove-m5.sh              # backups to per-app buckets, a drill, a restore, signals, one email per outage
-lane/prove-m6.sh [begamin]    # git push deploys begamin with its records, no app reaches another, dns point, a webhook
-lane/prove-m7.sh              # a Core-shaped app: made secrets, releases, singletons, an object store, back from its bucket
-lane/prove-cloudflare.sh      # Cloudflare itself: real records made, audited and removed under the lane's zone
+lane/prove.sh --config /absolute/path/to/lane.env --check m1 m2
+lane/prove.sh --config /absolute/path/to/lane.env m1 m2
 ```
 
-`prove-m5.sh` needs the apps `prove-m4.sh` leaves behind. It runs two
-fixtures on the box that bedrock doesn't manage: a mail sink (mailpit on
-127.0.0.1:1025 and :8025) and an S3 store (MinIO on 127.0.0.1:9000), so the
-email and storage integrations have something to talk to without any real
-credential leaving the machine. On the real machines the same integrations
-point at a mail provider and Backblaze B2.
+Reprovision that target separately using its existing provider workflow.
+Proof commands never reinstall its OS. `lane/reset.sh` controls only the
+locally created QEMU machine.
 
-`prove-m6.sh` clones begamin's repository from this Mac (its argument, or
-`LANE_BEGAMIN_REPO`) into a temporary directory and commits
-a lane manifest there; nothing is pushed anywhere but the box. It runs a
-stand-in for Cloudflare's API on the box (`lane/fixtures/fakeflare`, on
-127.0.0.1:8788), and makes a throwaway SSH key for the pushes.
+## Proof scopes and dependencies
 
-`prove-m7.sh` deploys `lane/fixtures/notes`, an app shaped like Loom's
-Core: pgvector's image with its own superuser and first-run scripts, an
-object store, two release workloads, one image for two workloads, and a
-singleton worker whose health goes through the API's alias. It breaks the
-worker and a release on purpose, then backs the app up, drills it, removes
-it with its data and restores it from the bucket. It needs the storage
-integration `prove-m5.sh` sets up. Loom's own Core is M7's other half:
-`pnpm loom core create` from the Loom repository, against
-`core.$LANE_DOMAIN`.
+| Proof | Behavior | Required fixtures/setup |
+| --- | --- | --- |
+| `m1` | Daemon killed during a journaled operation; systemd restarts and resumes it | Fresh root SSH Linux/systemd machine |
+| `m2` | Host setup, doctor, reconcile, maintenance reboot, failed/good upgrade | Ubuntu/Debian and package downloads; runs independently of `m1` |
+| `m3` | Static/web deploys, certificates, revisions, rollback, failed check, DNS diagnosis | `m2`; public wildcard DNS to target, ports 80/443 reachable |
+| `m4` | Revision-pinned secrets, cron, one-offs, restore private-shaped apps | `m3`; `--staging`, `LANE_SITE_URL`, expected `LANE_DW_CHAPTERS` |
+| `m5` | Backups, drills, restoration, email outage signals | `m4`'s apps and expected chapter count |
+| `m6` | Git push, app isolation, DNS stand-in, webhook, remote deploy | `m5`'s apps; explicit `LANE_BEGAMIN_REPO`, `LANE_SITE_URL` |
+| `m7` | Generated/derived secrets, release order, singleton recovery, pgvector, object store, backup/restore | Prepared host; storage integration; public wildcard DNS |
+| `cloudflare` | Records made, retained, pruned and removed against Cloudflare itself | `m6`; real integration token already on target; explicit `--real-cloudflare` |
 
-The fixtures name hosts under `lane.example.com`; each proof rewrites them
-to `$LANE_DOMAIN` on the machine after copying them there.
+Select proofs in dependency order. Dependencies are explicit; selecting
+`m7` does not silently execute private-app proofs or real Cloudflare calls.
+Independent storage/email fixture setup uses MinIO/Mailpit on guest loopback,
+with throwaway credentials retained on the guest:
+
+```sh
+lane/prove.sh --config /absolute/path/to/lane.env --setup storage m7
+lane/setup-fixtures.sh storage email    # requires LANE_CONFIG when not the local VM
+```
+
+`m4` staging contains `src/begamin`, `src/dragon-writer`, and `archives/` with
+`begamin-data.tar.gz`, exactly one `dragon_writer_*.dump` and exactly one
+`uploads_*.tar.gz`. Use sanitized, dedicated fixture data and sources without
+`.env` files. These historical private-shaped proofs are optional and their
+absence is reported distinctly; ordinary local checks and `m1` do not need
+them. `m6` clones its explicitly supplied repository into a temporary folder
+and pushes only to the disposable target.
+
+Historical scripts can still be run directly with `LANE_CONFIG=...`; each
+uses the same refusal checks and target-specific arm64/amd64 builds.
+Prefer the runner for prerequisite checks, bounded proof timeouts and reports.
+
+## Reports and CI
+
+```sh
+lane/prove.sh --artifacts /tmp/bedrock-proof-review m1
+make lane-check               # shell syntax, safeguards, Python syntax
+```
+
+Artifact directories must be new and have mode 700. Reports contain no SSH
+key, provider token, integration credential file or database contents.
+Credential-shaped transcript values are masked; diagnostics collect daemon
+service state and operation receipts. Do not use production data in fixtures.
+Only selected completed scopes count as proven. Preflight-only reports say
+`ready` and `not run`; missing prerequisites say `blocked`; an assertion or
+timeout says `failed`. A failed proof leaves the machine for inspection.
+
+CI runs safeguard tests alongside normal checks. Its separate operational
+job boots a fresh QEMU guest, runs `m1`, uploads the proof report even on
+failure, and removes its owned VM. This checks daemon recovery on a real
+Linux kernel without external secrets, DNS, private repositories or a VPS.
