@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -95,6 +96,21 @@ func (s *Store) Incidents(ctx context.Context, limit int) ([]Incident, error) {
 		limit = 20
 	}
 	return s.queryIncidents(ctx, `SELECT `+incidentColumns+` FROM incidents ORDER BY opened_at DESC, id DESC LIMIT ?`, limit)
+}
+
+// IncidentHistory includes every open incident plus the newest resolved
+// incidents, bounded by pastLimit. A history limit never hides a live problem.
+// Zero shows only open incidents.
+func (s *Store) IncidentHistory(ctx context.Context, pastLimit int) ([]Incident, error) {
+	if pastLimit < 0 {
+		return nil, fmt.Errorf("the incident history limit must be zero or more")
+	}
+	return s.queryIncidents(ctx, `SELECT `+incidentColumns+` FROM incidents
+		WHERE resolved_at = 0 OR id IN (
+			SELECT id FROM incidents WHERE resolved_at != 0
+			ORDER BY opened_at DESC, id DESC LIMIT ?
+		)
+		ORDER BY opened_at DESC, id DESC`, pastLimit)
 }
 
 func (s *Store) queryIncidents(ctx context.Context, query string, args ...any) ([]Incident, error) {

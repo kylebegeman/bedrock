@@ -9,6 +9,7 @@ import (
 	"maps"
 	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -57,6 +58,8 @@ type Manifest struct {
 type Preview struct {
 	Of     string `yaml:"of" json:"of"`
 	Branch string `yaml:"branch" json:"branch"`
+	// Pinned previews are retained by preview prune until explicitly unpinned.
+	Pinned bool `yaml:"pinned,omitempty" json:"pinned,omitempty"`
 }
 
 // Secrets bedrock makes for an app.
@@ -412,12 +415,44 @@ type Resources struct {
 // Check is a URL that must answer a certain way after a deploy.
 type Check struct {
 	URL string `yaml:"url" json:"url"`
+	// Context limits this check to the application before activation or the
+	// public edge afterwards. Empty checks both; guarded routes check the
+	// application directly and verify anonymous denial separately.
+	Context CheckContext `yaml:"context,omitempty" json:"context,omitempty"`
+	// HeadersFromSecrets maps request headers to app secret names. Values
+	// are resolved only when an explicit edge check runs, never recorded.
+	HeadersFromSecrets map[string]string `yaml:"headers_from_secrets,omitempty" json:"headers_from_secrets,omitempty"`
 	// Status is the expected code. Default 200.
 	Status int `yaml:"status,omitempty" json:"status,omitempty"`
 	// Contains is text the body must include.
 	Contains string `yaml:"contains,omitempty" json:"contains,omitempty"`
 	// Within is the longest acceptable response time, as a Go duration.
 	Within string `yaml:"within,omitempty" json:"within,omitempty"`
+}
+
+// CheckContext is where a verification assertion runs.
+type CheckContext string
+
+const (
+	CheckApplication CheckContext = "application"
+	CheckEdge        CheckContext = "edge"
+)
+
+// ValidCheckHeader excludes HTTP routing and proxy-control headers.
+func ValidCheckHeader(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, ch := range name {
+		if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || strings.ContainsRune("!#$%&'*+-.^_`|~", ch)) {
+			return false
+		}
+	}
+	switch strings.ToLower(name) {
+	case "host", "content-length", "connection", "transfer-encoding", "proxy-authorization", "proxy-authenticate", "keep-alive", "te", "trailer", "upgrade", "forwarded", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-for", "x-forwarded-uri", "x-forwarded-method", "x-real-ip":
+		return false
+	}
+	return true
 }
 
 var (
@@ -930,6 +965,38 @@ func (m *Manifest) validatePreview(fail func(format string, args ...any)) {
 // validateChecks checks the checks run after a deploy.
 func (m *Manifest) validateChecks(fail func(format string, args ...any)) {
 	for i, c := range m.Checks {
+		switch c.Context {
+		case "", CheckApplication, CheckEdge:
+		default:
+			fail("checks[%d].context: %q isn't application or edge", i, c.Context)
+		}
+		u, err := url.Parse(c.URL)
+		if err != nil || u.Hostname() == "" {
+			fail("checks[%d]: url must name a host", i)
+		} else if u.User != nil {
+			fail("checks[%d]: credentials belong in headers_from_secrets, not the url", i)
+		}
+		if len(c.HeadersFromSecrets) > 0 {
+			if c.Context != CheckEdge {
+				fail("checks[%d].headers_from_secrets: credentials require context: edge", i)
+			}
+			if u == nil || u.Scheme != "https" {
+				fail("checks[%d].headers_from_secrets: credentials require an https url", i)
+			}
+			seen := map[string]bool{}
+			for _, header := range sortedKeys(c.HeadersFromSecrets) {
+				if !ValidCheckHeader(header) {
+					fail("checks[%d].headers_from_secrets: %q isn't an allowed request header", i, header)
+				}
+				if seen[strings.ToLower(header)] {
+					fail("checks[%d].headers_from_secrets: %q repeats a header with different case", i, header)
+				}
+				seen[strings.ToLower(header)] = true
+				if name := c.HeadersFromSecrets[header]; !envPattern.MatchString(name) {
+					fail("checks[%d].headers_from_secrets.%s: %q must be an UPPER_CASE secret name", i, header, name)
+				}
+			}
+		}
 		if !strings.HasPrefix(c.URL, "https://") && !strings.HasPrefix(c.URL, "http://") {
 			fail("checks[%d]: url must start with https:// or http://", i)
 		}

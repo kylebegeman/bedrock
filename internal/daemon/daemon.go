@@ -87,7 +87,10 @@ func Registry(store *state.Store, sec *secrets.Store, socket, stateDir string) k
 	reg.Add(app.GC{Store: store})
 	reg.Add(app.RunDefinition{Jobs: app.NewJobs(store, sec)})
 	addresses := func(ctx context.Context) []string { return host.Addresses(ctx, env) }
-	reg.Add(app.Remove{Store: store, Secrets: sec, Addresses: addresses, StateDir: stateDir})
+	remove := app.Remove{Store: store, Secrets: sec, Addresses: addresses, StateDir: stateDir}
+	reg.Add(remove)
+	reg.Add(app.PreviewPin{Store: store})
+	reg.Add(app.PreviewPrune{Remove: remove})
 	reg.Add(app.Point{Store: store, Secrets: sec, Addresses: addresses, CloudflareOnly: cloudflareOnly})
 	reg.Add(app.Drop{Store: store, Secrets: sec, Addresses: addresses})
 	reg.Add(app.Backup{Store: store, Secrets: sec, StateDir: stateDir, Hostname: hostname, Profile: host.ProfilePath})
@@ -242,6 +245,7 @@ func (d *daemon) startLoops(ctx context.Context) {
 	})
 	watcher := &watch.Watcher{Store: d.store, Notifier: watch.EmailNotifier{Secrets: d.sec, Store: d.store}, Hostname: d.machine, Log: logf}
 	prober := watch.NewProber(d.store)
+	prober.CheckSecrets = d.sec.Load
 	go every(ctx, time.Minute, true, func(time.Time) {
 		guarded(logf, "watch", func() {
 			if err := watcher.Round(ctx, prober.Observe(ctx)); err != nil && ctx.Err() == nil {

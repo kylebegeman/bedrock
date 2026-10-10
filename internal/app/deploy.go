@@ -124,6 +124,9 @@ func (d Deploy) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 	if in.SecretsFrom == m.App {
 		return nil, fmt.Errorf("%s would copy its secrets onto itself", m.App)
 	}
+	if err := CheckDeploySecretsFrom(m, d.Secrets, in.SecretsFrom); err != nil {
+		return nil, err
+	}
 	commit := in.Commit
 	if commit == "" {
 		commit = sourceCommit(ctx, in.Source)
@@ -703,7 +706,7 @@ func runCheck(ctx context.Context, c manifest.Check) error {
 
 // runCheckDirect performs a check against the new container that would
 // serve the URL, before the edge routes anything to it.
-func runCheckDirect(ctx context.Context, e *docker.Engine, m *manifest.Manifest, containers map[string]string, c manifest.Check) error {
+func runCheckDirect(ctx context.Context, e checkInspector, m *manifest.Manifest, containers map[string]string, c manifest.Check) error {
 	u, err := url.Parse(c.URL)
 	if err != nil {
 		return fmt.Errorf("check %s: %w", c.URL, err)

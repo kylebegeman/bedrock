@@ -28,7 +28,7 @@ func newAlerts(a *app) *cobra.Command {
 				return err
 			}
 			defer store.Close()
-			all, err := store.Incidents(ctx, limit)
+			all, err := store.IncidentHistory(ctx, limit)
 			if err != nil {
 				return err
 			}
@@ -61,7 +61,7 @@ func newAlerts(a *app) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().IntVar(&limit, "limit", 20, "how many to list, open ones included")
+	cmd.Flags().IntVar(&limit, "limit", 20, "how many resolved incidents to list; every open incident is included")
 	test := &cobra.Command{
 		Use:   "test",
 		Short: "Send a test alert through the email integration.",

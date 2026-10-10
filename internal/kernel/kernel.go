@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -144,6 +145,29 @@ type Receipt struct {
 	Steps         []StepView            `json:"steps"`
 	Version       string                `json:"bedrock"`
 }
+
+// StepOutput is a journaled step's saved diagnostic tail. Output is saved
+// when an execution finishes, so running steps may not have output yet.
+type StepOutput struct {
+	Index      int              `json:"index"`
+	Name       string           `json:"name"`
+	Status     state.StepStatus `json:"status"`
+	Error      string           `json:"error,omitempty"`
+	Output     string           `json:"output"`
+	FinishedAt time.Time        `json:"finished_at,omitempty"`
+}
+
+// OperationOutput is explicitly requested diagnostic output, separate from
+// ordinary receipts. Tails can contain both apply and compensation output;
+// each execution retains at most TailLinesPerExecution lines.
+type OperationOutput struct {
+	ID                    string       `json:"id"`
+	TailLinesPerExecution int          `json:"tail_lines_per_execution"`
+	Steps                 []StepOutput `json:"steps"`
+}
+
+// ErrUnknownStep means an output selector did not name a journaled step.
+var ErrUnknownStep = errors.New("unknown operation step")
 
 // Engine plans and applies operations against one store.
 type Engine struct {
@@ -510,6 +534,37 @@ func (e *Engine) ReceiptOf(ctx context.Context, id string) (*Receipt, error) {
 		}
 	}
 	return buildReceipt(op, steps), nil
+}
+
+// OutputOf returns saved tails for an operation, optionally selecting one
+// step by name or its one-based position. ReceiptOf intentionally omits them.
+func (e *Engine) OutputOf(ctx context.Context, id, selected string) (*OperationOutput, error) {
+	op, steps, err := e.store.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	out := &OperationOutput{ID: op.ID, TailLinesPerExecution: tailLines, Steps: make([]StepOutput, 0, len(steps))}
+	position, _ := strconv.Atoi(selected)
+	// Prefer an exact name when a step's name happens to be a number.
+	named := false
+	for _, st := range steps {
+		if st.Name == selected {
+			named = true
+			break
+		}
+	}
+	var names []string
+	for _, st := range steps {
+		names = append(names, st.Name)
+		if selected != "" && st.Name != selected && (named || position != st.Index+1) {
+			continue
+		}
+		out.Steps = append(out.Steps, StepOutput{Index: st.Index, Name: st.Name, Status: st.Status, Error: st.Error, Output: st.Output, FinishedAt: st.FinishedAt})
+	}
+	if selected != "" && len(out.Steps) == 0 {
+		return nil, fmt.Errorf("%w %q; choose a name or a one-based position: %s", ErrUnknownStep, selected, strings.Join(names, ", "))
+	}
+	return out, nil
 }
 
 func buildReceipt(op *state.Operation, steps []state.Step) *Receipt {

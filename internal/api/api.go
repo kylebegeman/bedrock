@@ -46,7 +46,9 @@ type Runner interface {
 	Run(ctx context.Context, kind string, input json.RawMessage, emit func(kernel.Event)) (*kernel.Receipt, error)
 	RunExpecting(ctx context.Context, kind string, input json.RawMessage, expect string, emit func(kernel.Event)) (*kernel.Receipt, error)
 	List(ctx context.Context, limit int) ([]Summary, error)
+	ListFiltered(ctx context.Context, filter state.OperationFilter) ([]Summary, error)
 	Receipt(ctx context.Context, id string) (*kernel.Receipt, error)
+	Output(ctx context.Context, id, step string) (*kernel.OperationOutput, error)
 	Close() error
 }
 
@@ -92,18 +94,22 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/version", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, version.Current())
 	})
-	mux.HandleFunc("GET /v1/operations", func(w http.ResponseWriter, r *http.Request) {
-		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-		ops, err := s.Store.List(r.Context(), limit)
-		if err != nil {
+	mux.HandleFunc("GET /v1/operations", s.listOperations)
+	// A distinct route lets filtered clients fail on an older daemon rather
+	// than have unknown query parameters silently ignored.
+	mux.HandleFunc("GET /v1/operations/history", s.listOperations)
+	mux.HandleFunc("GET /v1/operations/{id}/output", func(w http.ResponseWriter, r *http.Request) {
+		output, err := s.Engine.OutputOf(r.Context(), r.PathValue("id"), r.URL.Query().Get("step"))
+		switch {
+		case errors.Is(err, state.ErrNotFound):
+			writeError(w, http.StatusNotFound, err)
+		case errors.Is(err, kernel.ErrUnknownStep):
+			writeError(w, http.StatusBadRequest, err)
+		case err != nil:
 			writeError(w, http.StatusInternalServerError, err)
-			return
+		default:
+			writeJSON(w, http.StatusOK, output)
 		}
-		rows := make([]Summary, 0, len(ops))
-		for _, op := range ops {
-			rows = append(rows, summarize(op))
-		}
-		writeJSON(w, http.StatusOK, rows)
 	})
 	mux.HandleFunc("GET /v1/operations/{id}", func(w http.ResponseWriter, r *http.Request) {
 		receipt, err := s.Engine.ReceiptOf(r.Context(), r.PathValue("id"))
@@ -119,6 +125,43 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("POST /v1/operations", s.runOperation)
 	return mux
+}
+
+func (s *Server) listOperations(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	filter := state.OperationFilter{Target: query.Get("app"), Kind: query.Get("kind")}
+	var err error
+	if value := query.Get("limit"); value != "" {
+		filter.Limit, err = strconv.Atoi(value)
+		if err != nil || filter.Limit < 0 {
+			writeError(w, http.StatusBadRequest, errors.New("limit must be zero or a positive integer"))
+			return
+		}
+	}
+	if value := query.Get("failed"); value != "" {
+		filter.Failed, err = strconv.ParseBool(value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, errors.New("failed must be true or false"))
+			return
+		}
+	}
+	if value := query.Get("since"); value != "" {
+		filter.Since, err = time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, errors.New("since must be an RFC3339 timestamp"))
+			return
+		}
+	}
+	ops, err := s.Store.ListFiltered(r.Context(), filter)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	rows := make([]Summary, 0, len(ops))
+	for _, op := range ops {
+		rows = append(rows, summarize(op))
+	}
+	writeJSON(w, http.StatusOK, rows)
 }
 
 func (s *Server) runOperation(w http.ResponseWriter, r *http.Request) {
@@ -265,7 +308,12 @@ func lockOperations(ctx context.Context, statePath string) (func(), error) {
 
 // List implements Runner.
 func (l *Local) List(ctx context.Context, limit int) ([]Summary, error) {
-	ops, err := l.Store.List(ctx, limit)
+	return l.ListFiltered(ctx, state.OperationFilter{Limit: limit})
+}
+
+// ListFiltered implements Runner.
+func (l *Local) ListFiltered(ctx context.Context, filter state.OperationFilter) ([]Summary, error) {
+	ops, err := l.Store.ListFiltered(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -279,6 +327,11 @@ func (l *Local) List(ctx context.Context, limit int) ([]Summary, error) {
 // Receipt implements Runner.
 func (l *Local) Receipt(ctx context.Context, id string) (*kernel.Receipt, error) {
 	return l.Engine.ReceiptOf(ctx, id)
+}
+
+// Output implements Runner.
+func (l *Local) Output(ctx context.Context, id, step string) (*kernel.OperationOutput, error) {
+	return l.Engine.OutputOf(ctx, id, step)
 }
 
 // Close implements Runner.

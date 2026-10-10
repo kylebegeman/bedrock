@@ -331,12 +331,52 @@ func (s *Store) Steps(ctx context.Context, id string) ([]Step, error) {
 	return steps, rows.Err()
 }
 
+// OperationFilter selects history before the result limit is applied.
+// Failed includes compensated operations because their requested changes did
+// not succeed. Since includes operations created at or after that instant.
+type OperationFilter struct {
+	Target string
+	Kind   string
+	Failed bool
+	Since  time.Time
+	Limit  int
+}
+
 // List returns the most recent operations, newest first.
 func (s *Store) List(ctx context.Context, limit int) ([]Operation, error) {
-	if limit <= 0 {
-		limit = 50
+	return s.ListFiltered(ctx, OperationFilter{Limit: limit})
+}
+
+// ListFiltered returns matching operations, newest first. Empty filters
+// retain List's behavior, including its default limit of 50.
+func (s *Store) ListFiltered(ctx context.Context, filter OperationFilter) ([]Operation, error) {
+	if filter.Limit <= 0 {
+		filter.Limit = 50
 	}
-	rows, err := s.db.QueryContext(ctx, selectOperation+` ORDER BY created_at DESC, id DESC LIMIT ?`, limit)
+	var clauses []string
+	var args []any
+	if filter.Target != "" {
+		clauses = append(clauses, "target = ?")
+		args = append(args, filter.Target)
+	}
+	if filter.Kind != "" {
+		clauses = append(clauses, "kind = ?")
+		args = append(args, filter.Kind)
+	}
+	if filter.Failed {
+		clauses = append(clauses, "status IN (?, ?)")
+		args = append(args, string(Failed), string(Compensated))
+	}
+	if !filter.Since.IsZero() {
+		clauses = append(clauses, "created_at >= ?")
+		args = append(args, unix(filter.Since))
+	}
+	query := selectOperation
+	if len(clauses) > 0 {
+		query += " WHERE " + strings.Join(clauses, " AND ")
+	}
+	args = append(args, filter.Limit)
+	rows, err := s.db.QueryContext(ctx, query+` ORDER BY created_at DESC, id DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}

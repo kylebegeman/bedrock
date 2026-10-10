@@ -66,6 +66,9 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 	if err := checkPublishedPorts(ctx, r.store, m); err != nil {
 		return nil, err
 	}
+	if err := CheckRouteConflicts(ctx, r.store, m); err != nil {
+		return nil, err
+	}
 	for _, name := range m.WorkloadNames() {
 		if m.Workloads[name].LongRunning() {
 			r.containers[name] = docker.ContainerName(m.App, name, revision)
@@ -110,7 +113,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 	}
 	add(r.startStep())
 	add(r.readyStep())
-	if len(m.Checks) > 0 {
+	if len(verificationChecks(m).application) > 0 {
 		add(r.checksStep())
 	}
 	// Activation and certificate failures need the same recovery as a
@@ -119,7 +122,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 	if len(r.hosts) > 0 {
 		add(r.recoverOnFailure(r.certificatesStep()))
 	}
-	if len(m.Checks) > 0 {
+	if checks := verificationChecks(m); len(checks.edge)+len(checks.guards) > 0 {
 		add(r.verifyStep())
 	}
 	add(r.retireStep())
@@ -172,6 +175,9 @@ func (r *rollout) pin(ctx context.Context) (*state.Revision, map[string]string, 
 		return nil, nil, 0, err
 	}
 	if err := checkSecrets(r.m, values); err != nil {
+		return nil, nil, 0, err
+	}
+	if err := checkVerificationSecrets(r.m, values); err != nil {
 		return nil, nil, 0, err
 	}
 	if rev.SecretsVersion != version {
@@ -475,8 +481,9 @@ func (r *rollout) readyStep() kernel.Step {
 }
 
 func (r *rollout) checksStep() kernel.Step {
+	checks := verificationChecks(r.m).application
 	return kernel.Step{
-		Name: "checks", Change: fmt.Sprintf("run %d check(s) against the new containers", len(r.m.Checks)),
+		Name: "checks", Change: fmt.Sprintf("run %d check(s) against the new containers", len(checks)),
 		// Before any traffic reaches it: a revision that answers wrong
 		// never goes live.
 		Apply: func(ctx context.Context, out io.Writer) error {
@@ -484,7 +491,7 @@ func (r *rollout) checksStep() kernel.Step {
 			if err != nil {
 				return err
 			}
-			for _, c := range r.m.Checks {
+			for _, c := range checks {
 				if err := runCheckDirect(ctx, e, r.m, r.containers, c); err != nil {
 					return errors.Join(err, r.abandon(ctx, e, out))
 				}
@@ -564,27 +571,37 @@ func (r *rollout) recoverOnFailure(step kernel.Step) kernel.Step {
 }
 
 func (r *rollout) verifyStep() kernel.Step {
-	return kernel.Step{
-		Name: "verify", Change: fmt.Sprintf("run %d check(s) through the edge", len(r.m.Checks)),
-		// The checks already passed against the containers; this proves the
-		// edge and the certificates. If it fails, the previous revision
-		// comes back before anyone notices.
+	checks := verificationChecks(r.m)
+	change := fmt.Sprintf("run %d check(s) through the edge", len(checks.edge))
+	if len(checks.guards) > 0 {
+		change += fmt.Sprintf(" and verify %d sign-in guard(s) deny anonymous requests", len(checks.guards))
+	}
+	return r.recoverOnFailure(kernel.Step{
+		Name: "verify", Change: change,
 		Apply: func(ctx context.Context, out io.Writer) error {
-			for _, c := range r.m.Checks {
-				if err := runCheck(ctx, c); err != nil {
-					cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-					revert, revertErr := revertSwitch(cleanup, r.store, r.d.Secrets, r.connect, r.m.App, r.revision, r.containers)
-					cancel()
-					if revertErr != nil {
-						return fmt.Errorf("%w; and putting the previous revision back failed too: %v", err, revertErr)
-					}
-					return fmt.Errorf("%w; %s", err, revert)
+			for _, c := range checks.guards {
+				if err := runGuardCheck(ctx, c); err != nil {
+					return err
+				}
+				fmt.Fprintf(out, "%s: sign-in guard denied anonymous access\n", c.URL)
+			}
+			var values map[string]string
+			if len(CheckSecretNames(r.m)) > 0 {
+				_, loaded, _, err := r.pin(ctx)
+				if err != nil {
+					return err
+				}
+				values = loaded
+			}
+			for _, c := range checks.edge {
+				if err := runEdgeCheck(ctx, c, values); err != nil {
+					return err
 				}
 				fmt.Fprintf(out, "%s ok\n", c.URL)
 			}
 			return nil
 		},
-	}
+	})
 }
 
 func (r *rollout) retireStep() kernel.Step {

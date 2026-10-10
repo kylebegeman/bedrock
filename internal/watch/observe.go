@@ -49,6 +49,8 @@ type Prober struct {
 	Connect func(ctx context.Context) (*docker.Engine, error)
 	// Root is the filesystem whose free space matters.
 	Root string
+	// CheckSecrets loads only the revision-bound credentials used by checks.
+	CheckSecrets func(app string, version int) (map[string]string, error)
 
 	// mu keeps rounds from overlapping.
 	mu sync.Mutex
@@ -188,11 +190,21 @@ func (p *Prober) app(ctx context.Context, e *docker.Engine, rev state.Revision) 
 			worse(state.SeverityCritical)
 		}
 	}
-	for _, c := range m.Checks {
-		if err := app.RunCheck(ctx, c); err != nil {
-			problems = append(problems, strings.TrimPrefix(err.Error(), "check "))
+	values := map[string]string{}
+	if len(app.CheckSecretNames(&m)) > 0 {
+		if p.CheckSecrets == nil {
+			problems = append(problems, "check credentials cannot be loaded")
 			worse(state.SeverityCritical)
+		} else if loaded, err := p.CheckSecrets(rev.App, rev.SecretsVersion); err != nil {
+			problems = append(problems, "check credentials cannot be loaded")
+			worse(state.SeverityCritical)
+		} else {
+			values = loaded
 		}
+	}
+	for _, err := range app.RunAppChecks(ctx, e, &m, rev.Containers, values) {
+		problems = append(problems, strings.TrimPrefix(err.Error(), "check "))
+		worse(state.SeverityCritical)
 	}
 	for _, host := range m.Hosts() {
 		ready, why, expiry, found := edge.Certificate(ctx, host, EdgeAddress)

@@ -349,8 +349,11 @@ runs a branch as its own app beside the one it is a branch of: a derived
 name, its own containers and an empty database, at hostnames under the
 preview domain, with every route behind a sign-in (`auth: loom`, below).
 Pushing the same branch again updates it; `bedrock preview ls` lists them,
-and `bedrock remove <preview> --data` throws one away, the secrets it was
-given included.
+`bedrock preview down <preview> --data` removes one and its data.
+Use `bedrock preview pin <preview>` to retain a branch, then review
+`bedrock preview prune --older-than 7d --plan` to clean up unpinned previews.
+Pins survive updates and rollbacks. Preview checks retain application and
+routed assertions; external checks that cannot be rewritten are reported.
 
 `bedrock move out <app> --yes > handoff.json` on one machine and
 `bedrock move in <app> --handoff handoff.json` on another move an app's data
@@ -472,12 +475,36 @@ for every secret an app holds at once, which is what a move needs.
 
 </details>
 
+## Validation and saved diagnostics
+
+`bedrock check .` validates a manifest and its source paths offline, with
+field locations in errors. `--json` returns one structured report.
+`bedrock check . --host` adds deploy-plan preconditions for integrations,
+secret names, and route and port ownership. Runtime capacity, image builds,
+DNS and certificates are verified during deployment. The generated
+[editor schema](schema/README.md) keeps authoring aligned with the Go parser.
+
+Checks can declare `context: application` or `context: edge`. Guarded routes
+check application content directly and independently verify anonymous denial
+at the edge. An explicit edge check can use `headers_from_secrets`, mapping
+HTTP header names to app secret names, for an authenticated assertion.
+Credentials are loaded from the deployed revision and stay off logs and
+receipts; credentialed checks require HTTPS and refuse redirects.
+
+`bedrock alerts --limit N` always includes every open incident plus N resolved
+incidents. Use `--limit 0` for open incidents only.
+`bedrock history --app api --kind app.deploy --failed --since 24h` filters
+operations before applying the limit. `bedrock history ID --output` retrieves
+saved diagnostic tails, optionally with `--step NAME` or a one-based step
+position. Saved tails contain up to 40 lines per execution, rather than a
+complete log, and become available when an execution finishes.
+
 ## Commands
 
 | | |
 |---|---|
 | **Machine** | `host` · `daemon` · `doctor` · `upgrade` · `version` · `status` · `alerts` · `watch` |
-| **Apps** | `init` · `launch` · `deploy` · `preview` · `rollback` · `remove` · `move` · `ls` · `ps` · `logs` · `history` · `gc` |
+| **Apps** | `init` · `check` · `launch` · `deploy` · `preview` · `rollback` · `remove` · `move` · `ls` · `ps` · `logs` · `history` · `gc` |
 | **Data** | `backup` · `backups` · `restore` · `drill` · `psql` |
 | **Access** | `secret` · `integration` · `git` · `exec` · `run` · `jobs` |
 | **Network** | `dns` · `exposure` |

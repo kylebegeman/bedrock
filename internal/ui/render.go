@@ -231,6 +231,39 @@ func (r *Renderer) Receipt(rc *kernel.Receipt) {
 	}
 }
 
+// Output prints explicitly requested diagnostic tails. The label stays clear
+// that journal tails cannot reconstruct the complete log or live output.
+func (r *Renderer) Output(saved *kernel.OperationOutput) {
+	if r.json {
+		_ = r.enc.Encode(saved)
+		return
+	}
+	r.println(fmt.Sprintf("%s: saved output tails (up to %d lines per execution; not a complete log)", saved.ID, saved.TailLinesPerExecution))
+	for _, st := range saved.Steps {
+		r.println(fmt.Sprintf("  %d. %s (%s)", st.Index+1, st.Name, st.Status))
+		if st.Error != "" {
+			r.println("     error: " + st.Error)
+		}
+		if st.Output == "" {
+			note := "no output was saved"
+			switch st.Status {
+			case state.StepPending:
+				note = "this step has not run"
+			case state.StepRunning:
+				note = "output is saved when this execution finishes; none available yet"
+			}
+			r.println("     " + note)
+			continue
+		}
+		for _, line := range strings.Split(strings.TrimSuffix(st.Output, "\n"), "\n") {
+			r.println("     | " + line)
+		}
+		if st.Status == state.StepRunning {
+			r.println("     this execution is running; its output is saved when it finishes")
+		}
+	}
+}
+
 // Summary is one row of history.
 type Summary struct {
 	ID            string                `json:"id"`

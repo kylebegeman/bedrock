@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"maps"
+	"net/url"
 	"strings"
 
 	"github.com/kylebegeman/bedrock/internal/manifest"
@@ -36,25 +37,36 @@ const maxAppName = 40
 // seeing a branch work, and most branches need a schema rather than
 // somebody's real rows.
 //
-// Checks are dropped. A deploy runs them twice, once against the containers
-// and once through the edge, with the same expected status both times. The
-// second one now arrives at a guarded route and is answered 401, which
-// would fail the deploy and roll it back. Keeping a check that cannot pass
-// would make every preview look broken.
+// Checks for the parent's own routes keep their assertions at the preview's
+// hostname. Application checks and anonymous guard probes are independent,
+// so a sign-in never replaces a useful content assertion. Checks for an
+// external host or nonstandard public port are reported individually.
 //
-// Backups are turned off. The data is a copy of something already backed
-// up, and a preview exists to be thrown away.
+// Backups are turned off: the database starts empty, and a preview exists
+// to be thrown away.
 //
 // Ports published on the machine are dropped. The parent already holds
 // them, so a preview that kept them could never start, and a branch has no
 // business answering on the machine's own address anyway.
 func PreviewOf(parent *manifest.Manifest, branch, domain string) (*manifest.Manifest, error) {
+	preview, _, err := PreviewOfWithReport(parent, branch, domain)
+	return preview, err
+}
+
+// PreviewCheckSkip explains one assertion that cannot be carried to a preview.
+type PreviewCheckSkip struct {
+	URL    string `json:"url"`
+	Reason string `json:"reason"`
+}
+
+// PreviewOfWithReport derives a preview and explains unsupported checks.
+func PreviewOfWithReport(parent *manifest.Manifest, branch, domain string) (*manifest.Manifest, []PreviewCheckSkip, error) {
 	label := DNSLabel(branch)
 	if label == "" {
-		return nil, fmt.Errorf("%q has nothing in it a hostname can use", branch)
+		return nil, nil, fmt.Errorf("%q has nothing in it a hostname can use", branch)
 	}
 	if !manifest.ValidHost(domain) {
-		return nil, fmt.Errorf("%q isn't a domain to put previews under, such as preview.example.com", domain)
+		return nil, nil, fmt.Errorf("%q isn't a domain to put previews under, such as preview.example.com", domain)
 	}
 
 	// Nothing is shared with the parent: its manifest is still in use, and
@@ -97,7 +109,7 @@ func PreviewOf(parent *manifest.Manifest, branch, domain string) (*manifest.Mani
 		for _, r := range w.Routes {
 			host := previewHost(r.Host, branch, domain)
 			if !manifest.ValidHost(host) {
-				return nil, fmt.Errorf("%s would become %q, which isn't a hostname; use a shorter branch name", r.Host, host)
+				return nil, nil, fmt.Errorf("%s would become %q, which isn't a hostname; use a shorter branch name", r.Host, host)
 			}
 			key := host + " " + r.NormalizedPath()
 			if claimed[key] {
@@ -114,10 +126,30 @@ func PreviewOf(parent *manifest.Manifest, branch, domain string) (*manifest.Mani
 		}
 		preview.Workloads[name] = copied
 	}
-	if err := preview.Validate(); err != nil {
-		return nil, fmt.Errorf("the preview derived from %s is not a valid app, which is a bug in bedrock: %w", parent.App, err)
+	var skipped []PreviewCheckSkip
+	for _, check := range parent.Checks {
+		u, err := url.Parse(check.URL)
+		if err != nil || u.Hostname() == "" || u.User != nil {
+			skipped = append(skipped, PreviewCheckSkip{URL: check.URL, Reason: "URL is not a supported application URL"})
+			continue
+		}
+		if _, _, _, ok := parent.RouteFor(u.Hostname(), u.Path); !ok {
+			skipped = append(skipped, PreviewCheckSkip{URL: check.URL, Reason: "URL does not belong to a route in this app"})
+			continue
+		}
+		if port := u.Port(); port != "" && !(u.Scheme == "https" && port == "443" || u.Scheme == "http" && port == "80") {
+			skipped = append(skipped, PreviewCheckSkip{URL: check.URL, Reason: "nonstandard public port has no preview route"})
+			continue
+		}
+		u.Host = previewHost(u.Hostname(), branch, domain)
+		check.URL = u.String()
+		check.HeadersFromSecrets = maps.Clone(check.HeadersFromSecrets)
+		preview.Checks = append(preview.Checks, check)
 	}
-	return &preview, nil
+	if err := preview.Validate(); err != nil {
+		return nil, nil, fmt.Errorf("the preview derived from %s is not a valid app, which is a bug in bedrock: %w", parent.App, err)
+	}
+	return &preview, skipped, nil
 }
 
 // SetRouteDNS makes every route of an app keep its record one way, for a

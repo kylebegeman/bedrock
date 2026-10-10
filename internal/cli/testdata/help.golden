@@ -8,6 +8,7 @@ Available Commands:
   alerts      What is wrong right now, and what was recently.
   backup      Back the app's data up to its bucket now. "bedrock" backs up the machine's own state.
   backups     List backups, drills and restores, newest first.
+  check       Validate a manifest and its local source inputs without a host.
   daemon      The host daemon: run it, install it under systemd, or check it.
   deploy      Deploy the app in a source directory: build, start, check, switch the edge, retire the old revision.
   dns         The records behind every host this machine routes, as Cloudflare and the world see them.
@@ -17,7 +18,7 @@ Available Commands:
   exposure    What each container may do and what reaches it: user, capabilities, root filesystem, networks, ports, mounts.
   gc          Remove containers, images and build cache that no kept revision uses.
   git         Deploy by pushing: which keys may push which apps, remotes, and GitHub webhooks.
-  history     List recent operations, or show one receipt.
+  history     List recent operations, show a receipt, or retrieve saved diagnostic output.
   host        Set up, keep and maintain this machine.
   init        Write a starting bedrock.yaml for a new app.
   integration The credentials bedrock itself uses: storage for backups, email for alerts, Cloudflare for DNS.
@@ -56,7 +57,7 @@ Available Commands:
   test        Send a test alert through the email integration.
 
 Flags:
-      --limit int   how many to list, open ones included (default 20)
+      --limit int   how many resolved incidents to list; every open incident is included (default 20)
 
 Global Flags:
       --json               print JSON, one object per line
@@ -97,6 +98,32 @@ Usage:
 
 Flags:
       --limit int   how many to list (default 20)
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock check (hidden false)
+Validate a manifest and its local source inputs without a host.
+Validate a manifest and its local source inputs without a host.
+
+Checks workload shapes, routes, ports and secret names with the deploy
+validator, then checks build contexts, Dockerfiles, static directories
+and PostgreSQL init inputs. Nothing is built or changed.
+
+This is an offline check. It does not establish DNS, certificates,
+image availability, secret values or capacity on a target machine.
+Add --host while running on the target to check the same read-only
+preconditions as bedrock deploy --plan, including integrations and
+route/published-port ownership and availability of named secrets.
+It does not execute the plan or prove disk/aggregate resource capacity,
+runtime readiness, DNS or certificate issuance.
+Usage:
+  bedrock check [source-dir] [flags]
+
+Flags:
+      --host              also check deploy-plan preconditions on this target; applies and journals nothing
+      --manifest string   the .yaml or .yml manifest at the source's root (default "bedrock.yaml")
 
 Global Flags:
       --json               print JSON, one object per line
@@ -414,13 +441,31 @@ Global Flags:
       --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
       --state-dir string   where bedrock keeps its state (default "~/.bedrock")
 == bedrock history (hidden false)
-List recent operations, or show one receipt.
+List recent operations, show a receipt, or retrieve saved diagnostic output.
+List recent operations, show a receipt, or retrieve saved diagnostic output.
 
+List filters are combined and applied before --limit. --failed includes
+failed and compensated operations. --since accepts a positive duration
+such as 24h, or an RFC3339 timestamp such as 2026-10-10T12:00:00Z.
+
+  bedrock history --app api --kind app.deploy --failed --since 24h
+  bedrock history <operation-id> --output
+  bedrock history <operation-id> --output --step build-web
+
+Output is opt-in and contains saved tails, not a complete log. Each step
+execution keeps up to 40 lines; a running execution's output is saved when
+it finishes. --step selects an exact name or a one-based step position.
 Usage:
   bedrock history [operation-id] [flags]
 
 Flags:
-      --limit int   how many operations to list (default 20)
+      --app string     only operations targeting this app
+      --failed         only failed or compensated operations
+      --kind string    only this operation kind, such as app.deploy
+      --limit int      how many matching operations to list (default 20)
+      --output         show the operation's saved step-output tails instead of its receipt
+      --since string   operations created since a duration ago or an RFC3339 timestamp
+      --step string    with --output, select a step by name or one-based position
 
 Global Flags:
       --json               print JSON, one object per line
@@ -793,7 +838,9 @@ updates it rather than making a second one.
   bedrock preview up https://github.com/you/app --branch new-nav \
       --domain preview.example.com
   bedrock preview ls
-  bedrock remove app-pr-new-nav --data
+  bedrock preview down app --branch new-nav
+  bedrock preview pin app --branch new-nav
+  bedrock preview prune --older-than 7d --plan
 
 Every preview route is behind the Core's sign-in and there is no way to turn
 that off, so the machine needs the loom integration before any of this works.
@@ -801,7 +848,11 @@ Usage:
   bedrock preview [command]
 
 Available Commands:
+  down        Remove a preview, including its data and secrets.
   ls          List the previews running on this machine.
+  pin         Keep a preview out of preview prune.
+  prune       Remove old, unpinned previews with one reviewable plan.
+  unpin       Allow preview prune to remove this preview when old enough.
   up          Deploy a branch as a preview of the app in it.
 
 Global Flags:
@@ -810,6 +861,25 @@ Global Flags:
       --state-dir string   where bedrock keeps its state (default "~/.bedrock")
 
 Use "bedrock preview [command] --help" for more information about a command.
+== bedrock preview down (hidden false)
+Remove a preview, including its data and secrets.
+Remove a preview, including its data and secrets.
+
+Give the preview's name, or its parent app with --branch. Pinned previews can
+be removed explicitly here; preview prune leaves them alone.
+Usage:
+  bedrock preview down <preview-or-parent> [flags]
+
+Flags:
+      --branch string   the exact branch when naming the parent app
+      --digest string   apply only if the plan is still the one with this digest; implies --yes
+      --plan            show the plan and change nothing
+      --yes             apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
 == bedrock preview ls (hidden false)
 List the previews running on this machine.
 
@@ -823,13 +893,65 @@ Global Flags:
       --json               print JSON, one object per line
       --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
       --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock preview pin (hidden false)
+Keep a preview out of preview prune.
+
+Usage:
+  bedrock preview pin <preview-or-parent> [flags]
+
+Flags:
+      --branch string   the exact branch when naming the parent app
+      --digest string   apply only if the plan is still the one with this digest; implies --yes
+      --plan            show the plan and change nothing
+      --yes             apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock preview prune (hidden false)
+Remove old, unpinned previews with one reviewable plan.
+Remove old, unpinned previews with one reviewable plan.
+
+Age is measured from the latest deploy, not traffic or branch activity. Every
+selected preview's data and secrets are removed using the ordinary remove
+plan. Production apps and pinned previews are excluded.
+Usage:
+  bedrock preview prune [parent-app] [flags]
+
+Flags:
+      --digest string       apply only if the plan is still the one with this digest; implies --yes
+      --older-than string   time since latest deploy, such as 48h or 7d (default "7d")
+      --plan                show the plan and change nothing
+      --yes                 apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
+== bedrock preview unpin (hidden false)
+Allow preview prune to remove this preview when old enough.
+
+Usage:
+  bedrock preview unpin <preview-or-parent> [flags]
+
+Flags:
+      --branch string   the exact branch when naming the parent app
+      --digest string   apply only if the plan is still the one with this digest; implies --yes
+      --plan            show the plan and change nothing
+      --yes             apply without asking
+
+Global Flags:
+      --json               print JSON, one object per line
+      --socket string      the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string   where bedrock keeps its state (default "~/.bedrock")
 == bedrock preview up (hidden false)
 Deploy a branch as a preview of the app in it.
 Deploy a branch as a preview of the app in it.
 
 The branch's own bedrock.yaml says which app this is a preview of. The
 preview is derived from it: a name with the branch in it, hostnames under
-the preview domain, every route behind a sign-in, no checks and no backups.
+the preview domain, every route behind a sign-in, preserved checks and no backups.
 
 The database starts empty and is built by whatever the app runs to migrate
 itself. Most branches want a schema rather than somebody's real rows.
@@ -847,6 +969,7 @@ Flags:
       --dns string        keep the preview's records this way: direct, proxied or manual (default: as the app's routes say)
       --domain string     the domain previews answer under, such as preview.example.com
       --manifest string   the manifest at the branch's root, for a source that holds several apps (default "bedrock.yaml")
+      --pin               keep this preview out of preview prune (existing pin is preserved unless explicitly set)
       --plan              show the plan and change nothing
       --secrets           copy the parent's hand-set secrets so the preview can start (default true)
       --yes               apply without asking
