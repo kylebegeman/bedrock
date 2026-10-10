@@ -108,3 +108,30 @@ recorded as infrastructure evidence, never a successful product proof. The
 proof worker owns recovery of the specifically identified guest and will test
 a final frozen source snapshot. Public DNS/TLS issuance and external/private
 fixture proofs remain dependent on explicit unavailable prerequisites.
+
+
+## Milestone 4 verification
+
+Commit `7ae0003` contains the combined safety workflows and product/transfer
+proof runners. The checkout was clean after commit. The exact staged snapshot
+passed `make check`: 28 lane tests, formatting, vet and the complete Go suite,
+including the regenerated command-help and plan goldens. Snapshot:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-milestone4-3arxooys`.
+
+Both static Linux builds (`amd64`, `arm64`) and the Linux ARM64 CLI test binary
+compile. The independent draft-2020-12 schema checks passed all 8 tests; README
+and feature-document local links resolve. Darwin terminal regressions passed.
+Final product and two-machine proofs will rebuild from a frozen commit after
+disposable guest recovery. No public infrastructure proof is implied by the
+local and emulated-guest checks.
+
+
+## Linux terminal verification
+
+The Linux CLI test binary was run as PID 1 in an isolated, read-only,
+networkless container made from the existing lane provider image. This exposed
+a test-helper controlling-terminal bug: closing the PTY sent SIGHUP to the test
+process. The Linux helper now opens its slave with `O_NOCTTY`. Production
+credential code is unchanged. The rebuilt Linux binary passed the three real
+terminal regressions plus malformed-input privacy, unchanged credential pipes
+and state/socket approval binding. Matching Darwin regressions also pass.

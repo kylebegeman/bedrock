@@ -23,10 +23,13 @@ func openCredentialTestPTY(t *testing.T) (*os.File, *os.File) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	slave, err := os.OpenFile(fmt.Sprintf("/dev/pts/%d", number), os.O_RDWR, 0)
+	// A container entrypoint can be a session leader. Keep the test's slave
+	// from becoming its controlling terminal and sending SIGHUP on cleanup.
+	slaveFD, err := unix.Open(fmt.Sprintf("/dev/pts/%d", number), unix.O_RDWR|unix.O_NOCTTY, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	slave := os.NewFile(uintptr(slaveFD), "credential-pty-slave")
 	t.Cleanup(func() { slave.Close() })
 	return master, slave
 }
