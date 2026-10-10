@@ -10,6 +10,10 @@ First establish the host's SSH key through your normal trusted channel. Bedrock
 uses strict host-key checking and noninteractive SSH, including for bootstrap.
 An existing SSH configuration alias can supply connection settings.
 
+The examples below require Bedrock already installed on the target. For a fresh
+host, save the target, complete [portable bootstrap](#write-a-portable-profile),
+then run `bedrock target verify staging`.
+
 ```sh
 bedrock target set staging --ssh bedrock-staging --sudo
 bedrock target verify staging
@@ -85,7 +89,7 @@ is refused; use compatibility-aware `upgrade` to replace it.
 
 ```sh
 bedrock host bootstrap --resume
-bedrock history --state-dir ~/.bedrock/bootstrap --json
+bedrock history --state-dir ~/.bedrock/bootstrap --socket '' --json
 ```
 
 `--resume` replays unfinished receipts after their lease expires, using the

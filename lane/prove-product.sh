@@ -116,7 +116,7 @@ workloads:
     command: [sh, -c, 'while :; do sleep 10; done']
 YAML
 before=$(last_operation)
-br check "$work/hello" --host --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["valid"] and r["host_preflight"]["valid"]'
+br check "$work/hello" --host --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["valid"] and r["host_preflight"]["valid"], r.get("diagnostics")'
 [[ "$(last_operation)" == "$before" ]]
 br deploy "$work/hello" --plan --json >"$work/source-plan.json"
 source_digest=$(field digest <"$work/source-plan.json")
@@ -194,9 +194,9 @@ checks:
     context: edge
     contains: authenticated fixture
     headers_from_secrets: {Authorization: CHECK_TOKEN}
-    timeout: 2s
+    within: 2s
 YAML
-br check "$work/hello" --host --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["valid"]'
+br check "$work/hello" --host --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["valid"], r.get("diagnostics")'
 sleep 1
 br deploy "$work/hello" --yes
 hello_revision=$(active_revision hello)

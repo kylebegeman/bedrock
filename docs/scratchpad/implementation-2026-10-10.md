@@ -135,3 +135,46 @@ process. The Linux helper now opens its slave with `O_NOCTTY`. Production
 credential code is unchanged. The rebuilt Linux binary passed the three real
 terminal regressions plus malformed-input privacy, unchanged credential pipes
 and state/socket approval binding. Matching Darwin regressions also pass.
+
+## Milestone 5 verification
+
+Commit `0642a68` contains Linux terminal test hardening and the integrated
+verification record. Its exact staged snapshot passed `make check`, including
+28 lane safeguard tests, formatting, vet and the complete Go suite. Snapshot:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-milestone5-jmpu5q62`.
+
+## Final proof investigation and hardening
+
+The original guest's host setup receipt `op-20261010-231314-josu6` succeeded;
+the apparent outage was isolated to Docker's published SSH forwarding. Guest
+SSH responded immediately inside its positively identified provider container.
+A task-specific byte-only SSH ProxyCommand retained the original endpoint,
+private client key, pinned host key and all remote disposable guards. No
+production lane was contacted. The second guest retains ordinary pinned SSH.
+The final report directory includes `transport.md` with the exact limitation.
+
+The clean `0642a68` product run passed checkpointed upgrade, pinned bootstrap,
+recipient-bound integration transfer, connection/machine/source approval
+refusals, read-only host preflight, deploy and preview retention/cleanup.
+It then failed while validating the authenticated fixture because the proof
+used `checks[].timeout` instead of the supported `checks[].within` field.
+The CLI correctly refused the malformed manifest. Preserve that failed report:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-product-final-0642a68/report.md`.
+The corrected proof must run again from a clean committed source.
+
+The final bounded documentation audit found three corrections: verify fresh
+targets after bootstrap, explicitly disable the default daemon socket when
+reading the client bootstrap journal, and describe recovered cron admission
+only after cutover releases its reservation. These documentation fixes do not
+change runtime behavior.
+
+The corrected authenticated fixture validates through the current CLI. All six
+product and both transfer inline manifests validate with zero diagnostics:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-proof-manifest-validation/results.json`.
+Lane safeguard checks pass all 28 tests; shellcheck passes with the existing
+intentional `SC2016` exclusion. Live product and transfer verification remain
+pending for the next frozen milestone.
+
+The frozen corrected proof and documentation snapshot passed `make check`:
+formatting, vet, the complete Go suite and all 28 lane safeguard tests. Only
+this verification note was added afterward; runtime source is unchanged.

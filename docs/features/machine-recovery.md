@@ -82,8 +82,9 @@ bedrock recover cutover <recovery-id> --yes
 Cutover brings services onto their normal app networks, restores normal
 workload port publishing and rechecks every long-running workload. Only after
 readiness does it activate recovered revisions, load edge routes and explicitly
-point managed DNS records at the target. Cron jobs become eligible once the
-recovered revisions are active. DNS modes configured as manual remain manual.
+point managed DNS records at the target. Cron jobs become eligible after
+cutover completes and releases the reservation. DNS modes configured as manual
+remain manual.
 Cutover durably records its start before changing the target runtime. A failed
 or interrupted cutover reports `cutover-incomplete` and is retried with the same
 recovery ID; it cannot be abandoned after that start marker.
