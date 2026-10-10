@@ -31,6 +31,10 @@ func (a *app) operate(ctx context.Context, kind string, input any, planOnly bool
 	if err != nil {
 		return err
 	}
+	return a.operateRaw(ctx, runner, kind, raw, planOnly)
+}
+
+func (a *app) operateRaw(ctx context.Context, runner api.Runner, kind string, raw json.RawMessage, planOnly bool) error {
 	defer runner.Close()
 	r := a.renderer()
 	view, err := runner.Plan(ctx, kind, raw)
@@ -85,6 +89,12 @@ func (a *app) operate(ctx context.Context, kind string, input any, planOnly bool
 // socket when the operator uses a nondefault installation.
 func (a *app) historyOutputCommand(id string) string {
 	command := "bedrock history " + shellArgument(id) + " --output"
+	if a.targetName != "" {
+		command += " --target " + shellArgument(a.targetName)
+		if a.targetsFile != defaultTargetsFile() {
+			command += " --targets-file " + shellArgument(a.targetsFile)
+		}
+	}
 	if a.stateDir != "" && a.stateDir != defaultStateDir() {
 		command += " --state-dir " + shellArgument(a.stateDir)
 	}

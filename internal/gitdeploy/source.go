@@ -99,6 +99,11 @@ func Extract(r io.Reader, dest string) error {
 	if err != nil {
 		return err
 	}
+	bounded, err := os.OpenRoot(root)
+	if err != nil {
+		return err
+	}
+	defer bounded.Close()
 	tr := tar.NewReader(in)
 	var total int64
 	for {
@@ -119,7 +124,7 @@ func Extract(r io.Reader, dest string) error {
 		target := filepath.Join(root, name)
 		switch h.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
+			if err := bounded.MkdirAll(name, 0o755); err != nil {
 				return err
 			}
 		case tar.TypeReg:
@@ -127,14 +132,14 @@ func Extract(r io.Reader, dest string) error {
 			if total > MaxSource {
 				return fmt.Errorf("the source is larger than %d GiB", MaxSource>>30)
 			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			if err := bounded.MkdirAll(filepath.Dir(name), 0o755); err != nil {
 				return err
 			}
 			mode := os.FileMode(0o644)
 			if h.Mode&0o111 != 0 {
 				mode = 0o755
 			}
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+			f, err := bounded.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 			if err != nil {
 				return err
 			}
@@ -156,11 +161,11 @@ func Extract(r io.Reader, dest string) error {
 				// machine; it is left out.
 				continue
 			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			if err := bounded.MkdirAll(filepath.Dir(name), 0o755); err != nil {
 				return err
 			}
-			_ = os.Remove(target)
-			if err := os.Symlink(link, target); err != nil {
+			_ = bounded.Remove(name)
+			if err := bounded.Symlink(link, name); err != nil {
 				return err
 			}
 		}

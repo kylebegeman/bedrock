@@ -58,39 +58,7 @@ func newCheck(a *app) *cobra.Command {
 					report.HostPreflight.Plan = plan
 				}
 			}
-			if a.json {
-				if err := json.NewEncoder(a.stdout).Encode(report); err != nil {
-					return err
-				}
-			} else if report.Valid {
-				fmt.Fprintf(a.stdout, "%s: %s manifest and local source inputs are valid\n", name, report.App)
-				if report.HostPreflight != nil {
-					fmt.Fprintln(a.stdout, "Host deploy-plan preconditions and secret names passed; runtime readiness remains to be verified during deploy.")
-					fmt.Fprintln(a.stdout, "Disk space and aggregate resource capacity are not checked; use bedrock doctor for current host capacity.")
-					a.renderer().Plan(report.HostPreflight.Plan)
-				} else {
-					fmt.Fprintln(a.stdout, "Offline check only; use bedrock check --host on the target before deploying.")
-				}
-			} else {
-				for _, d := range report.Diagnostics {
-					location := name
-					if d.Line > 0 {
-						location += fmt.Sprintf(":%d", d.Line)
-						if d.Column > 0 {
-							location += fmt.Sprintf(":%d", d.Column)
-						}
-					}
-					field := ""
-					if d.Path != "" {
-						field = " [" + d.Path + "]"
-					}
-					fmt.Fprintf(a.stdout, "%s%s: %s\n", location, field, d.Message)
-				}
-			}
-			if !report.Valid {
-				return quietError{code: 1}
-			}
-			return nil
+			return a.printCheckReport(report, name)
 		},
 	}
 	cmd.Flags().BoolVar(&host, "host", false, "also check deploy-plan preconditions on this target; applies and journals nothing")
@@ -112,4 +80,40 @@ func (a *app) checkHost(ctx context.Context, source, name string) (*kernel.PlanV
 		return nil, err
 	}
 	return runner.Plan(ctx, apps.DeployKind, raw)
+}
+
+func (a *app) printCheckReport(report sourceCheckReport, name string) error {
+	if a.json {
+		if err := json.NewEncoder(a.stdout).Encode(report); err != nil {
+			return err
+		}
+	} else if report.Valid {
+		fmt.Fprintf(a.stdout, "%s: %s manifest and local source inputs are valid\n", name, report.App)
+		if report.HostPreflight != nil {
+			fmt.Fprintln(a.stdout, "Host deploy-plan preconditions and secret names passed; runtime readiness remains to be verified during deploy.")
+			fmt.Fprintln(a.stdout, "Disk space and aggregate resource capacity are not checked; use bedrock doctor for current host capacity.")
+			a.renderer().Plan(report.HostPreflight.Plan)
+		} else {
+			fmt.Fprintln(a.stdout, "Offline check only; use bedrock check --host on the target before deploying.")
+		}
+	} else {
+		for _, d := range report.Diagnostics {
+			location := name
+			if d.Line > 0 {
+				location += fmt.Sprintf(":%d", d.Line)
+				if d.Column > 0 {
+					location += fmt.Sprintf(":%d", d.Column)
+				}
+			}
+			field := ""
+			if d.Path != "" {
+				field = " [" + d.Path + "]"
+			}
+			fmt.Fprintf(a.stdout, "%s%s: %s\n", location, field, d.Message)
+		}
+	}
+	if !report.Valid {
+		return quietError{code: 1}
+	}
+	return nil
 }

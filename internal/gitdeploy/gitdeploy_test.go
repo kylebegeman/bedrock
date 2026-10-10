@@ -272,3 +272,22 @@ func TestBranchNamesThatWouldBeFlagsAreRefused(t *testing.T) {
 		}
 	}
 }
+
+func TestExtractCannotFollowExistingLinkOutside(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	protected := filepath.Join(outside, "protected")
+	if err := os.WriteFile(protected, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Extract(bytes.NewReader(tarOf(t, [3]string{"file", "linked/protected", "overwrite"})), dir); err == nil {
+		t.Fatal("archive followed an existing link outside the destination")
+	}
+	got, err := os.ReadFile(protected)
+	if err != nil || string(got) != "keep" {
+		t.Fatalf("outside file changed: %q %v", got, err)
+	}
+}

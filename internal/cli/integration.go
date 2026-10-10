@@ -116,6 +116,7 @@ func newIntegration(a *app) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(set, list, remove)
+	addIntegrationTransfer(cmd, a)
 	return cmd
 }
 

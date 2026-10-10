@@ -46,13 +46,16 @@ type app struct {
 	// narrate is where an operation shows its plan, asks and reports its
 	// steps: stdout, unless a command's own result owns stdout, as move
 	// out's handoff does.
-	narrate  io.Writer
-	stateDir string
-	socket   string
-	json     bool
-	tty      bool
-	yes      bool
-	digest   string
+	narrate          io.Writer
+	stateDir         string
+	targetName       string
+	targetsFile      string
+	remoteStateFlags []string
+	socket           string
+	json             bool
+	tty              bool
+	yes              bool
+	digest           string
 }
 
 func (a *app) renderer() *ui.Renderer { return ui.New(a.narrateTo(), a.tty, a.json) }
@@ -108,6 +111,7 @@ func newRoot(stdout, stderr io.Writer) *cobra.Command {
 	root.PersistentFlags().StringVar(&a.socket, "socket", envOr("BEDROCK_SOCKET", daemon.DefaultSocket), "the daemon's socket; the local kernel is used when nothing answers")
 	root.PersistentFlags().BoolVar(&a.json, "json", false, "print JSON, one object per line")
 	root.AddCommand(newVersion(a), newCapabilities(a), newInit(a), newCheck(a), newDoctor(a), newHost(a), newUpgrade(a), newDeploy(a), newRollback(a), newLs(a), newStatus(a), newExposure(a), newDNS(a), newPs(a), newLogs(a), newExec(a), newGC(a), newLaunch(a), newMove(a), newPreview(a), newSecret(a), newIntegration(a), newRun(a), newJobs(a), newPsql(a), newBackup(a), newBackups(a), newDrill(a), newRestore(a), newAlerts(a), newWatch(a), newRemove(a), newGit(a), newReceive(a), newHistory(a), newKernel(a), newDaemon(a))
+	configureTargets(root, a)
 	return root
 }
 

@@ -56,10 +56,18 @@ func AssetName(version, goos, goarch string) string {
 // agree and nothing more: anyone who can replace one can replace both. Pass
 // a checksum from reviewed source when that distinction matters.
 func Fetch(ctx context.Context, version, dir, sha256Hex string) (string, error) {
+	return FetchPlatform(ctx, version, dir, sha256Hex, runtime.GOOS, runtime.GOARCH)
+}
+
+// FetchPlatform downloads for the target platform rather than the client OS.
+func FetchPlatform(ctx context.Context, version, dir, sha256Hex, goos, goarch string) (string, error) {
+	if (goos != "linux" && goos != "darwin") || (goarch != "amd64" && goarch != "arm64") {
+		return "", fmt.Errorf("unsupported release platform %s/%s", goos, goarch)
+	}
 	if err := CheckVersion(version); err != nil {
 		return "", err
 	}
-	asset := AssetName(version, runtime.GOOS, runtime.GOARCH)
+	asset := AssetName(version, goos, goarch)
 	base := fmt.Sprintf("%s/releases/download/v%s", repo, version)
 
 	want := strings.ToLower(strings.TrimSpace(sha256Hex))

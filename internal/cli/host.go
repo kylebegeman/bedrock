@@ -121,6 +121,7 @@ func newHost(a *app) *cobra.Command {
 	a.mutatingFlags(maintain, &maintainPlan)
 
 	hostCmd.AddCommand(setup, reconcile, maintain)
+	addHostBootstrap(hostCmd, a)
 	return hostCmd
 }
 

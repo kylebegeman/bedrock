@@ -370,6 +370,27 @@ secrets, volumes, database and networks), names each one in the plan and
 removes them. Its backups in the storage bucket are never touched, and are
 the only way back.
 
+## Named machines and portable setup
+
+Save and verify an SSH target, then select it explicitly for inspection or
+operations. Plans bind the connection, machine identity and uploaded source.
+
+```sh
+bedrock target set staging --ssh bedrock-staging --sudo
+bedrock target verify staging
+bedrock --target staging check . --host
+bedrock --target staging deploy . --plan
+```
+
+Portable profiles pin the host configuration, binary version/checksum and
+integration names. `bedrock --target staging host bootstrap --profile
+staging.json` installs and verifies that profile with resumable client receipts.
+Selected integrations are transferred as recipient-bound age ciphertext while
+the destination keeps its own identity. See
+[named targets and bootstrap](docs/features/targets-and-bootstrap.md) for the
+complete workflow, and [compatibility](docs/features/compatibility.md) for
+upgrade preflight and state checkpoint guarantees.
+
 ## A sign-in in front of a route
 
 A route marked `auth: loom` is put behind a Loom Core's sign-in by the edge:
@@ -569,8 +590,9 @@ against the checksums published beside it:
 bedrock upgrade --version 0.7.5
 ```
 
-`scripts/install-release.sh 0.7.5 <host>...` is the bootstrap, for a machine
-that has no bedrock on it yet.
+`bedrock --target <name> host bootstrap --profile <file>` provisions a machine
+from a reviewed portable profile. `scripts/install-release.sh 0.7.5 <host>...`
+remains available for initial binary installation.
 
 | Document | What it covers |
 |---|---|
@@ -580,8 +602,9 @@ that has no bedrock on it yet.
 | [docs/blueprint.html](docs/blueprint.html) | why the rewrite happened, written under an older name |
 | [lane/README.md](lane/README.md) | the proving ground |
 
-Every feature is proven on a real machine that is wiped and rebuilt for the
-purpose.
+The disposable lane reports which operational workflows ran and which need
+public DNS, external storage or other explicit prerequisites. Unit checks and
+operational proofs are recorded separately.
 
 ## License
 
