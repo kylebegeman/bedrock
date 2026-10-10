@@ -161,3 +161,41 @@ func TestTheSecretsFileGivesAShellTheValuesAsTheyWere(t *testing.T) {
 		}
 	}
 }
+
+func TestReleaseCheckpointTagsAreCapturedAndKeptByRetention(t *testing.T) {
+	fake := dockertest.New(t)
+	var commands [][]string
+	fake.OnCreate = func(c dockertest.Container) {
+		commands = append(commands, append([]string(nil), c.Cmd...))
+		fake.Update(c.Name, func(c *dockertest.Container) {
+			c.ExitAfter = 1
+			if c.Cmd[0] == "backup" {
+				c.Logs = `{"message_type":"summary","snapshot_id":"` + strings.Repeat("a", 64) + `"}`
+			} else {
+				c.Logs = `[]`
+			}
+		})
+	}
+	r := runner(t)
+	r.BackupTags = []string{ReleaseCheckpointTag}
+	if _, err := r.Backup(context.Background(), "site", nil, DataRoot); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Forget(context.Background(), "site", Keep{Daily: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if len(commands) != 2 {
+		t.Fatalf("%v", commands)
+	}
+	hasPair := func(command []string, key, value string) bool {
+		for i := 1; i < len(command); i++ {
+			if command[i-1] == key && command[i] == value {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasPair(commands[0], "--tag", ReleaseCheckpointTag) || !hasPair(commands[1], "--keep-tag", ReleaseCheckpointTag) {
+		t.Fatalf("checkpoint could be pruned: %v", commands)
+	}
+}

@@ -26,6 +26,13 @@ import (
 // a move requires both machines to be pointed at the same storage rather
 // than one machine handing the other a key.
 type Handoff struct {
+	// Migration fields identify the staged protocol. Empty Phase is a legacy
+	// copy whose source may have accepted writes after its snapshot.
+	Phase          string `json:"phase,omitempty"`
+	Migration      string `json:"migration,omitempty"`
+	To             string `json:"to,omitempty"`
+	ManifestDigest string `json:"manifest_digest,omitempty"`
+	SourceCommit   string `json:"source_commit,omitempty"`
 	// App is the app being moved.
 	App string `json:"app"`
 	// From is the machine it is moving off, for the record.

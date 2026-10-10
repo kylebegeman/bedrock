@@ -226,16 +226,7 @@ func (d *drillState) pick(ctx context.Context, r restic.Runner) (*restic.Snapsho
 	if err != nil {
 		return nil, err
 	}
-	var found *restic.Snapshot
-	for i := range snaps {
-		if strings.HasPrefix(snaps[i].ID, d.snapshot) {
-			found = &snaps[i]
-		}
-	}
-	if found == nil {
-		return nil, fmt.Errorf("no snapshot %s for %s", d.snapshot, d.app)
-	}
-	return found, nil
+	return resolveRecoverySnapshot(snaps, d.snapshot)
 }
 
 func (d *drillState) databaseStep() kernel.Step {

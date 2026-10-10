@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location("lane_proof", HERE / "proof.py")
@@ -34,6 +35,26 @@ class ProofReports(unittest.TestCase):
         for secret in ("throwaway-token", "throwaway-password", "AGE-SECRET-KEY-1ABCDEF", "a" * 48):
             self.assertNotIn(secret, text)
         self.assertIn("redacted", text)
+
+    def test_source_fingerprint_tracks_untracked_source_and_excludes_python_cache(self):
+        with tempfile.TemporaryDirectory(prefix="bedrock-fingerprint-test-") as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            source = root / "new-feature.go"
+            source.write_text("package fixture\n")
+            with mock.patch.object(PROOF, "ROOT", root):
+                initial = PROOF.source_tree_digest()
+                source.write_text("package improved\n")
+                changed = PROOF.source_tree_digest()
+                self.assertNotEqual(initial, changed)
+                cache = root / "__pycache__"
+                cache.mkdir()
+                (cache / "generated.pyc").write_bytes(b"cache")
+                self.assertEqual(changed, PROOF.source_tree_digest())
+
+    def test_transfer_requires_an_explicit_second_disposable_target(self):
+        args = SimpleNamespace(proofs=["transfer"], target_config=None)
+        self.assertTrue(any("--target-config" in item for item in PROOF.prerequisites(args, {})))
 
     def test_real_cloudflare_requires_explicit_mutation_opt_in(self):
         args = SimpleNamespace(proofs=["cloudflare"], real_cloudflare=False)

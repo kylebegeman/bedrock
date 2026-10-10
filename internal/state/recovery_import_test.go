@@ -109,3 +109,39 @@ func TestHistoricalRecoveryMigratesOnlyAnIsolatedCopy(t *testing.T) {
 		t.Fatalf("%+v %v", revision, err)
 	}
 }
+
+func TestMachineRecoveryFinalizesInterruptedReleaseAndRestoreHistory(t *testing.T) {
+	ctx := context.Background()
+	source := open(t)
+	target := open(t)
+	now := time.Now().UTC()
+	for _, status := range []string{ReleaseStarted, ReleaseRestoring} {
+		if err := source.BeginReleaseBoundary(ctx, ReleaseBoundary{App: "notes", Revision: status, Compatibility: "restore-required", StartedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := source.db.ExecContext(ctx, "UPDATE release_boundaries SET status=? WHERE app=? AND revision=?", status, "notes", status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := target.ImportMachineRecovery(ctx, source.Path(), "interrupted-release-history", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	boundaries, err := target.ReleaseBoundaries(ctx, "notes")
+	if err != nil || len(boundaries) != 2 {
+		t.Fatalf("boundaries %v, error %v", boundaries, err)
+	}
+	for _, boundary := range boundaries {
+		if boundary.Status != ReleaseFailed || boundary.FinishedAt.IsZero() || !strings.Contains(boundary.Error, "interrupted on source machine") {
+			t.Fatalf("source work remained resumable on target: %+v", boundary)
+		}
+	}
+	original, err := source.ReleaseBoundaries(ctx, "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, boundary := range original {
+		if boundary.Status != boundary.Revision || !boundary.FinishedAt.IsZero() {
+			t.Fatalf("source archive was changed: %+v", boundary)
+		}
+	}
+}

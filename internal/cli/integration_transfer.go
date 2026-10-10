@@ -37,5 +37,6 @@ func addIntegrationTransfer(cmd *cobra.Command, a *app) {
 		return nil
 	}}
 	accept.Flags().BoolVar(&replace, "replace", false, "explicitly replace conflicting target integration fields")
+	a.guardSecretMutation(accept, func([]string) string { return integration.App })
 	cmd.AddCommand(export, accept)
 }

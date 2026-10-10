@@ -210,10 +210,11 @@ func UnscopeDigest(t Target, digest string) (string, error) {
 	return raw, nil
 }
 
-// Binding adds the observed machine and uploaded input to a target approval.
+// Binding adds the observed machine, remote state and uploaded input to a target approval.
 type Binding struct {
-	Target     Target `json:"target"`
-	SourceHash string `json:"source_hash,omitempty"`
+	Target     Target   `json:"target"`
+	SourceHash string   `json:"source_hash,omitempty"`
+	StateArgs  []string `json:"state_args,omitempty"`
 }
 
 func (b Binding) ScopeDigest(digest string) string {
@@ -224,7 +225,7 @@ func (b Binding) ScopeDigest(digest string) string {
 func (b Binding) UnscopeDigest(token string) (string, error) {
 	_, raw, ok := strings.Cut(token, ".")
 	if !ok || raw == "" || b.ScopeDigest(raw) != token {
-		return "", errors.New("plan digest belongs to another target, machine or source snapshot; read --plan again")
+		return "", errors.New("plan digest belongs to another target, machine, remote state or source snapshot; read --plan again")
 	}
 	return raw, nil
 }

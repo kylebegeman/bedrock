@@ -1,6 +1,6 @@
 loom
 target loom, resume
- 1 prepare: write the manifest and preserve its initialization scripts
+ 1 prepare: write the manifest and preserve its initialization scripts for revision r1, secret version 0, manifest ad93d073853f2c80af1f9f472ec426a0b29a76fba8cd1f547d4759a2dccd173e
  2 snapshot: pause writers, dump and snapshot consistent data into bucket lane-loom, then resume (30m limit)
  3 retention: keep 7 daily, 4 weekly and 6 monthly snapshots
 bedrock

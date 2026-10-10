@@ -58,7 +58,7 @@ func (g GC) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, error)
 		return nil, err
 	}
 	defer e.Close()
-	keep, err := keptRevisions(ctx, g.Store)
+	keep, err := gcResourcesToKeep(ctx, g.Store)
 	if err != nil {
 		return nil, err
 	}
@@ -82,12 +82,12 @@ func (g GC) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, error)
 
 // connect opens Docker and works out, at apply time, which revisions stay:
 // a deploy may have finished between the plan and this step.
-func (g GC) connect(ctx context.Context) (*docker.Engine, map[string]bool, error) {
+func (g GC) connect(ctx context.Context) (*docker.Engine, *gcRetention, error) {
 	e, err := docker.Connect(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	keep, err := keptRevisions(ctx, g.Store)
+	keep, err := gcResourcesToKeep(ctx, g.Store)
 	if err != nil {
 		e.Close()
 		return nil, nil, err
@@ -183,6 +183,10 @@ func (g GC) forgetStep() kernel.Step {
 	return kernel.Step{
 		Name: "forget", Change: "forget retired revisions older than the last five",
 		Apply: func(ctx context.Context, out io.Writer) error {
+			keep, err := gcResourcesToKeep(ctx, g.Store)
+			if err != nil {
+				return err
+			}
 			apps, err := g.Store.Apps(ctx)
 			if err != nil {
 				return err
@@ -194,7 +198,7 @@ func (g GC) forgetStep() kernel.Step {
 				}
 				var old []state.Revision
 				for _, r := range revs {
-					if r.Status == state.RevisionRetired || r.Status == state.RevisionFailed {
+					if (r.Status == state.RevisionRetired || r.Status == state.RevisionFailed) && !keep.revisions[r.App+"/"+r.ID] {
 						old = append(old, r)
 					}
 				}
@@ -210,21 +214,57 @@ func (g GC) forgetStep() kernel.Step {
 	}
 }
 
-// keptRevisions returns "app/revision" for every active or previous revision.
-func keptRevisions(ctx context.Context, store *state.Store) (map[string]bool, error) {
-	keep := map[string]bool{}
-	apps, err := store.Apps(ctx)
+// gcRetention keeps both revision authority and image references. Restored
+// images can retain their original source labels while a new target revision
+// records their immutable image IDs.
+type gcRetention struct {
+	revisions map[string]bool
+	images    map[string]bool
+}
+
+// gcResourcesToKeep protects live rollback choices, unfinished target
+// migrations, and the code paired with each unconsumed data checkpoint.
+func gcResourcesToKeep(ctx context.Context, store *state.Store) (*gcRetention, error) {
+	keep := &gcRetention{revisions: map[string]bool{}, images: map[string]bool{}}
+	boundaries, err := store.ReleaseBoundaries(ctx, "")
 	if err != nil {
 		return nil, err
 	}
-	for _, a := range apps {
-		revs, err := store.Revisions(ctx, a.Name)
+	for _, b := range boundaries {
+		if !fullSnapshotID.MatchString(b.Snapshot) || b.PreviousRevision == "" {
+			continue
+		}
+		switch b.Status {
+		case state.ReleasePrepared, state.ReleaseStarted, state.ReleaseCompleted, state.ReleaseFailed, state.ReleaseRestoring:
+			keep.revisions[b.App+"/"+b.PreviousRevision] = true
+		}
+	}
+	// A destination that has only staged revisions has no active app row yet.
+	apps, err := store.AppNames(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, app := range apps {
+		record, err := readMigration(store.Path(), app)
+		if err != nil {
+			return nil, err
+		}
+		if record != nil && record.Role == "target" && record.Phase != "cutover" {
+			keep.revisions[app+"/"+record.TargetRevision] = true
+		}
+		revs, err := store.Revisions(ctx, app)
 		if err != nil {
 			return nil, err
 		}
 		for _, r := range revs {
+			key := r.App + "/" + r.ID
 			if r.Status == state.RevisionActive || r.Status == state.RevisionPrevious {
-				keep[r.App+"/"+r.ID] = true
+				keep.revisions[key] = true
+			}
+			if keep.revisions[key] {
+				for _, ref := range r.Images {
+					keep.images[ref] = true
+				}
 			}
 		}
 	}
@@ -233,7 +273,7 @@ func keptRevisions(ctx context.Context, store *state.Store) (map[string]bool, er
 
 // staleContainers are bedrock's containers that belong to a revision nobody
 // keeps. Containers without a revision label (the edge, the registry) stay.
-func staleContainers(ctx context.Context, e *docker.Engine, keep map[string]bool) ([]docker.Info, error) {
+func staleContainers(ctx context.Context, e *docker.Engine, keep *gcRetention) ([]docker.Info, error) {
 	owned, err := e.Owned(ctx)
 	if err != nil {
 		return nil, err
@@ -241,7 +281,7 @@ func staleContainers(ctx context.Context, e *docker.Engine, keep map[string]bool
 	var stale []docker.Info
 	for _, c := range owned {
 		rev := c.Labels[docker.LabelRevision]
-		if rev == "" || keep[c.Labels[docker.LabelApp]+"/"+rev] {
+		if rev == "" || keep.revisions[c.Labels[docker.LabelApp]+"/"+rev] {
 			continue
 		}
 		stale = append(stale, c)
@@ -251,7 +291,7 @@ func staleContainers(ctx context.Context, e *docker.Engine, keep map[string]bool
 }
 
 // staleImages are images bedrock built for revisions nobody keeps.
-func staleImages(ctx context.Context, e *docker.Engine, keep map[string]bool) ([]docker.Image, error) {
+func staleImages(ctx context.Context, e *docker.Engine, keep *gcRetention) ([]docker.Image, error) {
 	images, err := e.OwnedImages(ctx)
 	if err != nil {
 		return nil, err
@@ -259,10 +299,19 @@ func staleImages(ctx context.Context, e *docker.Engine, keep map[string]bool) ([
 	var stale []docker.Image
 	for _, img := range images {
 		rev := img.Labels[docker.LabelRevision]
-		if rev == "" || keep[img.Labels[docker.LabelApp]+"/"+rev] {
+		if rev == "" || keep.revisions[img.Labels[docker.LabelApp]+"/"+rev] || keep.images[img.ID] {
 			continue
 		}
-		stale = append(stale, img)
+		referenced := false
+		for _, tag := range img.Tags {
+			if keep.images[tag] {
+				referenced = true
+				break
+			}
+		}
+		if !referenced {
+			stale = append(stale, img)
+		}
 	}
 	sort.Slice(stale, func(i, j int) bool { return stale[i].Describe() < stale[j].Describe() })
 	return stale, nil

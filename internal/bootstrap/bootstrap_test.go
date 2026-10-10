@@ -13,8 +13,10 @@ import (
 
 	"filippo.io/age"
 	"github.com/kylebegeman/bedrock/internal/host"
+	"github.com/kylebegeman/bedrock/internal/integration"
 	"github.com/kylebegeman/bedrock/internal/kernel"
 	"github.com/kylebegeman/bedrock/internal/remote"
+	"github.com/kylebegeman/bedrock/internal/secrets"
 	"github.com/kylebegeman/bedrock/internal/state"
 )
 
@@ -159,5 +161,61 @@ func TestProfilesRejectUnknownVersionFieldsAndUnpinnedBuilds(t *testing.T) {
 		if _, err := Load(path); err == nil {
 			t.Fatalf("accepted %s", body)
 		}
+	}
+}
+
+func TestBootstrapApprovalBindsConnectionSettings(t *testing.T) {
+	def, in, _ := bootstrapFixture(t)
+	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	reg := kernel.Registry{}
+	reg.Add(def)
+	engine := kernel.New(store, reg, "test")
+	raw, _ := json.Marshal(in)
+	first, err := engine.PlanOnly(context.Background(), Kind, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Target.Port = 2222
+	raw, _ = json.Marshal(in)
+	changed, err := engine.PlanOnly(context.Background(), Kind, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Digest == changed.Digest {
+		t.Fatal("connection change retained bootstrap approval")
+	}
+}
+
+func TestBootstrapRejectsAnotherStoreWithTheSameSecretVersion(t *testing.T) {
+	def, in, _ := bootstrapFixture(t)
+	makeSource := func(host string) *secrets.Store {
+		store := secrets.DefaultStore(t.TempDir())
+		if _, _, _, err := store.EnsureKey(); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := integration.Set(store, "email", map[string]string{"smtp_host": host, "smtp_port": "1025", "from": "fixture@example.com", "to": "owner@example.com"}); err != nil {
+			t.Fatal(err)
+		}
+		return store
+	}
+	def.Secrets = makeSource("smtp.first.invalid")
+	in.Profile.Integrations = []string{"email"}
+	in.SecretsVersion, _ = def.Secrets.Current(integration.App)
+	in.SecretsSHA256, _ = def.Secrets.SealedVersionSHA256(integration.App, in.SecretsVersion)
+	raw, _ := json.Marshal(in)
+	if _, err := def.Plan(context.Background(), raw); err != nil {
+		t.Fatal(err)
+	}
+	def.Secrets = makeSource("smtp.second.invalid")
+	version, _ := def.Secrets.Current(integration.App)
+	if version != in.SecretsVersion {
+		t.Fatal("fixture must use the same version number")
+	}
+	if _, err := def.Plan(context.Background(), raw); err == nil || !strings.Contains(err.Error(), "integration source changed") {
+		t.Fatal("different source store accepted a pinned bootstrap")
 	}
 }

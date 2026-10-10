@@ -103,6 +103,14 @@ func (d Deploy) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 	if err != nil {
 		return nil, err
 	}
+	if d.Store != nil {
+		if err := CheckMigrationAccess(d.Store.Path(), m.App); err != nil {
+			return nil, err
+		}
+		if err := checkReleaseStoreAccess(ctx, d.Store, m.App); err != nil {
+			return nil, err
+		}
+	}
 	if len(m.ManagedHosts()) > 0 {
 		if _, err := integration.LoadCloudflare(d.Secrets); err != nil {
 			return nil, errNoCloudflare(m.App, err)
@@ -456,7 +464,7 @@ func probeReady(ctx context.Context, e *docker.Engine, container string, info *d
 		return false, "no network address yet"
 	}
 	if w.Health != nil && w.Health.Path != "" {
-		resp, err := (&http.Client{Timeout: 5 * time.Second}).Get(fmt.Sprintf("http://%s:%d%s", ip, port, w.Health.Path))
+		resp, err := (&http.Client{Timeout: 5 * time.Second, CheckRedirect: directCheckRedirect}).Get(fmt.Sprintf("http://%s:%d%s", ip, port, w.Health.Path))
 		if err != nil {
 			return false, err.Error()
 		}
@@ -729,7 +737,17 @@ func runCheckDirect(ctx context.Context, e checkInspector, m *manifest.Manifest,
 		return err
 	}
 	req.Host = u.Host
-	return evaluateCheck(c, &http.Client{Timeout: within}, req, within)
+	return evaluateCheck(c, &http.Client{Timeout: within, CheckRedirect: directCheckRedirect}, req, within)
+}
+
+func directCheckRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("direct check stopped after 10 redirects")
+	}
+	if len(via) == 0 || req.URL.Scheme != via[0].URL.Scheme || req.URL.Host != via[0].URL.Host {
+		return errors.New("direct check refused a redirect outside the checked container")
+	}
+	return nil
 }
 
 func evaluateCheck(c manifest.Check, client *http.Client, req *http.Request, within time.Duration) error {
@@ -840,6 +858,8 @@ type RollbackInput struct {
 	App string `json:"app"`
 	// Revision is the one to return to; empty means the previous one.
 	Revision string `json:"revision,omitempty"`
+	// RestoreData is an exact retained release checkpoint. It explicitly replaces data.
+	RestoreData string `json:"restore_data,omitempty"`
 }
 
 // Kind implements kernel.Definition.
@@ -852,8 +872,36 @@ func (r Rollback) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, 
 		return nil, fmt.Errorf("rollback input: %w", err)
 	}
 	store := r.Deploy.Store
+	if in.App == "" {
+		return nil, errors.New("which app?")
+	}
+	if store != nil {
+		if err := CheckMigrationAccess(store.Path(), in.App); err != nil {
+			return nil, err
+		}
+	}
 	var rev *state.Revision
 	var err error
+	// The checkpoint pins the target even when "previous" changes after an
+	// interrupted activation. A retry must restore and start the same revision.
+	if in.RestoreData != "" {
+		if !fullSnapshotID.MatchString(in.RestoreData) {
+			return nil, errors.New("--restore-data requires the full 64-character checkpoint identity")
+		}
+		boundaries, err := store.ReleaseBoundaries(ctx, in.App)
+		if err != nil {
+			return nil, err
+		}
+		for _, b := range boundaries {
+			if b.Snapshot == in.RestoreData && b.PreviousRevision != "" {
+				if in.Revision != "" && in.Revision != b.PreviousRevision {
+					return nil, errors.New("checkpoint belongs to a different rollback revision")
+				}
+				in.Revision = b.PreviousRevision
+				break
+			}
+		}
+	}
 	if in.Revision == "" {
 		rev, err = store.RevisionWithStatus(ctx, in.App, state.RevisionPrevious)
 		if err != nil {
@@ -868,14 +916,69 @@ func (r Rollback) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, 
 			return nil, fmt.Errorf("revision %s of %s: %w", in.Revision, in.App, err)
 		}
 	}
-	if rev.Status == state.RevisionActive {
+	if rev.Status == state.RevisionActive && in.RestoreData == "" {
 		return nil, fmt.Errorf("%s is already the active revision of %s", rev.ID, in.App)
 	}
 	var m manifest.Manifest
 	if err := json.Unmarshal(rev.Manifest, &m); err != nil {
 		return nil, err
 	}
-	return r.Deploy.rollout(ctx, &m, rev.ID, nil)
+	unsafe, err := unsafeReleaseBoundaries(ctx, store, rev)
+	if err != nil {
+		return nil, err
+	}
+	var checkpoint *state.ReleaseBoundary
+	if in.RestoreData != "" {
+		if !fullSnapshotID.MatchString(in.RestoreData) {
+			return nil, errors.New("--restore-data requires the full 64-character checkpoint identity")
+		}
+		boundaries, err := store.ReleaseBoundaries(ctx, in.App)
+		if err != nil {
+			return nil, err
+		}
+		for i := range boundaries {
+			b := &boundaries[i]
+			if b.Snapshot == in.RestoreData && b.PreviousRevision == rev.ID {
+				checkpoint = b
+				break
+			}
+		}
+		if checkpoint == nil {
+			return nil, errors.New("checkpoint is not the retained pre-release data for the requested revision")
+		}
+		if checkpoint.Status == state.ReleaseRestored && len(unsafe) > 0 {
+			later := unsafe[0]
+			for _, boundary := range unsafe[1:] {
+				if boundary.StartedAt.Before(later.StartedAt) {
+					later = boundary
+				}
+			}
+			if later.Snapshot != "" {
+				return nil, fmt.Errorf("checkpoint %s was already restored; release %s changed data again; review the newer matching checkpoint %s before retrying --restore-data", checkpoint.Snapshot, later.Revision, later.Snapshot)
+			}
+			return nil, fmt.Errorf("checkpoint %s was already restored; release %s changed data again without a retained checkpoint; recover through a separately verified backup", checkpoint.Snapshot, later.Revision)
+		}
+		for _, boundary := range unsafe {
+			if boundary.StartedAt.Before(checkpoint.StartedAt) {
+				return nil, fmt.Errorf("checkpoint %s was captured after unsafe data release %s; choose the checkpoint before the first incompatible transition", checkpoint.Snapshot, boundary.Revision)
+			}
+		}
+	} else {
+		if err := checkReleaseStoreAccess(ctx, store, in.App); err != nil {
+			return nil, err
+		}
+		if len(unsafe) > 0 {
+			return nil, unsafeRollbackError(in.App, unsafe)
+		}
+	}
+	plan, err := r.Deploy.rollout(ctx, &m, rev.ID, nil)
+	if err != nil {
+		return nil, err
+	}
+	if checkpoint != nil {
+		plan.Steps = append([]kernel.Step{rollbackCheckpointStep(r.Deploy, rev, *checkpoint)}, plan.Steps...)
+	}
+	return plan, nil
 }
 
 // publicTransport resolves names the way the world does, through a public

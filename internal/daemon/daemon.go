@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +24,7 @@ import (
 	"github.com/kylebegeman/bedrock/internal/edge"
 	"github.com/kylebegeman/bedrock/internal/gitdeploy"
 	"github.com/kylebegeman/bedrock/internal/host"
+	"github.com/kylebegeman/bedrock/internal/integration"
 	"github.com/kylebegeman/bedrock/internal/kernel"
 	"github.com/kylebegeman/bedrock/internal/manifest"
 	"github.com/kylebegeman/bedrock/internal/secrets"
@@ -62,7 +64,7 @@ func Registry(store *state.Store, sec *secrets.Store, socket, stateDir string) k
 		}
 		return p.CloudflareOnly(), err
 	})
-	reg.Add(host.Setup{Env: env, Socket: socket, Routes: func(ctx context.Context) ([]host.Route, error) {
+	setup := host.Setup{Env: env, Socket: socket, Routes: func(ctx context.Context) ([]host.Route, error) {
 		return routesOf(ctx, store)
 	}, EnsureEdge: func(ctx context.Context, out io.Writer) error {
 		e, err := docker.Connect(ctx)
@@ -78,7 +80,8 @@ func Registry(store *state.Store, sec *secrets.Store, socket, stateDir string) k
 			return err
 		}
 		return app.ReloadEdge(ctx, store, sec)
-	}})
+	}}
+	reg.Add(setup)
 	reg.Add(host.Maintain{Env: env, Socket: socket})
 	reg.Add(host.Upgrade{Env: env, Socket: socket, Store: store})
 	deploy := app.Deploy{Store: store, Secrets: sec, StateDir: stateDir, Addresses: func(ctx context.Context) []string { return host.Addresses(ctx, env) }, CloudflareOnly: cloudflareOnly}
@@ -93,9 +96,44 @@ func Registry(store *state.Store, sec *secrets.Store, socket, stateDir string) k
 	reg.Add(app.PreviewPrune{Remove: remove})
 	reg.Add(app.Point{Store: store, Secrets: sec, Addresses: addresses, CloudflareOnly: cloudflareOnly})
 	reg.Add(app.Drop{Store: store, Secrets: sec, Addresses: addresses})
-	reg.Add(app.Backup{Store: store, Secrets: sec, StateDir: stateDir, Hostname: hostname, Profile: host.ProfilePath})
+	backup := app.Backup{Store: store, Secrets: sec, StateDir: stateDir, Hostname: hostname, Profile: host.ProfilePath}
+	reg.Add(backup)
+	reg.Add(app.MoveCapture{Backup: backup})
+	reg.Add(app.MoveStage{Deploy: deploy, Hostname: hostname})
+	reg.Add(app.MoveTest{Deploy: deploy, Hostname: hostname})
+	reg.Add(app.MoveCutover{Deploy: deploy})
+	reg.Add(app.MoveResume{Store: store})
+	recovery := app.RecoverMachine{Store: store, Secrets: sec, StateDir: stateDir,
+		ApplyProfile: func(ctx context.Context, raw json.RawMessage, out io.Writer) error {
+			plan, err := setup.Plan(ctx, raw)
+			if err != nil {
+				return err
+			}
+			for _, step := range plan.Steps {
+				if err := step.Apply(ctx, out); err != nil {
+					return fmt.Errorf("recover host profile %s: %w", step.Name, err)
+				}
+			}
+			return nil
+		},
+		RecoverIntegrations: func(_ context.Context, source *secrets.Store, out io.Writer) error {
+			restored, err := integration.RecoverMissing(sec, source)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "Recovered %d missing integration or operational key groups; target configuration retained\n", len(restored))
+			return nil
+		},
+	}
+	reg.Add(recovery)
+	reg.Add(app.RecoverAbandon{Recovery: recovery})
+	reg.Add(app.RecoverCutover{Recovery: recovery, Addresses: addresses, CloudflareOnly: cloudflareOnly})
 	reg.Add(app.Drill{Store: store, Secrets: sec, StateDir: stateDir})
+	reg.Add(app.Rehearse{Store: store, Secrets: sec, StateDir: stateDir})
 	reg.Add(app.RestoreDef{Store: store, Secrets: sec, StateDir: stateDir})
+	for kind, definition := range reg {
+		reg[kind] = recoveryGuard{stateFile: store.Path(), definition: definition}
+	}
 	return reg
 }
 
@@ -135,6 +173,12 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 		return err
 	}
 	defer store.Close()
+	if err := app.EnforceMigrationFences(ctx, store.Path()); err != nil {
+		return fmt.Errorf("enforce migration fences: %w", err)
+	}
+	if err := app.EnforceReleaseRestores(ctx, store); err != nil {
+		return fmt.Errorf("enforce release restore fences: %w", err)
+	}
 	if err := app.RecoverBackupPauses(ctx, store.Path()); err != nil {
 		return fmt.Errorf("recover backup pauses: %w", err)
 	}

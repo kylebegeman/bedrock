@@ -3,7 +3,9 @@
 The lane runs operational proofs on a dedicated Linux machine, separately
 from provisioning it. A proof uses the checkout being tested, checks the
 result, and writes a report with commit, dirty-tree status, source-diff hash,
-OS, architecture, selected results, transcripts and failure diagnostics.
+a source-tree fingerprint including untracked inputs (excluding ignored build
+output and Python caches), OS, architecture, selected results, transcripts
+and failure diagnostics.
 A preflight failure is **blocked**, never a passing proof.
 
 The historical Hostinger machine became production. `hostinger.env` is no
@@ -52,7 +54,7 @@ To inspect an unsuccessful boot, use the exact container name printed by
 `lane/vm.sh up` with `docker logs`. The VM remains available after a failed
 proof for inspection. Remove it with `make lane-down` when finished.
 
-The local loopback VM proves `m1` and `m2`. Public certificate, external DNS
+The local loopback VM proves `m1`, `m2`, and `product`. Public certificate, external DNS
 and public webhook proofs require the dedicated externally reachable SSH
 machine described below. The runner refuses those scopes on the loopback
 VM and names the missing prerequisite.
@@ -90,6 +92,8 @@ locally created QEMU machine.
 
 | Proof | Behavior | Required fixtures/setup |
 | --- | --- | --- |
+| `transfer` | Two-host rehearsal/final/stage/cutover, durable source fence, clean encrypted machine recovery/private readiness/cutover, retained destination key/journal, deliberate source resume | Prepared disposable source plus `--target-config` for a separate clean Linux guest of the same architecture |
+| `product` | Pinned profile bootstrap, sealed integration transfer, connection/machine/source-bound approvals, preview retention, authenticated HTTPS checks, scratch release rehearsal, data-aware rollback, machine recovery rehearsal, source move fence/resume | Ubuntu/Debian and package/image downloads; provisions loopback fixtures; no public DNS |
 | `m1` | Daemon killed during a journaled operation; systemd restarts and resumes it | Fresh root SSH Linux/systemd machine |
 | `m2` | Host setup, doctor, reconcile, maintenance reboot, failed/good upgrade | Ubuntu/Debian and package downloads; runs independently of `m1` |
 | `m3` | Static/web deploys, certificates, revisions, rollback, failed check, DNS diagnosis | `m2`; public wildcard DNS to target, ports 80/443 reachable |
@@ -140,3 +144,63 @@ CI runs safeguard tests alongside normal checks. Its separate operational
 job boots a fresh QEMU guest, runs `m1`, uploads the proof report even on
 failure, and removes its owned VM. This checks daemon recovery on a real
 Linux kernel without external secrets, DNS, private repositories or a VPS.
+
+## Product workflow proof
+
+```sh
+lane/prove.sh --config /absolute/path/to/lane.env product
+```
+
+This proof builds private client and Linux binaries from the checkout. An
+existing installation is upgraded through the journaled compatibility and
+checkpoint workflow. A checksum-pinned profile then bootstraps the target and
+transfers a selected email integration encrypted to its own identity. The
+proof exercises remote source upload, read-only host preflight, stale source
+and wrong connection/machine approval refusals, preview pinning and pruning,
+and authenticated HTTPS checks against a guest-loopback fixture. A temporary
+fixture certificate is trusted only inside the disposable guest and removed
+when the proof exits.
+
+A loopback MinIO fixture holds actual restic backups. A candidate release
+changes a scratch-restored marker and passes its health check while live data
+and the active revision stay unchanged. A live incompatible release then
+proves that ordinary rollback is refused and an explicit retained checkpoint
+restores the original data. Exact machine recovery rehearses recorded images
+and volume data without changing live app state and checks scratch cleanup.
+Finally, an app handoff proves the persistent source write fence and deliberate
+resume after confirming destination writers have stopped.
+
+The fixture apps are `hello`, `notes`, and `lane-preview`; their state is
+deliberately changed by this proof. It requires no private app sources,
+production credentials, public DNS, certificate authority or paid provider.
+It does not prove public route/certificate behavior or a clean cross-host
+recovery and move cutover. Those require a separate second-target proof.
+
+## Two-host transfer proof
+
+```sh
+lane/prove.sh --config /path/to/source/lane.env \
+  --target-config /path/to/clean-target/lane.env transfer
+```
+
+Create the second guest in a separate `LANE_VM_STATE` directory. Both
+connections pass the same pinned-host-key and disposable-identity guards;
+the runner refuses identical identities or different architectures. The
+source must already have working host setup. The target is bootstrapped
+from a pinned binary and keeps its own encryption identity.
+
+The proof opens guest-loopback MinIO access through two pinned SSH tunnels,
+transfers the storage integration encrypted to the destination recipient,
+and stops only tunnel processes it started. It exercises actual destination
+rehearsal, exact final snapshot staging, explicit writer cutover, durable
+source fencing across a daemon restart, and deliberate resume after removing
+destination writers. It then recovers an exact machine snapshot onto the
+clean target, checks inactive imported state, retained target journal and
+identity, private readiness without published ports, and explicit cutover.
+The source identity streams directly between pinned SSH connections and is
+never printed or stored on the client. Fixture destination apps are removed
+before source writers are deliberately resumed.
+
+Worker fixtures and real volume markers prove data and write-authority
+behavior. Public DNS, traffic routing and certificate issuance remain
+outside this proof. Both guests remain available for inspection afterward.

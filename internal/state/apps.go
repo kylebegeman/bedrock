@@ -252,9 +252,9 @@ func (s *Store) ActiveRevisions(ctx context.Context) ([]Revision, error) {
 	return out, rows.Err()
 }
 
-// RemoveApp forgets an app: its revisions, its job runs, its signals, its
-// incident and its webhook. Its backup runs stay, because they say where
-// its data went.
+// RemoveApp forgets an app: its revisions, release boundaries, job runs,
+// signals, incident and webhook. Release fences cannot survive their removed
+// revision history. Backup runs stay, because they say where its data went.
 func (s *Store) RemoveApp(ctx context.Context, app string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -263,6 +263,7 @@ func (s *Store) RemoveApp(ctx context.Context, app string) error {
 	defer tx.Rollback()
 	for _, q := range []struct{ query, arg string }{
 		{`DELETE FROM revisions WHERE app = ?`, app},
+		{`DELETE FROM release_boundaries WHERE app = ?`, app},
 		{`DELETE FROM apps WHERE name = ?`, app},
 		{`DELETE FROM job_runs WHERE app = ?`, app},
 		{`DELETE FROM signals WHERE app = ?`, app},

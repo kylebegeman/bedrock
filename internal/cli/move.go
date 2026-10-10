@@ -19,8 +19,29 @@ func newMove(a *app) *cobra.Command {
 		Short: "Move an app, and its data, to another machine.",
 		Long: `Move an app, and its data, to another machine.
 
-A move is two commands, one on each machine, with the backup bucket as the
-channel between them. Both machines must be pointed at the same storage: the
+The staged workflow first rehearses a capture, then freezes source writers for
+an exact final snapshot. The target restores and checks that snapshot before
+an explicit write-authority and DNS cutover.
+
+  on the source: bedrock move rehearse <app> --to target-name > rehearsal.json
+  on the target: bedrock move test <source-dir> --handoff rehearsal.json
+  on the source: bedrock move final <app> --to target-name > final.json
+  on the target: bedrock move stage <source-dir> --handoff final.json
+  on the target: bedrock move cutover <app>
+
+The source stays frozen after final capture, including after a host or daemon
+restart. Resume it only deliberately, after stopping destination writers:
+
+  on the source: bedrock move resume <app> --target-stopped
+
+Destination writes are not included in the source snapshot. Returning those
+writes requires a reverse move; an old source is not a lossless rollback.
+Import the app's original secrets with move secrets before staging.
+
+The older out/in commands remain for manual copy workflows. Their source
+keeps running after capture and can accept writes the copied snapshot lacks.
+
+The backup bucket is the channel between the machines. Both machines must be pointed at the same storage: the
 same bucket prefix and the same backup password. A machine reading its own
 bucket instead of the source's finds nothing there, which looks like an app
 with no data rather than like a failure.
@@ -31,10 +52,10 @@ with no data rather than like a failure.
                   bedrock dns point <host>          # once it answers
   on the source:  bedrock remove <app>              # after a rollback window
 
-The source keeps running and keeps serving throughout. Nothing is torn down
-until you tear it down, which is what makes the window a real one.`,
+These legacy commands provide a manual copy, without a durable source write
+fence or automatic cutover. Quiesce writers before a final manual transfer.`,
 	}
-	cmd.AddCommand(newMoveOut(a), newMoveIn(a), newMoveSecrets(a))
+	cmd.AddCommand(newMoveOut(a), newMoveIn(a), newMoveSecrets(a), newMoveCapture(a, false), newMoveCapture(a, true), newMoveStage(a), newMoveTest(a), newMoveCutover(a), newMoveResume(a))
 	return cmd
 }
 
@@ -51,8 +72,8 @@ func newMoveOut(a *app) *cobra.Command {
 			"applied like any other operation; --digest names its plan. The handoff\n" +
 			"goes to standard output alone and carries no secrets, so it can be\n" +
 			"redirected to a file, read, and copied to the other machine.\n\n" +
-			"The app is left running. A move is only safe because the source is still\n" +
-			"there to go back to.",
+			"The app is left running and may accept writes after this snapshot. Use\n" +
+			"move final and move stage when you need a durable final write fence.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -234,6 +255,12 @@ terminal, a log or a shell history on either machine.`,
 			return err
 		},
 	}
+	a.guardSecretMutation(cmd, func(args []string) string {
+		if accept {
+			return args[0]
+		}
+		return ""
+	})
 	cmd.Flags().StringVar(&recipient, "to", "", "the target machine's recipient, from 'bedrock secret recipient' there")
 	cmd.Flags().BoolVar(&accept, "accept", false, "read a sealed bundle from standard input and store it here")
 	return cmd

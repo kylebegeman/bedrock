@@ -31,6 +31,9 @@ const DataRoot = "/data"
 // Tag marks snapshots bedrock made.
 const Tag = "bedrock"
 
+// ReleaseCheckpointTag keeps explicit rollback points beyond ordinary retention.
+const ReleaseCheckpointTag = "bedrock-release-checkpoint"
+
 // Repo is one repository and how to open it.
 type Repo struct {
 	// Repository is restic's repository string, such as b2:bucket:/ .
@@ -47,6 +50,8 @@ type Runner struct {
 	Repo   Repo
 	// Owner is the app the containers are labeled with.
 	Owner string
+	// BackupTags are additional tags applied when capturing a snapshot.
+	BackupTags []string
 	// Log receives restic's lines, when set.
 	Log func(line string)
 }
@@ -237,7 +242,11 @@ const ListTimeout = 5 * time.Minute
 
 // Backup snapshots the mounted paths under a host name.
 func (r Runner) Backup(ctx context.Context, host string, mounts []string, paths ...string) (*Summary, error) {
-	args := append([]string{"backup", "--json", "--host", host, "--tag", Tag, "--one-file-system=false"}, paths...)
+	args := []string{"backup", "--json", "--host", host, "--tag", Tag, "--one-file-system=false"}
+	for _, tag := range r.BackupTags {
+		args = append(args, "--tag", tag)
+	}
+	args = append(args, paths...)
 	lines, err := r.run(ctx, mounts, args...)
 	if err != nil {
 		return nil, err
@@ -293,7 +302,7 @@ func (r Runner) Latest(ctx context.Context, host string) (*Snapshot, error) {
 // Forget applies the retention policy and prunes what it freed. It
 // returns how many snapshots were removed.
 func (r Runner) Forget(ctx context.Context, host string, keep Keep) (int, error) {
-	args := []string{"forget", "--json", "--host", host, "--tag", Tag, "--prune"}
+	args := []string{"forget", "--json", "--host", host, "--tag", Tag, "--prune", "--keep-tag", ReleaseCheckpointTag}
 	if keep.Daily > 0 {
 		args = append(args, "--keep-daily", fmt.Sprint(keep.Daily))
 	}

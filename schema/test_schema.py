@@ -87,6 +87,18 @@ class ManifestSchemaTests(unittest.TestCase):
             with self.subTest(workload=workload):
                 self.assert_invalid({"app": "demo", "workloads": {"work": workload}})
 
+    def test_release_data_policy_requires_a_release_workload_and_known_contract(self) -> None:
+        manifest = {"app": "demo", "workloads": {"release": {"kind": "release", "image": "app"}},
+                    "release": {"data_compatibility": "restore-required"}}
+        self.assert_valid(manifest)
+        manifest["release"]["data_compatibility"] = "backward-compatible"
+        self.assert_valid(manifest)
+        manifest["release"]["data_compatibility"] = "unknown"
+        self.assert_invalid(manifest)
+        manifest["release"]["data_compatibility"] = "backward-compatible"
+        manifest["workloads"]["release"]["kind"] = "worker"
+        self.assert_invalid(manifest)
+
     def test_preview_routes_require_sign_in(self) -> None:
         manifest = {"app": "demo-pr-nav", "preview": {"of": "demo", "branch": "nav", "pinned": True},
                     "workloads": {"web": {"kind": "web", "image": "app", "port": 8080,

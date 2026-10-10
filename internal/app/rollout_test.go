@@ -137,7 +137,7 @@ func TestTheDeployPlanMakesSecretsBeforeDataAndReleasesBeforeStart(t *testing.T)
 	for _, s := range plan.Steps {
 		names = append(names, s.Name)
 	}
-	want := []string{"record", "edge", "dns", "secrets", "data", "build-core-api", "pull-objects-setup", "build-runner", "release", "start", "ready", "switch", "certificates", "retire"}
+	want := []string{"record", "edge", "dns", "secrets", "data", "build-core-api", "pull-objects-setup", "build-runner", "release-checkpoint", "release", "start", "ready", "switch", "certificates", "retire"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("steps\n %v\nwant\n %v", names, want)
 	}

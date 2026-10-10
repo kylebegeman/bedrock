@@ -113,7 +113,20 @@ func (b Backup) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 		return nil, fmt.Errorf("backups need the storage integration: %w", err)
 	}
 	if in.App == manifest.ReservedApp {
+		if b.Store != nil {
+			if err := checkReleaseStoreAccess(ctx, b.Store, ""); err != nil {
+				return nil, err
+			}
+		}
 		return b.machinePlan(st)
+	}
+	if b.Store != nil {
+		if err := CheckMigrationAccess(b.Store.Path(), in.App); err != nil {
+			return nil, err
+		}
+		if err := checkReleaseStoreAccess(ctx, b.Store, in.App); err != nil {
+			return nil, err
+		}
 	}
 	rev, err := b.Store.RevisionWithStatus(ctx, in.App, state.RevisionActive)
 	if err != nil {
@@ -171,7 +184,7 @@ func (b Backup) appPlan(st *integration.Storage, rev *state.Revision, m *manifes
 	}
 	return &kernel.Plan{Target: app, Recovery: kernel.Resume, Steps: []kernel.Step{
 		x.appPrepareStep(rev, m),
-		x.appSnapshotStep(m),
+		x.appSnapshotStep(rev, m),
 		x.retentionStep(),
 	}}, nil
 }
@@ -229,6 +242,7 @@ func (x *backingUp) appPrepareStep(rev *state.Revision, m *manifest.Manifest) ke
 	if m.PostgresVersion() != "" {
 		change += " and preserve its initialization scripts"
 	}
+	change += fmt.Sprintf(" for revision %s, secret version %d, manifest %s", rev.ID, rev.SecretsVersion, backupManifestHash(rev.Manifest))
 	return kernel.Step{
 		Name: "prepare", Change: change,
 		Apply: func(ctx context.Context, out io.Writer) error {
@@ -263,11 +277,14 @@ func (x *backingUp) appPrepareStep(rev *state.Revision, m *manifest.Manifest) ke
 	}
 }
 
-func (x *backingUp) appSnapshotStep(m *manifest.Manifest) kernel.Step {
+func (x *backingUp) appSnapshotStep(rev *state.Revision, m *manifest.Manifest) kernel.Step {
 	app := x.target
 	return kernel.Step{
 		Name: "snapshot", Change: fmt.Sprintf("pause writers, dump and snapshot consistent data into bucket %s, then resume (30m limit)", x.bucket),
 		Apply: func(ctx context.Context, out io.Writer) error {
+			if err := checkReleaseStoreAccess(ctx, x.b.Store, app); err != nil {
+				return err
+			}
 			if err := x.run.begin(ctx); err != nil {
 				return err
 			}
@@ -284,12 +301,24 @@ func (x *backingUp) appSnapshotStep(m *manifest.Manifest) kernel.Step {
 				mounts = append(mounts, restic.VolumeMount(docker.VolumeName(app, v), v, true))
 			}
 			err = withQuiescedWriters(ctx, e, x.b.Store.Path(), m, out, func(ctx context.Context) error {
+				if err := checkReleaseStoreAccess(ctx, x.b.Store, app); err != nil {
+					return err
+				}
 				if m.PostgresVersion() != "" {
 					if err := x.dump(ctx, e, m, out); err != nil {
 						return err
 					}
 				}
-				var err error
+				active, err := x.b.Store.RevisionWithStatus(ctx, app, state.RevisionActive)
+				if err != nil {
+					return err
+				}
+				if active == nil || active.ID != rev.ID || active.SecretsVersion != rev.SecretsVersion || backupManifestHash(active.Manifest) != backupManifestHash(rev.Manifest) {
+					return errors.New("the active revision changed after this backup was prepared; start a fresh app backup")
+				}
+				if err := writeAppBackupProvenance(x.staging, *rev, time.Now().UTC()); err != nil {
+					return err
+				}
 				x.summary, err = r.Backup(ctx, app, mounts, restic.DataRoot)
 				return err
 			})
@@ -326,6 +355,9 @@ func (x *backingUp) machinePrepareStep(hostname string) kernel.Step {
 	return kernel.Step{
 		Name: "prepare", Change: "copy the state store, the sealed secrets and the host profile",
 		Apply: func(ctx context.Context, out io.Writer) error {
+			if err := checkReleaseStoreAccess(ctx, x.b.Store, ""); err != nil {
+				return err
+			}
 			if err := x.run.begin(ctx); err != nil {
 				return err
 			}
@@ -335,7 +367,7 @@ func (x *backingUp) machinePrepareStep(hostname string) kernel.Step {
 			if err := b.Store.BackupTo(ctx, filepath.Join(x.staging, "state.db")); err != nil {
 				return x.run.fail(fmt.Errorf("copy the state store: %w", err))
 			}
-			if secretsDir := filepath.Join(b.StateDir, "secrets"); dirExists(secretsDir) {
+			if secretsDir := b.Secrets.Dir; dirExists(secretsDir) {
 				if out, err := exec.CommandContext(ctx, "cp", "-a", secretsDir, filepath.Join(x.staging, "secrets")).CombinedOutput(); err != nil {
 					return x.run.fail(fmt.Errorf("copy the secrets: %s", strings.TrimSpace(string(out))))
 				}
@@ -354,7 +386,10 @@ func (x *backingUp) machinePrepareStep(hostname string) kernel.Step {
 			if err := os.WriteFile(filepath.Join(x.staging, "machine.json"), append(info, '\n'), 0o600); err != nil {
 				return x.run.fail(err)
 			}
-			fmt.Fprintln(out, "state, secrets and profile copied")
+			if err := b.prepareMachineRecoveryCatalog(ctx, hostname, x.staging, out); err != nil {
+				return x.run.fail(err)
+			}
+			fmt.Fprintln(out, "state, secrets, profile and workload images copied")
 			return nil
 		},
 	}
@@ -364,6 +399,9 @@ func (x *backingUp) machineSnapshotStep() kernel.Step {
 	return kernel.Step{
 		Name: "snapshot", Change: fmt.Sprintf("snapshot them into bucket %s", x.bucket),
 		Apply: func(ctx context.Context, out io.Writer) error {
+			if err := checkReleaseStoreAccess(ctx, x.b.Store, ""); err != nil {
+				return err
+			}
 			if err := x.run.begin(ctx); err != nil {
 				return err
 			}
@@ -416,7 +454,7 @@ func (x *backingUp) retentionStep() kernel.Step {
 				}
 			}
 			s := x.summary
-			if err := x.run.done(ctx, state.BackupRun{Snapshot: short(s.SnapshotID), SnapshotAt: s.BackupStart, Files: s.TotalFiles, Bytes: s.TotalBytes, Detail: x.detail()}); err != nil {
+			if err := x.run.done(ctx, state.BackupRun{Snapshot: s.SnapshotID, SnapshotAt: s.BackupStart, Files: s.TotalFiles, Bytes: s.TotalBytes, Detail: x.detail()}); err != nil {
 				return err
 			}
 			_ = os.RemoveAll(x.staging)

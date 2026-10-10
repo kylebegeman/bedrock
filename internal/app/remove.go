@@ -2,12 +2,14 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -104,7 +106,38 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 		plan.Steps = append(plan.Steps, x.dataStep())
 	}
 	plan.Steps = append(plan.Steps, x.forgetStep())
+	reviewed := removalRevisionIdentity(revs)
+	names := make([]string, len(revs))
+	for i, rev := range revs {
+		names[i] = rev.ID
+	}
+	slices.Sort(names)
+	plan.Steps[0].Change += fmt.Sprintf("; reviewed revisions %s, identity %s", strings.Join(names, ", "), reviewed)
+	for i := range plan.Steps {
+		apply := plan.Steps[i].Apply
+		plan.Steps[i].Apply = func(ctx context.Context, out io.Writer) error {
+			current, err := r.Store.Revisions(ctx, in.App)
+			if err != nil {
+				return err
+			}
+			if removalRevisionIdentity(current) != reviewed {
+				return errors.New("app revision history changed after removal was reviewed; review removal again")
+			}
+			return apply(ctx, out)
+		}
+	}
 	return plan, nil
+}
+
+// Statuses change during removal, so bind immutable revision identity while
+// refusing to expand an approved removal to a later deployment of this name.
+func removalRevisionIdentity(revs []state.Revision) string {
+	identities := make([]string, len(revs))
+	for i, rev := range revs {
+		identities[i] = fmt.Sprintf("%s:%x", rev.ID, sha256.Sum256(rev.Manifest))
+	}
+	slices.Sort(identities)
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(identities, "\x00"))))
 }
 
 func (x *removal) unrouteStep() kernel.Step {
@@ -291,40 +324,41 @@ func (x *removal) forgetStep() kernel.Step {
 // bedrock made for it and, when asked, its sealed secrets. Its backup runs
 // stay, because they say where its data went.
 func forgetApp(ctx context.Context, store *state.Store, sec *secrets.Store, stateDir, app string, secretsToo bool, out io.Writer) error {
-	if err := store.RemoveApp(ctx, app); err != nil {
-		return err
-	}
-	for _, dir := range []string{"backups", "restore", "drills", "builds"} {
+	// Keep revision rows until every fallible cleanup finishes. Otherwise a
+	// retry loses its manifest and falls into a destructive --data purge.
+	for _, dir := range []string{"backups", "restore", "drills", "builds", "moves"} {
 		if err := os.RemoveAll(filepath.Join(stateDir, dir, app)); err != nil {
 			return err
 		}
 	}
-	if sec == nil {
-		return nil
+	if sec != nil {
+		own, _, err := sec.LoadCurrent(integration.App)
+		if err != nil {
+			return err
+		}
+		changes := map[string]*string{}
+		for _, name := range []string{integration.WebhookSecretName(app), integration.DeployKeyName(app)} {
+			if _, ok := own[name]; ok {
+				changes[name] = nil
+			}
+		}
+		if len(changes) > 0 {
+			if _, err := sec.SetAll(integration.App, changes); err != nil {
+				return err
+			}
+			fmt.Fprintln(out, "the webhook secret and deploy key made for it are gone")
+		}
+		if secretsToo {
+			if err := sec.RemoveApp(app); err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "%s's secrets forgotten\n", app)
+		}
 	}
-	own, _, err := sec.LoadCurrent(integration.App)
-	if err != nil {
+	if err := forgetMigration(store.Path(), app); err != nil {
 		return err
 	}
-	changes := map[string]*string{}
-	for _, name := range []string{integration.WebhookSecretName(app), integration.DeployKeyName(app)} {
-		if _, ok := own[name]; ok {
-			changes[name] = nil
-		}
-	}
-	if len(changes) > 0 {
-		if _, err := sec.SetAll(integration.App, changes); err != nil {
-			return err
-		}
-		fmt.Fprintln(out, "the webhook secret and deploy key made for it are gone")
-	}
-	if secretsToo {
-		if err := sec.RemoveApp(app); err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "%s's secrets forgotten\n", app)
-	}
-	return nil
+	return store.RemoveApp(ctx, app)
 }
 
 func recordsNote(m manifest.Manifest) string {

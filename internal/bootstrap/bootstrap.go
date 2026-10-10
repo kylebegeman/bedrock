@@ -39,6 +39,7 @@ type Input struct {
 	Arch           string        `json:"arch"`
 	BinaryPath     string        `json:"binary_path,omitempty"`
 	SecretsVersion int           `json:"secrets_version,omitempty"`
+	SecretsSHA256  string        `json:"secrets_sha256,omitempty"`
 }
 type Definition struct {
 	Transport remote.Transport
@@ -125,6 +126,13 @@ func (d Definition) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 		if err := integration.ValidateVersion(d.Secrets, in.Profile.Integrations, in.SecretsVersion); err != nil {
 			return nil, err
 		}
+		digest, err := d.Secrets.SealedVersionSHA256(integration.App, in.SecretsVersion)
+		if err != nil {
+			return nil, err
+		}
+		if !checksumPattern.MatchString(in.SecretsSHA256) || digest != in.SecretsSHA256 {
+			return nil, errors.New("bootstrap integration source changed or lacks a pinned ciphertext identity; prepare a new plan with the original source store")
+		}
 	}
 	command := func(ctx context.Context, args []string, input io.Reader, out io.Writer) error {
 		return d.Transport.Run(ctx, in.Target, args, input, out, out)
@@ -133,7 +141,7 @@ func (d Definition) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 	add := func(name, change string, apply func(context.Context, io.Writer) error) {
 		plan.Steps = append(plan.Steps, kernel.Step{Name: name, Change: change, Apply: apply})
 	}
-	add("install", fmt.Sprintf("install bedrock %s SHA-256 %s on %s (%s, linux_%s)", in.Profile.Bedrock.Version, checksum, in.Target.SSH, in.Target.MachineID, in.Arch), func(ctx context.Context, out io.Writer) error {
+	add("install", fmt.Sprintf("install bedrock %s SHA-256 %s on %s (%s, linux_%s)", in.Profile.Bedrock.Version, checksum, in.Target.SSH, in.Target.MachineID, in.Arch)+"; connection "+(remote.Binding{Target: in.Target}).ScopeDigest("bootstrap"), func(ctx context.Context, out io.Writer) error {
 		path := in.BinaryPath
 		if path == "" {
 			if err := os.MkdirAll(d.CacheDir, 0o700); err != nil {
@@ -220,10 +228,17 @@ printf 'Pinned binary installed and checksum verified.\n'`
 		return nil
 	})
 	if len(in.Profile.Integrations) > 0 {
-		add("integrations", fmt.Sprintf("transfer only %s from sealed source version %d", strings.Join(in.Profile.Integrations, ", "), in.SecretsVersion), func(ctx context.Context, out io.Writer) error {
+		add("integrations", fmt.Sprintf("transfer only %s from sealed source version %d SHA-256 %s", strings.Join(in.Profile.Integrations, ", "), in.SecretsVersion, in.SecretsSHA256), func(ctx context.Context, out io.Writer) error {
 			var public bytes.Buffer
 			if err := d.Transport.Run(ctx, in.Target, []string{"secret", "recipient"}, nil, &public, io.Discard); err != nil {
 				return err
+			}
+			digest, err := d.Secrets.SealedVersionSHA256(integration.App, in.SecretsVersion)
+			if err != nil {
+				return err
+			}
+			if digest != in.SecretsSHA256 {
+				return errors.New("pinned bootstrap integration source changed")
 			}
 			sealed, err := integration.ExportVersion(d.Secrets, in.Profile.Integrations, strings.TrimSpace(public.String()), in.SecretsVersion)
 			if err != nil {

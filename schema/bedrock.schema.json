@@ -299,6 +299,35 @@
         {
           "if": {
             "properties": {
+              "release": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "release"
+            ]
+          },
+          "then": {
+            "properties": {
+              "workloads": {
+                "not": {
+                  "additionalProperties": {
+                    "properties": {
+                      "kind": {
+                        "not": {
+                          "const": "release"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
               "preview": {
                 "type": "object"
               }
@@ -385,6 +414,16 @@
           "anyOf": [
             {
               "$ref": "#/$defs/Preview"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "release": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReleasePolicy"
             },
             {
               "type": "null"
@@ -578,6 +617,23 @@
       },
       "required": [
         "port"
+      ],
+      "type": "object"
+    },
+    "ReleasePolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "data_compatibility": {
+          "description": "Whether older code can use data changed by release jobs; restore-required blocks rollback until a compatible checkpoint is restored.",
+          "enum": [
+            "backward-compatible",
+            "restore-required"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "data_compatibility"
       ],
       "type": "object"
     },

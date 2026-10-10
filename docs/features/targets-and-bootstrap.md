@@ -26,10 +26,10 @@ configuration. `--targets-file` selects a separate local configuration; the
 default is `~/.bedrock/targets.json`. `--state-dir` and `--socket` overrides
 apply consistently to target capability queries, uploads and operations.
 
-A target plan's digest binds its connection settings, observed machine identity
-and uploaded source or restore inputs. Changing any of these requires a fresh
-plan. `--yes` applies without interactive confirmation. Target announcements
-use stderr so command JSON, encrypted exports and migration handoffs retain
+A target plan's digest binds its connection settings, observed machine identity,
+the selected remote state directory and socket, and uploaded source or restore
+inputs. Changing any of these requires a fresh plan. `--yes` applies without
+interactive confirmation. Target announcements use stderr so command JSON, encrypted exports and migration handoffs retain
 their normal stdout contract. SSH exit codes are preserved.
 
 Local sources for `deploy`, `check`, `rehearse`, `move stage` and `move test`
@@ -41,9 +41,19 @@ manifest names and deploy restore files are supported. Source archives retain
 internal symlinks and reject paths that escape the extraction root.
 
 Artifacts remain privately cached on the target for retries and operation
-recovery. Keep the state directory on a filesystem with enough room for the
-source and restore inputs. `run --stdin` and recovery identities stream stdin;
-planning does not consume it.
+recovery. Reused binary and data artifacts are checked against their checksum;
+source artifacts are compared with the uploaded archive, including file bytes,
+executable permissions and symlinks. A changed cache is refused rather than
+replaced underneath an operation. Keep the state directory on a filesystem
+with enough room for the source and restore inputs. `run --stdin` and recovery
+identities stream stdin; planning does not consume it.
+
+For `secret set` and `integration set`, typed values are collected at the local
+terminal with hidden prompts for secret fields, then streamed through SSH.
+Integration prompts show the target's public settings and whether a secret is
+set. A blank answer keeps that target field without fetching its secret value.
+Piped secret values and `field=value` integration input pass through unchanged.
+Malformed integration input is explained by line number without showing it.
 
 ## Write a portable profile
 
@@ -82,7 +92,10 @@ bedrock history --state-dir ~/.bedrock/bootstrap --json
 recorded target/profile and cached binary. Failed completed receipts can be
 retried by submitting the profile again; steps adopt matching installed state.
 `--journal-dir` or `BEDROCK_BOOTSTRAP_DIR` selects another local journal. Keep
-that journal and the client secret store until bootstrap finishes.
+that journal and the client secret store until bootstrap finishes. Approval
+binds the full SSH connection and the immutable encrypted integration version.
+A different source store with the same version number cannot satisfy that
+approval; prepare a fresh plan if the source changes.
 
 ## Transfer integrations separately
 

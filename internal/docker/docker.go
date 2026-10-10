@@ -61,6 +61,15 @@ func ContainerName(app, workload, revision string) string {
 	return "bedrock-" + app + "-" + workload + "-" + revision
 }
 
+// NetworkExists reports whether the exact network name is already in use.
+func (e *Engine) NetworkExists(ctx context.Context, name string) (bool, error) {
+	_, err := e.cli.NetworkInspect(ctx, name, client.NetworkInspectOptions{})
+	if IsNotFound(err) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // EnsureNetwork creates a bridge network if it doesn't exist.
 func (e *Engine) EnsureNetwork(ctx context.Context, name string) error {
 	return e.ensureNetwork(ctx, name, false)

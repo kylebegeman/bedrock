@@ -17,6 +17,8 @@ import time
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 PROOFS = {
+    "transfer": {"title": "Two-host staged migration and clean machine recovery", "needs": "prepared disposable source plus --target-config for a separate clean matching-architecture Linux guest", "timeout": 7200},
+    "product": {"title": "Bootstrap, remote approvals, previews, release and recovery safety", "needs": "disposable Ubuntu/Debian; package/image-network access; loopback HTTPS and MinIO fixtures", "timeout": 5400},
     "m1": {"title": "Journal recovery after a killed daemon", "needs": "fresh Linux with systemd and SSH", "timeout": 300},
     "m2": {"title": "Host setup, reboot, and upgrade rollback", "needs": "fresh Ubuntu/Debian; package-network access", "timeout": 1800},
     "m3": {"title": "Deploy, certificates, rollback, and failed checks", "needs": "m2; public wildcard DNS and reachable ports 80/443", "dns": True, "timeout": 1200},
@@ -34,6 +36,30 @@ def stamp() -> str:
 
 def local(*args: str) -> str:
     return subprocess.check_output(args, cwd=ROOT, text=True).strip()
+
+
+def source_tree_digest() -> str:
+    """Fingerprint tracked and untracked inputs, excluding ignored build output."""
+    files = subprocess.check_output(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], cwd=ROOT).split(b"\0")
+    digest = hashlib.sha256()
+    for name in sorted(set(files)):
+        if not name:
+            continue
+        relative = Path(os.fsdecode(name))
+        if "__pycache__" in relative.parts or relative.suffix == ".pyc":
+            continue
+        path = ROOT / relative
+        if path.is_symlink():
+            content = os.fsencode(os.readlink(path))
+            kind = b"link"
+        elif path.is_file():
+            content = path.read_bytes()
+            kind = b"executable" if path.stat().st_mode & 0o111 else b"file"
+        else:
+            content = b""
+            kind = b"missing"
+        digest.update(name + b"\0" + kind + b"\0" + hashlib.sha256(content).digest())
+    return digest.hexdigest()
 
 
 def remote(config: str, script: str, timeout: int = 60) -> subprocess.CompletedProcess:
@@ -59,6 +85,8 @@ def prerequisites(args, settings: dict) -> list[str]:
                 problems.append(f"{proof}: LANE_DOMAIN and LANE_ZONE are required for public DNS/certificate checks")
             if settings.get("LANE_PROVIDER") == "qemu-docker":
                 problems.append(f"{proof}: the loopback QEMU guest is for m1/m2; public DNS/ports need a dedicated externally reachable SSH VM")
+        if proof == "transfer" and not args.target_config:
+            problems.append("transfer: pass --target-config for a separate disposable Linux guest")
         if proof == "m4":
             stage = Path(args.staging) if args.staging else None
             if stage is None:
@@ -99,10 +127,17 @@ def write_report(directory: Path, report: dict) -> None:
     (directory / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     lines = ["# Bedrock operational proof", "", f"Status: **{report['status']}**", f"Commit: `{report['commit']}`",
              f"Working tree: {'modified' if report['dirty'] else 'clean'}", f"Started: {report['started_at']}", f"Finished: {report['finished_at']}", ""]
+    if report.get("source_tree_sha256"):
+        lines += [f"Source tree SHA256: `{report['source_tree_sha256']}`", ""]
     if "target" in report:
         lines += [f"Target architecture: `{report['target'].get('LANE_ARCH', 'unknown')}`", f"Provider: `{report['target'].get('LANE_PROVIDER') or 'dedicated SSH'}`", f"Guest image SHA256: `{report['target'].get('LANE_OS_IMAGE_SHA256') or 'owner-provisioned'}`", "", "```text", report.get("os", ""), "```", ""]
+    if report.get("secondary_target"):
+        other = report["secondary_target"]
+        lines += [f"Destination architecture: `{other.get('LANE_ARCH', 'unknown')}`", f"Destination provider: `{other.get('LANE_PROVIDER') or 'dedicated SSH'}`", f"Destination guest image SHA256: `{other.get('LANE_OS_IMAGE_SHA256') or 'owner-provisioned'}`", ""]
     if report.get("installed_binary"):
         lines += ["Installed binary:", "", "```text", report["installed_binary"], "```", ""]
+    if report.get("secondary_installed_binary"):
+        lines += ["Destination installed binary:", "", "```text", report["secondary_installed_binary"], "```", ""]
     for item in report["results"]:
         lines += [f"- {item['proof']}: **{item['status']}**" + (f" ({item['seconds']:.1f}s)" if "seconds" in item else "")]
     if report.get("problems"):
@@ -117,6 +152,7 @@ def main() -> int:
     parser.add_argument("--list", action="store_true", help="show proof scope and prerequisites without connecting")
     parser.add_argument("--check", action="store_true", help="verify selected prerequisites without running proofs")
     parser.add_argument("--config", default=os.environ.get("LANE_CONFIG", str(Path(os.environ.get("TMPDIR", "/tmp")) / f"bedrock-lane-{os.getuid()}" / "lane.env")))
+    parser.add_argument("--target-config", default=os.environ.get("LANE_TARGET_CONFIG"), help="second disposable guest lane.env for the transfer proof")
     parser.add_argument("--artifacts", help="new output directory, default a temporary directory")
     parser.add_argument("--staging")
     parser.add_argument("--setup", action="append", choices=("storage", "email"), default=[])
@@ -134,7 +170,7 @@ def main() -> int:
     directory.chmod(0o700)
     tracked = local("git", "status", "--porcelain")
     report = {"started_at": stamp(), "commit": local("git", "rev-parse", "HEAD"), "dirty": bool(tracked),
-              "source_diff_sha256": hashlib.sha256(local("git", "diff", "HEAD").encode()).hexdigest(),
+              "source_diff_sha256": hashlib.sha256(local("git", "diff", "HEAD").encode()).hexdigest(), "source_tree_sha256": source_tree_digest(),
               "status": "blocked", "selected_proofs": args.proofs, "results": [], "problems": []}
     print(f"Proof artifacts: {directory}", flush=True)
     try:
@@ -152,6 +188,16 @@ def main() -> int:
             supported = remote(args.config, '. /etc/os-release; case "$ID:$VERSION_ID" in ubuntu:22.04|ubuntu:24.04|debian:12|debian:13) exit 0 ;; *) printf "unsupported host setup OS: %s %s\\n" "$ID" "$VERSION_ID" >&2; exit 1 ;; esac')
             if supported.returncode:
                 report["problems"].append(supported.stderr.strip() or "m2 requires a supported Ubuntu/Debian version")
+        if "transfer" in args.proofs and args.target_config:
+            other = configuration(str(Path(args.target_config).resolve()))
+            report["secondary_target"] = {k: other[k] for k in ("LANE_PROVIDER", "LANE_ID", "LANE_ARCH", "LANE_VM_IMAGE", "LANE_OS_IMAGE_SHA256")}
+            if other["LANE_ID"] == settings["LANE_ID"]:
+                report["problems"].append("transfer: source and destination must have different disposable identities")
+            if other["LANE_ARCH"] != settings["LANE_ARCH"]:
+                report["problems"].append("transfer: recorded fixture images require matching architectures")
+            ready = remote(args.target_config, 'test "$(id -u)" = 0 && test "$(uname -s)" = Linux && test "$(cat /proc/1/comm)" = systemd && command -v python3 >/dev/null')
+            if ready.returncode:
+                report["problems"].append("transfer: destination must run Linux/systemd with root SSH and Python 3")
         # Fail early on implicit historical fixture dependencies.
         preceding = set()
         for proof in args.proofs:
@@ -180,6 +226,8 @@ def main() -> int:
             print("Prerequisites ready; no proof or fixture setup was run.")
             return 0
         env = {**os.environ, "LANE_CONFIG": str(Path(args.config).resolve())}
+        if args.target_config:
+            env["LANE_TARGET_CONFIG"] = str(Path(args.target_config).resolve())
         fixtures_ready = not args.setup
         if args.setup and "m2" not in args.proofs:
             subprocess.run([str(HERE / "setup-fixtures.sh"), *args.setup], cwd=ROOT, env=env, check=True, timeout=300)
@@ -215,6 +263,11 @@ def main() -> int:
         report["installed_binary"] = binary.stdout.strip()
         diagnostics = remote(args.config, 'systemctl show bedrock -p ActiveState -p SubState -p NRestarts; bedrock history --json --limit 10', timeout=45)
         (directory / "diagnostics.txt").write_text(redact(diagnostics.stdout + diagnostics.stderr))
+        if "transfer" in args.proofs and args.target_config:
+            binary = remote(args.target_config, 'sha256sum /usr/local/bin/bedrock; bedrock version', timeout=30)
+            report["secondary_installed_binary"] = binary.stdout.strip()
+            diagnostics = remote(args.target_config, 'systemctl show bedrock -p ActiveState -p SubState -p NRestarts; bedrock history --json --limit 10', timeout=45)
+            (directory / "destination-diagnostics.txt").write_text(redact(diagnostics.stdout + diagnostics.stderr))
         return 0 if report["status"] == "passed" else 1
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, KeyError) as error:
         if report["results"]:

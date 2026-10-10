@@ -31,6 +31,8 @@ Available Commands:
   preview          Run a branch of an app beside it, behind a sign-in.
   ps               List apps, their workloads and what is running.
   psql             Open psql on the app's database.
+  recover          Recover an exact machine backup privately, or rehearse it in disposable isolation.
+  rehearse         Test a candidate's releases and checks on an isolated restored backup.
   remove           Take an app off this machine. Its volumes, database and secrets stay unless asked.
   restore          Bring an app's data back from its bucket onto this machine, before deploying it here.
   rollback         Make the previous revision active again.
@@ -955,8 +957,29 @@ Global Flags:
 Move an app, and its data, to another machine.
 Move an app, and its data, to another machine.
 
-A move is two commands, one on each machine, with the backup bucket as the
-channel between them. Both machines must be pointed at the same storage: the
+The staged workflow first rehearses a capture, then freezes source writers for
+an exact final snapshot. The target restores and checks that snapshot before
+an explicit write-authority and DNS cutover.
+
+  on the source: bedrock move rehearse <app> --to target-name > rehearsal.json
+  on the target: bedrock move test <source-dir> --handoff rehearsal.json
+  on the source: bedrock move final <app> --to target-name > final.json
+  on the target: bedrock move stage <source-dir> --handoff final.json
+  on the target: bedrock move cutover <app>
+
+The source stays frozen after final capture, including after a host or daemon
+restart. Resume it only deliberately, after stopping destination writers:
+
+  on the source: bedrock move resume <app> --target-stopped
+
+Destination writes are not included in the source snapshot. Returning those
+writes requires a reverse move; an old source is not a lossless rollback.
+Import the app's original secrets with move secrets before staging.
+
+The older out/in commands remain for manual copy workflows. Their source
+keeps running after capture and can accept writes the copied snapshot lacks.
+
+The backup bucket is the channel between the machines. Both machines must be pointed at the same storage: the
 same bucket prefix and the same backup password. A machine reading its own
 bucket instead of the source's finds nothing there, which looks like an app
 with no data rather than like a failure.
@@ -967,15 +990,21 @@ with no data rather than like a failure.
                   bedrock dns point <host>          # once it answers
   on the source:  bedrock remove <app>              # after a rollback window
 
-The source keeps running and keeps serving throughout. Nothing is torn down
-until you tear it down, which is what makes the window a real one.
+These legacy commands provide a manual copy, without a durable source write
+fence or automatic cutover. Quiesce writers before a final manual transfer.
 Usage:
   bedrock move [command]
 
 Available Commands:
+  cutover     Recheck the staged target, admit its writers and move production routes and DNS.
+  final       Fence all source writers and capture the final handoff; the source stays stopped.
   in          Restore an app's data here from the handoff the source machine wrote.
   out         Back an app up and write the handoff the target machine reads.
+  rehearse    Capture a rehearsal snapshot while the source remains available afterwards.
+  resume      Deliberately resume a frozen source after stopping the target.
   secrets     Seal an app's secrets for the target machine, and accept them there.
+  stage       Restore the final snapshot and validate the target without public routes or DNS.
+  test        Prove a rehearsal snapshot on scratch target data without production activation.
 
 Global Flags:
       --json                  print JSON, one object per line
@@ -985,6 +1014,46 @@ Global Flags:
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
 
 Use "bedrock move [command] --help" for more information about a command.
+== bedrock move cutover (hidden false)
+Recheck the staged target, admit its writers and move production routes and DNS.
+Recheck the staged target, admit its writers and move production routes and DNS.
+
+This is the explicit write-authority boundary. Once destination writers
+start, source data may be stale. A failure leaves the source fenced and the
+target intact so the operation can be repaired and retried. Bedrock never
+automatically points production back at a stale source.
+Usage:
+  bedrock move cutover <app> [flags]
+
+Flags:
+      --digest string   apply only if the plan is still the one with this digest; implies --yes
+      --plan            show the plan and change nothing
+      --yes             apply without asking
+
+Global Flags:
+      --json                  print JSON, one object per line
+      --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --target string         operate on this explicitly named SSH target
+      --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
+== bedrock move final (hidden false)
+Fence all source writers and capture the final handoff; the source stays stopped.
+
+Usage:
+  bedrock move final <app> [flags]
+
+Flags:
+      --digest string   apply only if the plan is still the one with this digest; implies --yes
+      --plan            show the plan and change nothing
+      --to string       the exact target machine name, as hostname reports there
+      --yes             apply without asking
+
+Global Flags:
+      --json                  print JSON, one object per line
+      --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --target string         operate on this explicitly named SSH target
+      --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
 == bedrock move in (hidden false)
 Restore an app's data here from the handoff the source machine wrote.
 Restore an app's data here from the handoff the source machine wrote.
@@ -1016,8 +1085,8 @@ applied like any other operation; --digest names its plan. The handoff
 goes to standard output alone and carries no secrets, so it can be
 redirected to a file, read, and copied to the other machine.
 
-The app is left running. A move is only safe because the source is still
-there to go back to.
+The app is left running and may accept writes after this snapshot. Use
+move final and move stage when you need a durable final write fence.
 Usage:
   bedrock move out <app> [flags]
 
@@ -1026,6 +1095,47 @@ Flags:
       --no-backup       use the last good backup instead of taking a fresh one
       --plan            show the plan and change nothing
       --yes             apply without asking
+
+Global Flags:
+      --json                  print JSON, one object per line
+      --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --target string         operate on this explicitly named SSH target
+      --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
+== bedrock move rehearse (hidden false)
+Capture a rehearsal snapshot while the source remains available afterwards.
+
+Usage:
+  bedrock move rehearse <app> [flags]
+
+Flags:
+      --digest string   apply only if the plan is still the one with this digest; implies --yes
+      --plan            show the plan and change nothing
+      --to string       the exact target machine name, as hostname reports there
+      --yes             apply without asking
+
+Global Flags:
+      --json                  print JSON, one object per line
+      --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --target string         operate on this explicitly named SSH target
+      --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
+== bedrock move resume (hidden false)
+Deliberately resume a frozen source after stopping the target.
+Deliberately resume a frozen source after stopping the target.
+
+--target-stopped records your assertion that no destination writers remain.
+The source cannot prove this across disconnected machines. Its data excludes
+changes made on the destination; use a reverse move to preserve those writes.
+Resume does not change DNS. Review DNS separately before returning traffic.
+Usage:
+  bedrock move resume <app> [flags]
+
+Flags:
+      --digest string    apply only if the plan is still the one with this digest; implies --yes
+      --plan             show the plan and change nothing
+      --target-stopped   confirm that destination writers have been stopped; source data excludes destination writes
+      --yes              apply without asking
 
 Global Flags:
       --json                  print JSON, one object per line
@@ -1056,6 +1166,56 @@ Usage:
 Flags:
       --accept      read a sealed bundle from standard input and store it here
       --to string   the target machine's recipient, from 'bedrock secret recipient' there
+
+Global Flags:
+      --json                  print JSON, one object per line
+      --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --target string         operate on this explicitly named SSH target
+      --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
+== bedrock move stage (hidden false)
+Restore the final snapshot and validate the target without public routes or DNS.
+Restore the final snapshot and validate the target without public routes or DNS.
+
+Import the source secrets first with move secrets. The handoff must come from
+move final and name this target machine. Staging starts web and static
+workloads for direct checks; worker, cron and release jobs wait. Staged
+workloads may write destination data, so resuming the source never recovers
+those changes. Use move cutover to admit normal destination writers and DNS.
+Usage:
+  bedrock move stage <source-dir> [flags]
+
+Flags:
+      --digest string     apply only if the plan is still the one with this digest; implies --yes
+      --handoff string    the final source handoff, or - for standard input (default "-")
+      --manifest string   the source manifest (default "bedrock.yaml")
+      --plan              show the plan and change nothing
+      --yes               apply without asking
+
+Global Flags:
+      --json                  print JSON, one object per line
+      --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --target string         operate on this explicitly named SSH target
+      --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
+== bedrock move test (hidden false)
+Prove a rehearsal snapshot on scratch target data without production activation.
+Prove a rehearsal snapshot on scratch target data without production activation.
+
+Import original secrets first. Use the handoff from move rehearse. The test
+restores scratch volumes, starts web and static workloads on an internal
+network, checks them directly, and cleans up. Background workers, cron,
+release jobs, public routes and DNS are excluded. The source continues
+running after its capture; perform move final before a real cutover.
+Usage:
+  bedrock move test <source-dir> [flags]
+
+Flags:
+      --digest string     apply only if the plan is still the one with this digest; implies --yes
+      --handoff string    the final source handoff, or - for standard input (default "-")
+      --manifest string   the source manifest (default "bedrock.yaml")
+      --plan              show the plan and change nothing
+      --yes               apply without asking
 
 Global Flags:
       --json                  print JSON, one object per line
@@ -1264,6 +1424,137 @@ Global Flags:
       --state-dir string      where bedrock keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
+== bedrock recover (hidden false)
+Recover an exact machine backup privately, or rehearse it in disposable isolation.
+Recover an exact machine backup privately, or rehearse it in disposable isolation.
+
+Configure the target's own identity and storage integration first. The source
+recovery identity is read from a protected file or stdin, then sealed with the
+target identity for resumable operation. It never appears in operation input.
+
+Recovery restores recorded images, sealed secret versions, pinned app data,
+host profile and operational history. It starts workloads privately with no
+published ports or live routes. A separate cutover changes live traffic after
+readiness. --rehearsal skips target state/profile/integrations and removes its
+isolated workloads and volumes after the check.
+
+  bedrock recover old-host --snapshot <id> --identity-file ./recovery.key --plan
+  bedrock recover old-host --snapshot <id> --identity-file ./recovery.key --yes
+  bedrock recover old-host --snapshot <id> --identity-stdin --rehearsal --yes
+  bedrock recover cutover <recovery-id> --plan
+
+The machine snapshot must contain a compatible recovery catalog and workload
+image archive. Data recovery restores the app recovery points embedded inside
+that machine snapshot, so app retention cannot remove them.
+Usage:
+  bedrock recover <source-machine> [flags]
+  bedrock recover [command]
+
+Available Commands:
+  abandon     Stop private recovery containers and release its reservation, preserving restored data and history.
+  cutover     Route live traffic to a completed private machine recovery after readiness.
+  report      Show the recovery's pinned snapshots, private readiness and cutover status.
+
+Flags:
+      --digest string          apply only if the plan is still the one with this digest; implies --yes
+      --id string              stable recovery ID; defaults to a hash of source, snapshot and mode
+      --identity-file string   protected source recovery identity file; never passed to the operation
+      --identity-stdin         read source recovery identity from stdin; requires --yes or --digest
+      --plan                   show the plan and change nothing
+      --rehearsal              prove recovery in disposable internal networks without changing target state, profile or traffic
+      --snapshot string        explicit machine snapshot ID (required; latest is not accepted)
+      --yes                    apply without asking
+
+Global Flags:
+      --json                  print JSON, one object per line
+      --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --target string         operate on this explicitly named SSH target
+      --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
+
+Use "bedrock recover [command] --help" for more information about a command.
+== bedrock recover abandon (hidden false)
+Stop private recovery containers and release its reservation, preserving restored data and history.
+
+Usage:
+  bedrock recover abandon <recovery-id> [flags]
+
+Flags:
+      --digest string   apply only if the plan is still the one with this digest; implies --yes
+      --plan            show the plan and change nothing
+      --yes             apply without asking
+
+Global Flags:
+      --json                  print JSON, one object per line
+      --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --target string         operate on this explicitly named SSH target
+      --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
+== bedrock recover cutover (hidden false)
+Route live traffic to a completed private machine recovery after readiness.
+
+Usage:
+  bedrock recover cutover <recovery-id> [flags]
+
+Flags:
+      --digest string   apply only if the plan is still the one with this digest; implies --yes
+      --plan            show the plan and change nothing
+      --yes             apply without asking
+
+Global Flags:
+      --json                  print JSON, one object per line
+      --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --target string         operate on this explicitly named SSH target
+      --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
+== bedrock recover report (hidden false)
+Show the recovery's pinned snapshots, private readiness and cutover status.
+
+Usage:
+  bedrock recover report <recovery-id> [flags]
+
+Global Flags:
+      --json                  print JSON, one object per line
+      --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --target string         operate on this explicitly named SSH target
+      --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
+== bedrock rehearse (hidden false)
+Test a candidate's releases and checks on an isolated restored backup.
+
+Usage:
+  bedrock rehearse <source> [flags]
+  bedrock rehearse [command]
+
+Available Commands:
+  report      Show the candidate's exact source, images, snapshot and rehearsal outcome.
+
+Flags:
+      --digest string     apply only if the plan is still the one with this digest; implies --yes
+      --plan              show the plan and change nothing
+      --snapshot string   the snapshot to test; default latest, exact identity recorded in the proof
+      --yes               apply without asking
+
+Global Flags:
+      --json                  print JSON, one object per line
+      --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --target string         operate on this explicitly named SSH target
+      --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
+
+Use "bedrock rehearse [command] --help" for more information about a command.
+== bedrock rehearse report (hidden false)
+Show the candidate's exact source, images, snapshot and rehearsal outcome.
+
+Usage:
+  bedrock rehearse report <app> <candidate-revision> [flags]
+
+Global Flags:
+      --json                  print JSON, one object per line
+      --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
+      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --target string         operate on this explicitly named SSH target
+      --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
 == bedrock remove (hidden false)
 Take an app off this machine. Its volumes, database and secrets stay unless asked.
 Take an app off this machine. Its volumes, database and sealed secrets
@@ -1314,10 +1605,11 @@ Usage:
   bedrock rollback <app> [flags]
 
 Flags:
-      --digest string   apply only if the plan is still the one with this digest; implies --yes
-      --plan            show the plan and change nothing
-      --to string       a specific revision instead of the previous one
-      --yes             apply without asking
+      --digest string         apply only if the plan is still the one with this digest; implies --yes
+      --plan                  show the plan and change nothing
+      --restore-data string   replace live data with this exact retained checkpoint; discard writes since it was captured
+      --to string             a specific revision instead of the previous one
+      --yes                   apply without asking
 
 Global Flags:
       --json                  print JSON, one object per line

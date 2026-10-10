@@ -79,3 +79,18 @@ func TestPlanDigestCannotBeAppliedToAnotherTarget(t *testing.T) {
 		t.Fatal("local digest accepted as target-bound")
 	}
 }
+
+func TestBindingIncludesRemoteStateAndSocket(t *testing.T) {
+	original := Binding{Target: Target{SSH: "fixture", MachineID: "machine"}, StateArgs: []string{"--state-dir=/srv/one", "--socket=/run/one.sock"}}
+	token := original.ScopeDigest("same-plan")
+	if raw, err := original.UnscopeDigest(token); err != nil || raw != "same-plan" {
+		t.Fatalf("original binding refused: %s %v", raw, err)
+	}
+	for _, args := range [][]string{{"--state-dir=/srv/two", "--socket=/run/one.sock"}, {"--state-dir=/srv/one", "--socket=/run/two.sock"}, nil} {
+		changed := original
+		changed.StateArgs = args
+		if _, err := changed.UnscopeDigest(token); err == nil {
+			t.Fatal("different remote state or socket accepted approval")
+		}
+	}
+}

@@ -8,9 +8,10 @@ target loom, resume
  7 build-core-api: build core-api's image from ., for core-api, product, schema (target server)
  8 pull-objects-setup: use image quay.io/minio/mc:latest for objects-setup
  9 build-runner: build runner from . (target runner-runtime)
-10 release: run objects-setup, schema, once each, before anything new starts
-11 start: start 3 container(s) (revision 20260922-120000; secrets: DATABASE_URL, LOOM_CORE_API_DATABASE_URL)
-12 ready: wait until every workload answers
-13 switch: route the edge to the new revision
-14 certificates: wait for certificates for core.example.com, runner.example.com
-15 retire: stop the revision this one replaces
+10 release-checkpoint: capture and retain a quiesced checkpoint before a data release with compatibility unknown data release
+11 release: run objects-setup, schema, once each, before anything new starts
+12 start: start 3 container(s) (revision 20260922-120000; secrets: DATABASE_URL, LOOM_CORE_API_DATABASE_URL)
+13 ready: wait until every workload answers
+14 switch: route the edge to the new revision
+15 certificates: wait for certificates for core.example.com, runner.example.com
+16 retire: stop the revision this one replaces

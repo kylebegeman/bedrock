@@ -131,6 +131,8 @@ func (g *schemaGenerator) constrain() {
 	g.describe("Manifest", "description", "One line about what this app is for.")
 	g.describe("Manifest", "owner", "Who owns the app, such as personal or a business name.")
 	g.describe("Manifest", "repo", "Where the app's source lives.")
+	g.prop("ReleasePolicy", "data_compatibility")["enum"] = []string{DataBackwardCompatible, DataRestoreRequired}
+	g.describe("ReleasePolicy", "data_compatibility", "Whether older code can use data changed by release jobs; restore-required blocks rollback until a compatible checkpoint is restored.")
 
 	w := g.def("Workload")
 	g.prop("Workload", "kind")["enum"] = []Kind{Web, Static, Worker, Cron, Release}
@@ -247,7 +249,7 @@ func (g *schemaGenerator) constrain() {
 	g.describe("Check", "within", "Positive Go duration such as 5s, limiting acceptable response time.")
 	g.prop("Preview", "of")["pattern"] = namePattern.String()
 	g.prop("Preview", "branch")["pattern"] = `^[^\r\n]*\S[^\r\n]*$`
-	g.def("Manifest")["allOf"] = []any{condition(schemaObject{"required": []string{"preview"}, "properties": schemaObject{"preview": schemaObject{"type": "object"}}}, properties(schemaObject{"workloads": schemaObject{"additionalProperties": properties(schemaObject{"ports": schemaObject{"maxItems": 0}, "routes": schemaObject{"items": schemaObject{"required": []string{"auth"}, "properties": schemaObject{"auth": schemaObject{"const": AuthLoom}}}}})}}))}
+	g.def("Manifest")["allOf"] = []any{condition(schemaObject{"required": []string{"release"}, "properties": schemaObject{"release": schemaObject{"type": "object"}}}, properties(schemaObject{"workloads": schemaObject{"not": schemaObject{"additionalProperties": schemaObject{"properties": schemaObject{"kind": schemaObject{"not": schemaObject{"const": Release}}}}}}})), condition(schemaObject{"required": []string{"preview"}, "properties": schemaObject{"preview": schemaObject{"type": "object"}}}, properties(schemaObject{"workloads": schemaObject{"additionalProperties": properties(schemaObject{"ports": schemaObject{"maxItems": 0}, "routes": schemaObject{"items": schemaObject{"required": []string{"auth"}, "properties": schemaObject{"auth": schemaObject{"const": AuthLoom}}}}})}}))}
 }
 
 // caseFoldPattern is an ECMAScript-compatible case-insensitive literal.

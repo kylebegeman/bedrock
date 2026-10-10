@@ -129,6 +129,15 @@ func (p *Prober) Observe(ctx context.Context) []Condition {
 // app looks at one app's containers, health, checks, certificates and
 // backups and returns the worst severity and every problem.
 func (p *Prober) app(ctx context.Context, e *docker.Engine, rev state.Revision) (string, []string) {
+	fenced, err := app.MigrationSourceFenced(p.Store.Path(), rev.App)
+	if err != nil {
+		return state.SeverityCritical, []string{"its migration fence cannot be read: " + err.Error()}
+	}
+	if fenced {
+		// Final capture deliberately stops this source and suspends its
+		// checks and scheduled backups. Host probes remain independent.
+		return "", nil
+	}
 	var m manifest.Manifest
 	if err := json.Unmarshal(rev.Manifest, &m); err != nil {
 		return state.SeverityWarning, []string{"its manifest can't be read: " + err.Error()}

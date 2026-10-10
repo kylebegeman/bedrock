@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -160,12 +162,30 @@ func newRemoteArtifact(a *app) *cobra.Command {
 		if kind == "source" {
 			result = filepath.Join(dest, "source")
 		}
+		exists := false
 		if info, err := os.Lstat(dest); err == nil {
 			if info.Mode()&os.ModeSymlink != 0 {
 				return errors.New("artifact destination is a symlink")
 			}
-			fmt.Fprintln(a.stdout, result)
-			return nil
+			exists = true
+			if kind != "source" {
+				if !info.Mode().IsRegular() {
+					return errors.New("cached artifact is not a regular file")
+				}
+				cached, actual, err := snapshotBoundedFile(dest, max)
+				if err != nil {
+					return err
+				}
+				cached.Close()
+				if actual != hash {
+					return errors.New("cached artifact checksum changed; repair the cached artifact before retrying")
+				}
+				fmt.Fprintln(a.stdout, result)
+				return nil
+			}
+			if !info.IsDir() {
+				return errors.New("cached source artifact is not a directory")
+			}
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -202,10 +222,20 @@ func newRemoteArtifact(a *app) *cobra.Command {
 			if err := gitdeploy.Extract(incoming, unpack); err != nil {
 				return err
 			}
-			if err := os.Rename(temp, dest); err != nil {
-				if _, exists := os.Stat(result); exists != nil {
+			if exists {
+				expected, err := artifactTreeDigest(unpack)
+				if err != nil {
 					return err
 				}
+				actual, err := artifactTreeDigest(result)
+				if err != nil {
+					return err
+				}
+				if expected != actual {
+					return errors.New("cached source changed; repair the cached artifact before retrying")
+				}
+			} else if err := os.Rename(temp, dest); err != nil {
+				return err
 			}
 		}
 		fmt.Fprintln(a.stdout, result)
@@ -242,4 +272,81 @@ func openRecoveryIdentityFile(path string) (*os.File, error) {
 		return nil, fmt.Errorf("recovery identity file must be readable only by its owner; chmod 600 %s", shellArgument(path))
 	}
 	return os.Open(path)
+}
+
+// Extraction normalizes timestamps and non-executable permissions. Compare
+// paths, types, executable modes, links and bytes when adopting cached source.
+func artifactTreeDigest(dir string) (string, error) {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("cached source root must be a plain directory")
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	sum := sha256.New()
+	enc := json.NewEncoder(sum)
+	var total int64
+	err = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == dir {
+			return nil
+		}
+		name, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		record := struct {
+			Name       string
+			Kind       string
+			Executable bool
+			Content    string
+		}{Name: filepath.ToSlash(name), Executable: info.Mode().Perm()&0o111 != 0}
+		switch {
+		case info.IsDir():
+			record.Kind = "directory"
+			record.Executable = false
+		case info.Mode()&os.ModeSymlink != 0:
+			record.Kind = "symlink"
+			record.Content, err = os.Readlink(path)
+			if err != nil {
+				return err
+			}
+		case info.Mode().IsRegular():
+			record.Kind = "file"
+			f, err := root.Open(name)
+			if err != nil {
+				return err
+			}
+			hash := sha256.New()
+			n, copyErr := io.Copy(hash, io.LimitReader(f, gitdeploy.MaxSource-total+1))
+			f.Close()
+			if copyErr != nil {
+				return copyErr
+			}
+			total += n
+			if total > gitdeploy.MaxSource {
+				return errors.New("cached source exceeds size limit")
+			}
+			record.Content = hex.EncodeToString(hash.Sum(nil))
+		default:
+			return errors.New("cached source contains an unsupported file type")
+		}
+		return enc.Encode(record)
+	})
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(sum.Sum(nil)), nil
 }

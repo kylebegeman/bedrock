@@ -23,8 +23,8 @@ disposable local proofs, and explicit commits are authorized.
 1. Alerts, diagnostics, offline schema/check, preview cleanup and guarded checks.
 2. Disposable real-machine lane and compatibility foundations.
 3. Shared named SSH targets, profiles, portable integrations, bootstrap.
-4. Whole-machine recovery and data-safe staged moves.
-5. Release rehearsal/data compatibility, integrated proofs and final docs.
+4. Whole-machine recovery, data-safe staged moves, and release/checkpoint safety.
+5. Integrated real-machine proofs, final hardening and verification documentation.
 
 ## Ownership and in-progress files
 
@@ -61,3 +61,50 @@ Includes alerts, opt-in diagnostic output and filters, generated schema/offline
 check and real deploy-plan host preflight, preview down/prune/pins, credentialed
 and anonymous guarded checks, daemon registry and watcher integration.
 Named-target work remains outside this first snapshot.
+
+## Milestone 2 verification
+
+Commit `a5a5132`: compatibility/state/upgrade foundations and disposable Linux
+lane. Exact staged snapshot passed `make check`, including 26 lane safeguards,
+formatting, vet and the full Go suite. Snapshot needed its own Git metadata
+because proof-report tests intentionally record repository provenance.
+
+Real m1 proof passed: daemon interruption resumed, six markers, exactly one
+interruption and two attempts for the interrupted step. Report:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-proof-t7qeg71y/report.md`.
+
+Current ownership: ergonomics owns machine recovery; operations owns safe moves;
+lane owns release rehearsal/rollback; platform owns product proof; root owns
+named targets/bootstrap/integration transfer and central startup/access wiring.
+Only root stages and commits.
+
+
+## Milestone 3 verification
+
+Commit `a409cba`: named SSH targets, portable profiles, encrypted integration
+transfer, source/restore-file transport and journaled bootstrap. The exact
+staged snapshot passed `make check`, including formatting, vet, full Go tests
+and lane safeguards. Snapshot:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-milestone3-x6hpgq8h`.
+
+## Milestone 4 integration decisions
+
+Recovery, staged moves and release safety are committed together because their
+writer reservations, data fences and startup recovery share authority. The
+implementation includes self-contained machine recovery with separate private
+readiness and cutover; source fencing and exact move handoffs; scratch release
+rehearsal; data compatibility boundaries and explicit checkpoint rollback.
+
+Final integration hardening preserves staged/checkpoint images through GC,
+refuses consumed checkpoints after later unsafe releases, binds app backups
+to revision/manifest/secret provenance, protects direct credential writes,
+verifies remote artifact cache integrity, and pins bootstrap integration
+ciphertext and SSH settings. Named-target approvals also bind state/socket
+overrides. Interactive remote credentials are collected privately on the client.
+
+Only disposable loopback guests are used for live proofs. The first guest's
+real host bootstrap became unresponsive during package installation. This is
+recorded as infrastructure evidence, never a successful product proof. The
+proof worker owns recovery of the specifically identified guest and will test
+a final frozen source snapshot. Public DNS/TLS issuance and external/private
+fixture proofs remain dependent on explicit unavailable prerequisites.

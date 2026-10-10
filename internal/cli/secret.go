@@ -25,7 +25,13 @@ func newSecret(a *app) *cobra.Command {
 		Use:   "secret",
 		Short: "Keep an app's secrets sealed on this machine.",
 	}
-	cmd.AddCommand(newSecretSet(a), newSecretList(a), newSecretRemove(a), newSecretVersions(a), newSecretCopy(a), newSecretRecipient(a), newSecretExport(a), newSecretImport(a))
+	set, remove, copy, accept := newSecretSet(a), newSecretRemove(a), newSecretCopy(a), newSecretImport(a)
+	appName := func(args []string) string { return args[0] }
+	for _, mutation := range []*cobra.Command{set, remove, accept} {
+		a.guardSecretMutation(mutation, appName)
+	}
+	a.guardSecretMutation(copy, func(args []string) string { return args[2] })
+	cmd.AddCommand(set, newSecretList(a), remove, newSecretVersions(a), copy, newSecretRecipient(a), newSecretExport(a), accept)
 	return cmd
 }
 

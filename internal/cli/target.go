@@ -265,6 +265,10 @@ func (a *app) dispatchTarget(cmd *cobra.Command, args []string) error {
 	sourceHash := ""
 	localSource := ""
 	command := strings.TrimPrefix(cmd.CommandPath(), cmd.Root().Name()+" ")
+	input, err = a.targetCredentialInput(cmd.Context(), t, command, args, input)
+	if err != nil {
+		return err
+	}
 	planOnly, _ := cmd.Flags().GetBool("plan")
 	if !planOnly && (command == "move out" || command == "move rehearse" || command == "move final") {
 		a.narrate = a.stderr
@@ -439,7 +443,7 @@ func (a *app) dispatchTarget(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
-	scope := remote.Binding{Target: t, SourceHash: sourceHash}
+	scope := remote.Binding{Target: t, SourceHash: sourceHash, StateArgs: a.targetStateArgs()}
 	if command == "check" {
 		var out bytes.Buffer
 		err := targetTransport().Run(cmd.Context(), t, appendRemoteFlags(argv, "--json"), nil, &boundedBuffer{Buffer: &out, Max: 4 << 20}, a.stderr)

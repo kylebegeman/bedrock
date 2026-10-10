@@ -86,6 +86,12 @@ func addHostBootstrap(parent *cobra.Command, a *app) {
 				runner.Close()
 				return err
 			}
+			in.SecretsSHA256, err = a.secretsStore().SealedVersionSHA256(integration.App, in.SecretsVersion)
+			if err != nil {
+				runner.Close()
+				return err
+			}
+
 		}
 		if binary != "" {
 			path, err := filepath.Abs(binary)

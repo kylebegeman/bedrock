@@ -109,6 +109,9 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 	// runs them: an older release step against newer data is the wrong
 	// way round.
 	if releases := m.ReleaseWorkloads(); from != nil && len(releases) > 0 {
+		if m.HasData() && m.ReleaseCompatibility() != manifest.DataBackwardCompatible {
+			add(r.releaseCheckpointStep())
+		}
 		add(r.releaseStep(releases))
 	}
 	add(r.startStep())
@@ -159,6 +162,19 @@ func (r *rollout) abandon(_ context.Context, e *docker.Engine, out io.Writer) er
 	// Never restart a singleton while its failed replacement may still run.
 	if len(failures) > 0 {
 		return errors.Join(failures...)
+	}
+	current, err := r.store.RevisionWithStatus(ctx, r.m.App, state.RevisionActive)
+	if err != nil {
+		return err
+	}
+	if current != nil {
+		unsafe, err := unsafeReleaseBoundaries(ctx, r.store, current)
+		if err != nil {
+			return err
+		}
+		if len(unsafe) > 0 {
+			return unsafeRollbackError(r.m.App, unsafe)
+		}
 	}
 	return restartStoppedWorkloads(ctx, e, r.store, r.m.App, r.revision, out)
 }
@@ -364,14 +380,35 @@ func (r *rollout) releaseStep(releases []string) kernel.Step {
 			if err != nil {
 				return err
 			}
+			boundary, err := r.prepareReleaseBoundary(ctx)
+			if err != nil {
+				return err
+			}
+			if boundary.Status == state.ReleaseCompleted {
+				fmt.Fprintln(out, "release jobs already completed; not replayed")
+				return nil
+			}
+			if boundary.Status != state.ReleasePrepared {
+				return fmt.Errorf("release %s has an uncertain or failed prior attempt (%s); release jobs are not replayed automatically; inspect the recorded jobs, rehearse a new candidate or restore checkpoint %s", r.revision, boundary.Status, boundary.Snapshot)
+			}
+			started, err := r.store.StartPreparedReleaseBoundary(ctx, r.m.App, r.revision, time.Now().UTC())
+			if err != nil {
+				return err
+			}
+			if !started {
+				return errors.New("release boundary changed; refusing to replay release jobs")
+			}
 			jobs := NewJobs(r.store, r.d.Secrets)
 			for _, name := range releases {
 				fmt.Fprintf(out, "%s:\n", name)
 				if _, err := jobs.Run(ctx, rev, name, nil, JobRelease, out); err != nil {
-					return fmt.Errorf("release workload %s: %w; nothing new started and the running revision still serves, though the release may already have changed the database", name, err)
+					failed := fmt.Errorf("release workload %s: %w; release may already have changed data; checkpoint %s", name, err, boundary.Snapshot)
+					cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					defer cancel()
+					return errors.Join(failed, r.store.FinishReleaseBoundary(cleanup, r.m.App, r.revision, state.ReleaseFailed, failed.Error(), time.Now().UTC()))
 				}
 			}
-			return nil
+			return r.store.FinishReleaseBoundary(ctx, r.m.App, r.revision, state.ReleaseCompleted, "", time.Now().UTC())
 		},
 	}
 }
@@ -560,6 +597,19 @@ func (r *rollout) recoverOnFailure(step kernel.Step) kernel.Step {
 				return errors.Join(err, r.abandon(cleanup, e, out))
 			}
 			return err
+		}
+		previous, lookupErr := r.store.RevisionWithStatus(cleanup, r.m.App, state.RevisionPrevious)
+		if lookupErr != nil {
+			return errors.Join(err, lookupErr)
+		}
+		if previous != nil {
+			unsafe, gateErr := unsafeReleaseBoundaries(cleanup, r.store, previous)
+			if gateErr != nil {
+				return errors.Join(err, gateErr)
+			}
+			if len(unsafe) > 0 {
+				return errors.Join(err, unsafeRollbackError(r.m.App, unsafe))
+			}
 		}
 		message, recoveryErr := revertSwitch(cleanup, r.store, r.d.Secrets, r.connect, r.m.App, r.revision, r.containers)
 		if recoveryErr != nil {

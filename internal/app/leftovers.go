@@ -33,6 +33,8 @@ type leftovers struct {
 	networks      []string
 	// dirs are what the machine keeps for it under the state directory.
 	dirs []string
+	// migrationFence is retained until the remaining app writers are removed.
+	migrationFence string
 	// credentials says whether the webhook secret or deploy key bedrock
 	// made for it are still among the integration credentials.
 	credentials bool
@@ -40,7 +42,7 @@ type leftovers struct {
 
 func (l *leftovers) empty() bool {
 	return len(l.secretNames) == 0 && l.secretVersion == 0 && len(l.containers) == 0 && len(l.images) == 0 &&
-		len(l.volumes) == 0 && len(l.networks) == 0 && len(l.dirs) == 0 && !l.credentials
+		len(l.volumes) == 0 && len(l.networks) == 0 && len(l.dirs) == 0 && l.migrationFence == "" && !l.credentials
 }
 
 // summary names what was found, for a refusal.
@@ -61,7 +63,7 @@ func (l *leftovers) summary() string {
 	if len(l.networks) > 0 {
 		parts = append(parts, plural(len(l.networks), "network"))
 	}
-	if len(l.dirs) > 0 || l.credentials {
+	if len(l.dirs) > 0 || l.migrationFence != "" || l.credentials {
 		parts = append(parts, "files the machine kept for it")
 	}
 	return strings.Join(parts, ", ")
@@ -181,6 +183,12 @@ func (r Remove) findLeftovers(ctx context.Context, app, stateDir string) (*lefto
 			return nil, err
 		}
 	}
+	fence := migrationFile(r.Store.Path(), app)
+	if _, err := os.Stat(fence); err == nil {
+		l.migrationFence = fence
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
 	return l, nil
 }
 
@@ -224,10 +232,10 @@ func drillPrefix(app string) string { return "bedrock-" + app + ".drill" }
 
 // appDirs are the directories the machine keeps for an app under its
 // state directory: its database's first-run scripts, and the staging
-// directories of backups, restores, drills and builds.
+// directories of backups, restores, drills, builds and moves.
 func appDirs(stateDir, app string) []string {
 	dirs := []string{filepath.Dir(InitDir(stateDir, app))}
-	for _, d := range []string{"backups", "restore", "drills", "builds"} {
+	for _, d := range []string{"backups", "restore", "drills", "builds", "moves"} {
 		dirs = append(dirs, filepath.Join(stateDir, d, app))
 	}
 	return dirs
@@ -344,6 +352,9 @@ func (l *leftovers) forgetStep(r Remove, stateDir string) kernel.Step {
 	var kept []string
 	if len(l.dirs) > 0 {
 		kept = append(kept, strings.Join(l.dirs, ", "))
+	}
+	if l.migrationFence != "" {
+		kept = append(kept, l.migrationFence)
 	}
 	if l.credentials {
 		kept = append(kept, "the webhook secret and deploy key made for it")

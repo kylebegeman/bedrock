@@ -44,6 +44,8 @@ type Manifest struct {
 	// Backup says when the data is backed up and drilled. An app with data
 	// is backed up nightly and drilled weekly unless this says otherwise.
 	Backup *Backup `yaml:"backup,omitempty" json:"backup,omitempty"`
+	// Release states whether older code may use data changed by release jobs.
+	Release *ReleasePolicy `yaml:"release,omitempty" json:"release,omitempty"`
 	// Secrets are the ones bedrock makes for the app, so nobody has to type
 	// them in: generated once and kept, or derived from others at every
 	// deploy.
@@ -52,6 +54,25 @@ type Manifest struct {
 	// preview up writes it into the manifest it derives; nobody writes it
 	// by hand. It is how a preview is known, whatever its name.
 	Preview *Preview `yaml:"preview,omitempty" json:"preview,omitempty"`
+}
+
+// ReleasePolicy declares a data contract, not an automatic SQL rollback.
+type ReleasePolicy struct {
+	DataCompatibility string `yaml:"data_compatibility" json:"data_compatibility"`
+}
+
+const (
+	DataBackwardCompatible   = "backward-compatible"
+	DataRestoreRequired      = "restore-required"
+	DataCompatibilityUnknown = "unknown"
+)
+
+// ReleaseCompatibility is conservative when an app has not declared a policy.
+func (m *Manifest) ReleaseCompatibility() string {
+	if m.Release == nil {
+		return DataCompatibilityUnknown
+	}
+	return m.Release.DataCompatibility
 }
 
 // Preview says which app, and which branch of it, an app previews.
@@ -543,6 +564,16 @@ func (m *Manifest) Validate() error {
 	m.validateData(fail)
 	m.validateSecrets(fail)
 	m.validateBackup(fail)
+	if m.Release != nil {
+		switch m.Release.DataCompatibility {
+		case DataBackwardCompatible, DataRestoreRequired:
+		default:
+			fail("release.data_compatibility: use backward-compatible or restore-required")
+		}
+		if len(m.ReleaseWorkloads()) == 0 {
+			fail("release: requires at least one release workload")
+		}
+	}
 	m.validatePreview(fail)
 	m.validateChecks(fail)
 	if len(errs) > 0 {
