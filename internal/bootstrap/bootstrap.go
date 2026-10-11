@@ -24,6 +24,20 @@ import (
 
 const Kind = "client.bootstrap"
 
+const maxRemoteResponse = 1 << 20
+
+// Keep the buffer named so io.Copy cannot bypass Write through a promoted ReadFrom.
+type boundedResponse struct {
+	buffer *bytes.Buffer
+}
+
+func (b *boundedResponse) Write(p []byte) (int, error) {
+	if len(p) > maxRemoteResponse-b.buffer.Len() {
+		return 0, errors.New("remote structured response is too large")
+	}
+	return b.buffer.Write(p)
+}
+
 type Facts struct {
 	MachineID string
 	Arch      string
@@ -60,7 +74,7 @@ printf '%s\n' "$(cat /etc/machine-id)" "$(uname -m)" "$ID" "$VERSION_ID" "$(id -
 	if t.Sudo {
 		script = "sudo -n -- sh -c " + remote.Quote(script)
 	}
-	if err := tr.RunScript(ctx, t, script, nil, &out, io.Discard); err != nil {
+	if err := tr.RunScript(ctx, t, script, nil, &boundedResponse{buffer: &out}, io.Discard); err != nil {
 		return Facts{}, fmt.Errorf("target OS preflight: %w", err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
@@ -195,7 +209,7 @@ printf 'Pinned binary installed and checksum verified.\n'`
 	})
 	add("capabilities", "verify installed binary compatibility and stable machine identity", func(ctx context.Context, _ io.Writer) error {
 		var out bytes.Buffer
-		if err := d.Transport.Run(ctx, in.Target, []string{"capabilities", "--json"}, nil, &out, io.Discard); err != nil {
+		if err := d.Transport.Run(ctx, in.Target, []string{"capabilities", "--json"}, nil, &boundedResponse{buffer: &out}, io.Discard); err != nil {
 			return err
 		}
 		var c struct {
@@ -207,7 +221,7 @@ printf 'Pinned binary installed and checksum verified.\n'`
 			return errors.New("installed binary capabilities or machine identity are incompatible")
 		}
 		out.Reset()
-		if err := d.Transport.Run(ctx, in.Target, []string{"version", "--json"}, nil, &out, io.Discard); err != nil {
+		if err := d.Transport.Run(ctx, in.Target, []string{"version", "--json"}, nil, &boundedResponse{buffer: &out}, io.Discard); err != nil {
 			return err
 		}
 		var info version.Info
@@ -218,7 +232,7 @@ printf 'Pinned binary installed and checksum verified.\n'`
 	})
 	add("identity", "create target-owned encryption identity; private key remains on target", func(ctx context.Context, out io.Writer) error {
 		var public bytes.Buffer
-		if err := d.Transport.Run(ctx, in.Target, []string{"secret", "recipient"}, nil, &public, io.Discard); err != nil {
+		if err := d.Transport.Run(ctx, in.Target, []string{"secret", "recipient"}, nil, &boundedResponse{buffer: &public}, io.Discard); err != nil {
 			return err
 		}
 		if _, err := age.ParseX25519Recipient(strings.TrimSpace(public.String())); err != nil {
@@ -230,7 +244,7 @@ printf 'Pinned binary installed and checksum verified.\n'`
 	if len(in.Profile.Integrations) > 0 {
 		add("integrations", fmt.Sprintf("transfer only %s from sealed source version %d SHA-256 %s", strings.Join(in.Profile.Integrations, ", "), in.SecretsVersion, in.SecretsSHA256), func(ctx context.Context, out io.Writer) error {
 			var public bytes.Buffer
-			if err := d.Transport.Run(ctx, in.Target, []string{"secret", "recipient"}, nil, &public, io.Discard); err != nil {
+			if err := d.Transport.Run(ctx, in.Target, []string{"secret", "recipient"}, nil, &boundedResponse{buffer: &public}, io.Discard); err != nil {
 				return err
 			}
 			digest, err := d.Secrets.SealedVersionSHA256(integration.App, in.SecretsVersion)

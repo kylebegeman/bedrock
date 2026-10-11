@@ -2,6 +2,7 @@
 package bootstrap
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -67,8 +68,15 @@ func Load(path string) (Profile, error) {
 		return Profile{}, err
 	}
 	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, (1<<20)+1))
+	if err != nil {
+		return Profile{}, err
+	}
+	if len(data) > 1<<20 {
+		return Profile{}, errors.New("bootstrap profile is oversized")
+	}
 	var p Profile
-	d := json.NewDecoder(io.LimitReader(f, 1<<20))
+	d := json.NewDecoder(bytes.NewReader(data))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&p); err != nil {
 		return p, fmt.Errorf("bootstrap profile: %w", err)

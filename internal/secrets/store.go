@@ -125,6 +125,9 @@ func (s *Store) appDir(app string) string { return filepath.Join(s.Dir, app) }
 
 // Current returns the app's current version, 0 when it has none.
 func (s *Store) Current(app string) (int, error) {
+	if !appPattern.MatchString(app) {
+		return 0, errors.New("invalid secrets app name")
+	}
 	data, err := os.ReadFile(filepath.Join(s.appDir(app), "current"))
 	if errors.Is(err, os.ErrNotExist) {
 		return 0, nil
@@ -132,11 +135,18 @@ func (s *Store) Current(app string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return strconv.Atoi(strings.TrimSpace(string(data)))
+	version, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || version <= 0 {
+		return 0, errors.New("invalid current secrets version")
+	}
+	return version, nil
 }
 
 // Load decrypts one version's values. Version 0 is empty.
 func (s *Store) Load(app string, version int) (map[string]string, error) {
+	if !appPattern.MatchString(app) || version < 0 {
+		return nil, errors.New("invalid secrets app name or version")
+	}
 	if version == 0 {
 		return map[string]string{}, nil
 	}
@@ -159,7 +169,10 @@ func (s *Store) Load(app string, version int) (map[string]string, error) {
 	}
 	var b bundle
 	if err := json.Unmarshal(data, &b); err != nil {
-		return nil, err
+		return nil, errors.New("invalid sealed secret version")
+	}
+	if b.Version != version {
+		return nil, errors.New("sealed secret version does not match the requested version")
 	}
 	if b.Values == nil {
 		b.Values = map[string]string{}
@@ -295,6 +308,9 @@ func (s *Store) write(app string, values map[string]string) (int, error) {
 // and the daemon can both set secrets, and each change reads the current
 // version before writing the next.
 func (s *Store) lock(app string) (func(), error) {
+	if !appPattern.MatchString(app) {
+		return nil, errors.New("invalid secrets app name")
+	}
 	dir := s.appDir(app)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -348,6 +364,9 @@ func (s *Store) Apps() ([]string, error) {
 
 // Versions lists an app's versions, newest first, without values.
 func (s *Store) Versions(app string) ([]VersionInfo, error) {
+	if !appPattern.MatchString(app) {
+		return nil, errors.New("invalid secrets app name")
+	}
 	entries, err := os.ReadDir(s.appDir(app))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -376,14 +395,22 @@ func (s *Store) Versions(app string) ([]VersionInfo, error) {
 
 // Names lists the current version's names.
 func (s *Store) Names(app string) ([]string, int, error) {
-	versions, err := s.Versions(app)
+	version, err := s.Current(app)
+	if err != nil || version == 0 {
+		return nil, 0, err
+	}
+	data, err := os.ReadFile(filepath.Join(s.appDir(app), fmt.Sprintf("v%d.meta", version)))
 	if err != nil {
 		return nil, 0, err
 	}
-	if len(versions) == 0 {
-		return nil, 0, nil
+	var info VersionInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		return nil, 0, err
 	}
-	return versions[0].Names, versions[0].Version, nil
+	if info.Version != version {
+		return nil, 0, errors.New("secrets metadata does not match the current version")
+	}
+	return info.Names, version, nil
 }
 
 // Missing returns the names a workload asks for that a version lacks.

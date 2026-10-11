@@ -13,7 +13,6 @@ import (
 	"net/mail"
 	"net/url"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -228,8 +227,8 @@ func validate(name string, v map[string]string) error {
 	switch name {
 	case StorageName:
 		if v["kind"] == "s3" {
-			if !strings.HasPrefix(v["endpoint"], "http://") && !strings.HasPrefix(v["endpoint"], "https://") {
-				return errors.New("storage.endpoint must be the S3 endpoint URL, starting with https:// or http://")
+			if _, err := parseEndpointURL(v["endpoint"]); err != nil {
+				return fmt.Errorf("storage.endpoint: %w", err)
 			}
 		} else if v["endpoint"] != "" {
 			return errors.New("storage.endpoint is for s3 only; Backblaze needs none")
@@ -238,8 +237,10 @@ func validate(name string, v map[string]string) error {
 			return errors.New("storage.bucket_prefix must be 2 to 20 lowercase letters, digits and hyphens")
 		}
 	case CloudflareName:
-		if api := v["api"]; api != "" && !strings.HasPrefix(api, "https://") && !strings.HasPrefix(api, "http://") {
-			return errors.New("cloudflare.api must be a URL starting with https:// or http://")
+		if api := v["api"]; api != "" {
+			if _, err := parseEndpointURL(api); err != nil {
+				return fmt.Errorf("cloudflare.api: %w", err)
+			}
 		}
 	case EmailName:
 		port, err := strconv.Atoi(v["smtp_port"])
@@ -321,13 +322,32 @@ type Status struct {
 
 // List describes every integration.
 func List(store *secrets.Store) ([]Status, error) {
-	all, _, err := store.LoadCurrent(App)
+	all, current, err := store.LoadCurrent(App)
 	if err != nil {
 		return nil, err
 	}
 	versions, err := store.Versions(App)
 	if err != nil {
 		return nil, err
+	}
+	// Ignore versions whose current pointer was never committed.
+	committed := versions[:0]
+	for _, info := range versions {
+		if info.Version <= current {
+			committed = append(committed, info)
+		}
+	}
+	versions = committed
+	loaded := map[int]map[string]string{current: all, 0: {}}
+	values := func(version int) (map[string]string, error) {
+		if raw, ok := loaded[version]; ok {
+			return raw, nil
+		}
+		raw, err := store.Load(App, version)
+		if err == nil {
+			loaded[version] = raw
+		}
+		return raw, err
 	}
 	var out []Status
 	for _, d := range Definitions {
@@ -345,34 +365,42 @@ func List(store *secrets.Store) ([]Status, error) {
 			}
 		}
 		if st.Set {
-			st.At = lastChange(versions, d)
+			st.At, err = lastChange(versions, d, values)
+			if err != nil {
+				return nil, err
+			}
 		}
 		out = append(out, st)
 	}
 	return out, nil
 }
 
-// lastChange finds when an integration's names last appeared in a new
-// version: the newest version whose set of the integration's names
-// differs from the one before it is when it was last set.
-func lastChange(versions []secrets.VersionInfo, d Definition) time.Time {
-	names := func(v secrets.VersionInfo) string {
-		var mine []string
-		for _, n := range v.Names {
-			if strings.HasPrefix(n, strings.ToUpper(d.Name)+"_") {
-				mine = append(mine, n)
+// lastChange compares values as well as field presence. Updating a credential
+// must advance its timestamp; unrelated changes in the shared store must not.
+func lastChange(versions []secrets.VersionInfo, d Definition, values func(int) (map[string]string, error)) (time.Time, error) {
+	for i, info := range versions {
+		current, err := values(info.Version)
+		if err != nil {
+			return time.Time{}, err
+		}
+		olderVersion := 0
+		if i+1 < len(versions) {
+			olderVersion = versions[i+1].Version
+		}
+		older, err := values(olderVersion)
+		if err != nil {
+			return time.Time{}, err
+		}
+		for _, field := range d.Fields {
+			key := d.key(field.Name)
+			value, exists := current[key]
+			previous, existed := older[key]
+			if exists != existed || value != previous {
+				return info.At, nil
 			}
 		}
-		sort.Strings(mine)
-		return strings.Join(mine, ",")
 	}
-	// versions are newest first
-	for i := 0; i < len(versions); i++ {
-		if i+1 == len(versions) || names(versions[i]) != names(versions[i+1]) {
-			return versions[i].At
-		}
-	}
-	return time.Time{}
+	return time.Time{}, nil
 }
 
 // Storage is the object storage backups go to.
@@ -509,18 +537,12 @@ type Verify struct {
 // ParseVerifyURL splits a Core's verify endpoint into a dial address and a
 // path, filling in the port the scheme implies.
 func ParseVerifyURL(raw string) (*Verify, error) {
-	u, err := url.Parse(strings.TrimSpace(raw))
+	u, err := parseEndpointURL(strings.TrimSpace(raw))
 	if err != nil {
-		return nil, fmt.Errorf("%q isn't a URL", raw)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, fmt.Errorf("%q must start with https:// or http://", raw)
-	}
-	if u.Hostname() == "" {
-		return nil, fmt.Errorf("%q names no host", raw)
+		return nil, err
 	}
 	if u.Path == "" || u.Path == "/" {
-		return nil, fmt.Errorf("%q names no path; give the verify endpoint itself", raw)
+		return nil, errors.New("URL names no path; give the verify endpoint itself")
 	}
 	port := u.Port()
 	if port == "" {
@@ -532,4 +554,23 @@ func ParseVerifyURL(raw string) (*Verify, error) {
 		TLS:  u.Scheme == "https",
 		Host: u.Hostname(),
 	}, nil
+}
+
+// These endpoints are also shown as public configuration. Credentials must
+// stay in their separate sealed fields, and rejected URLs never echo input.
+func parseEndpointURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+		return nil, errors.New("URL must start with https:// or http:// and name a host")
+	}
+	if u.User != nil || u.Fragment != "" {
+		return nil, errors.New("URL must not contain credentials or a fragment")
+	}
+	if port := u.Port(); port != "" {
+		number, err := strconv.Atoi(port)
+		if err != nil || number < 1 || number > 65535 {
+			return nil, errors.New("URL port must be 1 to 65535")
+		}
+	}
+	return u, nil
 }

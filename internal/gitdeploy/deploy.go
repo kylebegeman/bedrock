@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -54,6 +55,8 @@ func Deploy(ctx context.Context, d Deployer, source, commit string, out io.Write
 
 const zeroCommit = "0000000000000000000000000000000000000000"
 
+var commitPattern = regexp.MustCompile(`^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$`)
+
 // hookBuildsDir is where the hook writes source trees; tests move it.
 var hookBuildsDir = BuildsDir
 
@@ -61,6 +64,10 @@ var hookBuildsDir = BuildsDir
 // commit, and a failed deploy refuses the push, so the branch on the
 // machine is always what runs. Other branches are kept and not deployed.
 func Hook(ctx context.Context, appName string, stdin io.Reader, out io.Writer, d Deployer) int {
+	if !ValidApp(appName) {
+		fmt.Fprintln(out, "bedrock: invalid app name")
+		return 1
+	}
 	repo, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(out, "bedrock: %v\n", err)
@@ -71,18 +78,23 @@ func Hook(ctx context.Context, appName string, stdin io.Reader, out io.Writer, d
 	sc := bufio.NewScanner(stdin)
 	for sc.Scan() {
 		f := strings.Fields(sc.Text())
-		if len(f) != 3 {
-			continue
+		if len(f) != 3 || !commitPattern.MatchString(f[0]) || !commitPattern.MatchString(f[1]) {
+			fmt.Fprintln(out, "bedrock: invalid git ref update")
+			return 1
 		}
 		if f[2] != "refs/heads/"+branch {
 			fmt.Fprintf(out, "bedrock: %s kept; pushes to %s deploy\n", strings.TrimPrefix(f[2], "refs/heads/"), branch)
 			continue
 		}
-		if f[1] == zeroCommit {
+		if strings.Trim(f[1], "0") == "" {
 			fmt.Fprintf(out, "bedrock: %s is the branch that deploys %s; it can't be deleted here\n", branch, appName)
 			return 1
 		}
 		target = f[1]
+	}
+	if err := sc.Err(); err != nil {
+		fmt.Fprintf(out, "bedrock: read git updates: %v\n", err)
+		return 1
 	}
 	if target == "" {
 		return 0

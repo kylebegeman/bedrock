@@ -48,7 +48,8 @@ func (a *app) operateRaw(ctx context.Context, runner api.Runner, kind string, ra
 	// Naming the exact plan is the approval: an agent reads a plan, shows it,
 	// and applies that one. Asking again for a yes would be asking about a
 	// plan the person has already seen and named.
-	if !a.yes && a.digest == "" {
+	expect := a.digest
+	if !a.yes && expect == "" {
 		if !a.tty {
 			r.Plan(view)
 			return errors.New("this would change the machine; add --yes to apply it without a prompt, or --plan to only look")
@@ -59,9 +60,10 @@ func (a *app) operateRaw(ctx context.Context, runner api.Runner, kind string, ra
 		if s := strings.ToLower(strings.TrimSpace(answer)); s != "y" && s != "yes" {
 			return errors.New("not applied")
 		}
+		expect = view.Digest
 	}
 	var lastID string
-	receipt, err := runner.RunExpecting(ctx, kind, raw, a.digest, func(ev kernel.Event) {
+	receipt, err := runner.RunExpecting(ctx, kind, raw, expect, func(ev kernel.Event) {
 		if ev.Operation != "" {
 			lastID = ev.Operation
 		}

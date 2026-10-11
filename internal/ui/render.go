@@ -10,6 +10,7 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode"
 
 	"golang.org/x/term"
 
@@ -46,8 +47,7 @@ func New(out io.Writer, tty, jsonMode bool) *Renderer {
 
 // IsTerminal reports whether f is a terminal.
 func IsTerminal(f *os.File) bool {
-	info, err := f.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(f.Fd()))
 }
 
 // Event renders one event.
@@ -138,6 +138,7 @@ func times(n int) string {
 // running shows the current step's line. In a terminal it replaces the
 // line already on screen.
 func (r *Renderer) running(line string) {
+	line = terminalText(line)
 	if !r.tty {
 		r.println(line)
 		return
@@ -159,7 +160,22 @@ func (r *Renderer) endLine() {
 
 func (r *Renderer) println(s string) {
 	r.endLine()
-	fmt.Fprintln(r.out, s)
+	fmt.Fprintln(r.out, terminalText(s))
+}
+
+// Workload logs and remote errors can contain terminal commands, including
+// clipboard writes. Human output shows those bytes as text; JSON keeps the
+// original values for programs that explicitly request them.
+func terminalText(s string) string {
+	var b strings.Builder
+	for _, ch := range s {
+		if unicode.IsControl(ch) && ch != '\n' && ch != '\t' {
+			fmt.Fprintf(&b, "\\x%02x", ch)
+		} else {
+			b.WriteRune(ch)
+		}
+	}
+	return b.String()
 }
 
 // Plan prints a plan the way --plan shows it.

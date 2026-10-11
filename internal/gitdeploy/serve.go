@@ -76,6 +76,9 @@ const DefaultBranch = "main"
 // EnsureRepo makes an app's bare repository on first push and keeps its
 // hook pointing at this bedrock.
 func EnsureRepo(app string) (string, error) {
+	if !ValidApp(app) {
+		return "", errors.New("invalid repository app name")
+	}
 	dir := RepoDir(app)
 	if _, err := os.Stat(filepath.Join(dir, "HEAD")); errors.Is(err, os.ErrNotExist) {
 		if out, err := exec.Command("git", "init", "--bare", "--quiet", "--initial-branch="+DefaultBranch, dir).CombinedOutput(); err != nil {
@@ -114,6 +117,9 @@ func Branch(repoDir string) string {
 
 // SetBranch changes which branch deploys.
 func SetBranch(repoDir, branch string) error {
+	if err := ValidBranch(branch); err != nil {
+		return err
+	}
 	if out, err := exec.Command("git", "-C", repoDir, "config", "bedrock.branch", branch).CombinedOutput(); err != nil {
 		return fmt.Errorf("%s", strings.TrimSpace(string(out)))
 	}

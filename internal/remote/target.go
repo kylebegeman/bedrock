@@ -2,6 +2,7 @@
 package remote
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -66,8 +67,15 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, (1<<20)+1))
+	if err != nil {
+		return Config{}, err
+	}
+	if len(data) > 1<<20 {
+		return Config{}, errors.New("target configuration is oversized")
+	}
 	var c Config
-	dec := json.NewDecoder(io.LimitReader(f, 1<<20))
+	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&c); err != nil {
 		return c, fmt.Errorf("target configuration: %w", err)

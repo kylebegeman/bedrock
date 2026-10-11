@@ -29,6 +29,7 @@ func TestDirectSecretAndIntegrationWritesRespectRecoveryReservation(t *testing.T
 		{"secret", "import", "demo", "TOKEN"}, {"secret", "copy", "demo", "TOKEN", "other"},
 		{"integration", "set", "email"}, {"integration", "remove", "email"},
 		{"integration", "import", "email"}, {"move", "secrets", "demo", "--accept"},
+		{"git", "webhook", "demo", "--off"},
 	}
 	for _, args := range mutations {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {

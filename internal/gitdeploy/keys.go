@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
 )
 
 // Where pushes land.
@@ -248,4 +249,29 @@ func (kf *KeyFile) Write() error {
 		return err
 	}
 	return nil
+}
+
+// UpdateKeys keeps the complete read/change/replace sequence under one
+// process-shared lock. Atomic rename alone cannot preserve two simultaneous
+// permission changes made from different snapshots of the key file.
+func UpdateKeys(path string, change func(*KeyFile) error) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	keys, err := ReadKeys(path)
+	if err != nil {
+		return err
+	}
+	if err := change(keys); err != nil {
+		return err
+	}
+	return keys.Write()
 }

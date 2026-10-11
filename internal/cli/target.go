@@ -207,12 +207,12 @@ func (a *app) targetCapabilities(ctx context.Context, t remote.Target) (targetCa
 }
 
 type boundedBuffer struct {
-	*bytes.Buffer
-	Max int
+	Buffer *bytes.Buffer
+	Max    int
 }
 
 func (b *boundedBuffer) Write(p []byte) (int, error) {
-	if b.Len()+len(p) > b.Max {
+	if b.Buffer.Len()+len(p) > b.Max {
 		return 0, errors.New("remote structured response is too large")
 	}
 	return b.Buffer.Write(p)

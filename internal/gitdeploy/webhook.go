@@ -12,11 +12,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,19 +27,52 @@ import (
 	"github.com/kylebegeman/bedrock/internal/edge"
 	"github.com/kylebegeman/bedrock/internal/integration"
 	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/remote"
 	"github.com/kylebegeman/bedrock/internal/secrets"
 	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 // ValidRepo checks a repository URL bedrock can fetch.
 func ValidRepo(repo string) error {
-	switch {
-	case strings.HasPrefix(repo, "https://"), strings.HasPrefix(repo, "http://"), strings.HasPrefix(repo, "ssh://"), strings.HasPrefix(repo, "file:///"):
-		return nil
-	case strings.HasPrefix(repo, "git@") && strings.Contains(repo, ":"):
-		return nil
+	invalid := errors.New("repository must be a URL without embedded credentials (https://, git@host:owner/repo.git, ssh:// or file:///)")
+	if strings.ContainsAny(repo, "\x00\r\n\t ") {
+		return invalid
 	}
-	return fmt.Errorf("%q isn't a repository URL bedrock can fetch (https://, git@host:owner/repo.git, ssh:// or file:///)", repo)
+	if strings.HasPrefix(repo, "git@") {
+		host, path, ok := strings.Cut(strings.TrimPrefix(repo, "git@"), ":")
+		if ok && host != "" && path != "" && !strings.HasPrefix(host, "-") && !strings.ContainsAny(host, "/@?#") {
+			return nil
+		}
+		return invalid
+	}
+	u, err := url.Parse(repo)
+	if err != nil || u.Fragment != "" || u.RawQuery != "" || u.Path == "" || u.Path == "/" {
+		return invalid
+	}
+	switch u.Scheme {
+	case "file":
+		if u.Host != "" || u.User != nil || !filepath.IsAbs(u.Path) {
+			return invalid
+		}
+	case "http", "https", "ssh":
+		if u.Hostname() == "" {
+			return invalid
+		}
+		if u.User != nil {
+			if _, password := u.User.Password(); u.Scheme != "ssh" || password {
+				return invalid
+			}
+		}
+		if port := u.Port(); port != "" {
+			number, err := strconv.Atoi(port)
+			if err != nil || number < 1 || number > 65535 {
+				return invalid
+			}
+		}
+	default:
+		return invalid
+	}
+	return nil
 }
 
 var branchPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
@@ -47,8 +82,13 @@ var branchPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 // the rest.
 func ValidBranch(branch string) error {
 	switch {
-	case !branchPattern.MatchString(branch), strings.Contains(branch, ".."), strings.HasSuffix(branch, "/"), strings.HasSuffix(branch, ".lock"):
+	case !branchPattern.MatchString(branch), branch == "HEAD", strings.Contains(branch, ".."), strings.HasSuffix(branch, "/"), strings.HasSuffix(branch, "."):
 		return fmt.Errorf("%q isn't a branch name", branch)
+	}
+	for _, part := range strings.Split(branch, "/") {
+		if part == "" || strings.HasPrefix(part, ".") || strings.HasSuffix(part, ".lock") {
+			return fmt.Errorf("%q isn't a branch name", branch)
+		}
 	}
 	return nil
 }
@@ -70,6 +110,9 @@ type Webhook struct {
 // and, for a repository reached over SSH, a deploy key of its own. Both
 // live in bedrock's own secrets; the caller shows them once.
 func Configure(ctx context.Context, store *state.Store, sec *secrets.Store, appName, repo, branch, host string) (*Webhook, error) {
+	if !ValidApp(appName) {
+		return nil, errors.New("invalid webhook app name")
+	}
 	if err := ValidRepo(repo); err != nil {
 		return nil, err
 	}
@@ -152,6 +195,9 @@ func VerifySignature(secret string, body []byte, header string) bool {
 // Receiver answers webhooks and deploys what they announce, one deploy per
 // app at a time; pushes that arrive meanwhile collapse into the newest.
 type Receiver struct {
+	// Context owns background fetches and deploys for the daemon lifetime.
+	// Request cancellation does not cancel an accepted deployment.
+	Context context.Context
 	Store   *state.Store
 	Secrets *secrets.Store
 	Deploy  Deployer
@@ -205,7 +251,7 @@ func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if !VerifySignature(values[integration.WebhookSecretName(appName)], body, req.Header.Get("X-Hub-Signature-256")) {
-		r.Log("webhook for %s: bad signature from %s", appName, logSafe(req.Header.Get("X-Forwarded-For")))
+		r.log("webhook for %s: bad signature from %s", appName, logSafe(req.Header.Get("X-Forwarded-For")))
 		http.Error(w, "bad signature", http.StatusUnauthorized)
 		return
 	}
@@ -229,7 +275,10 @@ func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		fmt.Fprintf(w, "ignored: %s isn't %s\n", ev.Ref, hook.Branch)
 		return
 	}
-	r.enqueue(appName)
+	if !r.enqueue(appName) {
+		http.Error(w, "webhook receiver is stopping", http.StatusServiceUnavailable)
+		return
+	}
 	w.WriteHeader(http.StatusAccepted)
 	fmt.Fprintf(w, "deploying %s of %s\n", short(ev.After), appName)
 }
@@ -272,24 +321,35 @@ func (r *Receiver) appFor(ctx context.Context, host string) (string, error) {
 
 // enqueue starts a deploy for an app, or marks one as wanted after the
 // deploy that is running: the branch's newest commit is what it deploys.
-func (r *Receiver) enqueue(appName string) {
+func (r *Receiver) enqueue(appName string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	ctx := r.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if ctx.Err() != nil {
+		return false
+	}
 	if r.running == nil {
 		r.running, r.pending = map[string]bool{}, map[string]bool{}
 	}
 	if r.running[appName] {
 		r.pending[appName] = true
-		return
+		return true
 	}
 	r.running[appName] = true
-	go r.work(appName)
+	go r.work(ctx, appName)
+	return true
 }
 
-func (r *Receiver) work(appName string) {
+func (r *Receiver) work(ctx context.Context, appName string) {
+	cleanupNeeded := true
 	defer func() {
 		if p := recover(); p != nil {
-			r.Log("webhook deploy of %s: panic: %v\n%s", appName, p, debug.Stack())
+			r.log("webhook deploy of %s: panic: %v\n%s", appName, p, debug.Stack())
+		}
+		if cleanupNeeded {
 			r.mu.Lock()
 			delete(r.running, appName)
 			delete(r.pending, appName)
@@ -297,16 +357,27 @@ func (r *Receiver) work(appName string) {
 		}
 	}()
 	for {
-		r.deployOnce(appName)
-		r.mu.Lock()
-		if r.pending[appName] {
-			delete(r.pending, appName)
-			r.mu.Unlock()
-			continue
+		if ctx.Err() != nil {
+			return
 		}
-		delete(r.running, appName)
+		r.deployOnce(ctx, appName)
+		r.mu.Lock()
+		pending := r.pending[appName] && ctx.Err() == nil
+		delete(r.pending, appName)
+		if !pending {
+			delete(r.running, appName)
+			cleanupNeeded = false
+		}
 		r.mu.Unlock()
-		return
+		if !pending {
+			return
+		}
+	}
+}
+
+func (r *Receiver) log(format string, args ...any) {
+	if r.Log != nil {
+		r.Log(format, args...)
 	}
 }
 
@@ -327,8 +398,7 @@ func (r *Receiver) Wait(ctx context.Context) {
 	}
 }
 
-func (r *Receiver) deployOnce(appName string) {
-	ctx := context.Background()
+func (r *Receiver) deployOnce(ctx context.Context, appName string) {
 	hook, err := r.Store.GitHookFor(ctx, appName)
 	if err != nil || hook == nil {
 		return
@@ -351,8 +421,8 @@ func (r *Receiver) deployOnce(appName string) {
 		PruneBuilds(r.BuildsDir, appName, 3)
 	}
 	_ = r.Store.RecordGitHook(ctx, appName, short(commit), result, time.Now().UTC())
-	r.Log("webhook deploy of %s %s: %s", appName, short(commit), result)
-	if result != "deployed" && r.Notify != nil {
+	r.log("webhook deploy of %s %s: %s", appName, short(commit), result)
+	if result != "deployed" && r.Notify != nil && ctx.Err() == nil {
 		r.Notify(ctx, appName+": the deploy from "+hook.Repo+" failed",
 			fmt.Sprintf("A push to %s of %s asked for a deploy, and it %s.\n\nThe running revision stays. bedrock history on the machine has the receipt.\n", hook.Branch, hook.Repo, result))
 	}
@@ -372,9 +442,22 @@ func lastFailure(log string) string {
 // fetch brings the branch's newest commit into the app's mirror and
 // writes its tree out.
 func (r *Receiver) fetch(ctx context.Context, h state.GitHook) (string, string, error) {
+	if !ValidApp(h.App) {
+		return "", "", errors.New("invalid webhook app name")
+	}
+	if err := ValidRepo(h.Repo); err != nil {
+		return "", "", err
+	}
+	if err := ValidBranch(h.Branch); err != nil {
+		return "", "", err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	mirror := filepath.Join(r.SourcesDir, h.App+".git")
+	sourceRoot, err := filepath.Abs(r.SourcesDir)
+	if err != nil {
+		return "", "", err
+	}
+	mirror := filepath.Join(sourceRoot, h.App+".git")
 	if _, err := os.Stat(filepath.Join(mirror, "HEAD")); errors.Is(err, os.ErrNotExist) {
 		if err := os.MkdirAll(r.SourcesDir, 0o700); err != nil {
 			return "", "", err
@@ -395,13 +478,13 @@ func (r *Receiver) fetch(ctx context.Context, h state.GitHook) (string, string, 
 		}
 		// Made afresh, so the file has the mode asked for and not one an
 		// earlier bedrock left it with.
-		keyFile := filepath.Join(r.SourcesDir, "."+h.App+".key")
+		keyFile := filepath.Join(sourceRoot, "."+h.App+".key")
 		_ = os.Remove(keyFile)
 		if err := os.WriteFile(keyFile, []byte(key), 0o600); err != nil {
 			return "", "", err
 		}
 		defer os.Remove(keyFile)
-		env = append(env, "GIT_SSH_COMMAND=ssh -i "+keyFile+" -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="+filepath.Join(r.SourcesDir, "known_hosts"))
+		env = append(env, "GIT_SSH_COMMAND=ssh -i "+remote.Quote(keyFile)+" -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="+remote.Quote(filepath.Join(sourceRoot, "known_hosts")))
 	}
 	ref := "refs/heads/" + h.Branch
 	fetch := exec.CommandContext(ctx, "git", "-C", mirror, "fetch", "--quiet", "--force", "--depth", "1", h.Repo, ref+":"+ref)

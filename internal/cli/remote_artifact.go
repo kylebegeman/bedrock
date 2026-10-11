@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -29,16 +30,6 @@ func snapshotSource(ctx context.Context, source string) (*os.File, string, error
 	if err != nil {
 		return nil, "", err
 	}
-	// Environment files belong in the secret store, even in a non-Git tree.
-	selected := files[:0]
-	for _, file := range files {
-		name := filepath.Base(file)
-		if name == ".env" || strings.HasPrefix(name, ".env.") {
-			continue
-		}
-		selected = append(selected, file)
-	}
-	files = selected
 	f, err := os.CreateTemp("", "bedrock-source-*.tar.gz")
 	if err != nil {
 		return nil, "", err
@@ -110,8 +101,8 @@ func (a *app) targetStateArgs() []string {
 }
 func (a *app) uploadArtifact(ctx context.Context, t remote.Target, f *os.File, hash, kind string) (string, error) {
 	args := append(a.targetStateArgs(), "_remote-artifact", "--sha256="+hash, "--kind="+kind)
-	var out strings.Builder
-	if err := targetTransport().Run(ctx, t, args, f, &out, a.stderr); err != nil {
+	var out bytes.Buffer
+	if err := targetTransport().Run(ctx, t, args, f, &boundedBuffer{Buffer: &out, Max: 1 << 20}, a.stderr); err != nil {
 		return "", fmt.Errorf("upload to target: %w", err)
 	}
 	path := strings.TrimSpace(out.String())

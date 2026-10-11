@@ -20,7 +20,7 @@ func newExec(a *app) *cobra.Command {
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dash := cmd.ArgsLenAtDash()
-			if dash < 1 {
+			if dash < 1 || dash > 2 {
 				return fmt.Errorf("give the app, optionally the workload, then -- and the command")
 			}
 			target, command := args[:dash], args[dash:]

@@ -103,7 +103,7 @@ command's own exit code.`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dash := cmd.ArgsLenAtDash()
-			if dash < 1 || dash >= len(args) {
+			if dash < 1 || dash > 2 || dash >= len(args) {
 				return fmt.Errorf("give the app, optionally the workload, then -- and the command")
 			}
 			in := apps.RunInput{App: args[0], Workload: optional(args[:dash], 1), Command: args[dash:], Secrets: secretNames}

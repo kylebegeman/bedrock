@@ -24,21 +24,27 @@ const MaxSource int64 = 2 << 30
 // BuildDir names the directory one deploy's source is written to, under
 // the app's own, so PruneBuilds can keep the newest few.
 func BuildDir(root, app, label string) string {
-	return filepath.Join(root, app, fmt.Sprintf("%s-%d", label, time.Now().UnixMilli()))
+	return filepath.Join(root, app, fmt.Sprintf("%s-%d", label, time.Now().UnixNano()))
 }
 
 // NewBuildDir makes the directory one deploy's source is written to.
 func NewBuildDir(root, app, label string) (string, error) {
-	dir := BuildDir(root, app, label)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if !ValidApp(app) || label == "" || filepath.Base(label) != label || strings.ContainsAny(label, "\\\x00\r\n") {
+		return "", errors.New("invalid source tree app or label")
+	}
+	parent := filepath.Join(root, app)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return "", err
 	}
-	return dir, nil
+	return os.MkdirTemp(parent, fmt.Sprintf("%s-%d-", label, time.Now().UnixNano()))
 }
 
 // PruneBuilds keeps an app's newest few source trees: the images are in
 // the registry, so older trees are only disk.
 func PruneBuilds(root, app string, keep int) {
+	if !ValidApp(app) || keep < 0 {
+		return
+	}
 	entries, err := os.ReadDir(filepath.Join(root, app))
 	if err != nil {
 		return
@@ -74,7 +80,19 @@ func ExportCommit(ctx context.Context, repoDir, commit, dest string) error {
 		return err
 	}
 	extractErr := Extract(stdout, dest)
+	// An extractor may reject the first header while git is still writing.
+	// Closing its pipe releases the producer instead of waiting on a full pipe.
+	if extractErr != nil {
+		_ = stdout.Close()
+	} else {
+		// tar EOF can precede git's archive padding. Drain it so a valid
+		// producer finishes without a broken pipe or a blocked final write.
+		_, extractErr = io.Copy(io.Discard, stdout)
+	}
 	waitErr := cmd.Wait()
+	if extractErr != nil {
+		return extractErr
+	}
 	if waitErr != nil {
 		return fmt.Errorf("git archive %s: %s", commit, strings.TrimSpace(stderr.String()))
 	}

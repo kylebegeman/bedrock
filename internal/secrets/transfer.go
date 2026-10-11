@@ -107,7 +107,7 @@ func (s *Store) Import(app, name string, input io.Reader) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if current[name] == t.Value {
+	if value, present := current[name]; present && value == t.Value {
 		return version, nil
 	}
 	return s.Set(app, name, t.Value)
@@ -175,17 +175,22 @@ func (s *Store) ImportBundle(app string, input io.Reader) ([]string, error) {
 	}
 	sort.Strings(names)
 	var stored []string
+	changes := map[string]*string{}
 	for _, name := range names {
 		if !ValidName(name) {
-			return stored, fmt.Errorf("the bundle names a secret that isn't one: %q", name)
+			return nil, errors.New("the bundle names an invalid secret")
 		}
-		if current[name] == b.Values[name] {
+		if value, present := current[name]; present && value == b.Values[name] {
 			continue
 		}
-		if _, err := s.Set(app, name, b.Values[name]); err != nil {
-			return stored, err
-		}
+		value := b.Values[name]
+		changes[name] = &value
 		stored = append(stored, name)
+	}
+	if len(changes) > 0 {
+		if _, err := s.SetAll(app, changes); err != nil {
+			return nil, err
+		}
 	}
 	return stored, nil
 }
@@ -218,7 +223,10 @@ func (s *Store) CopyAll(from, to string) ([]string, error) {
 	changes := map[string]*string{}
 	names := make([]string, 0, len(values))
 	for name, value := range values {
-		if !ValidName(name) || current[name] == value {
+		if !ValidName(name) {
+			return nil, errors.New("source contains an invalid secret name")
+		}
+		if existing, present := current[name]; present && existing == value {
 			continue
 		}
 		v := value
