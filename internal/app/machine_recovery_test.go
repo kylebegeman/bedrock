@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -576,6 +578,212 @@ func TestRecoveryEmbeddedDataStillRequiresMatchingMetadataAndVerifiedSuccess(t *
 			loaded, err := x.load()
 			if err != nil || loaded.DataReady[m.App] {
 				t.Fatal("failed restored data was marked ready:", err)
+			}
+		})
+	}
+}
+
+func TestRecoveryCleanupRefusesReplacedClaimedResources(t *testing.T) {
+	for _, resource := range []string{"container", "network"} {
+		t.Run(resource, func(t *testing.T) {
+			r, _ := recoveryFixture(t)
+			in := recoveryInput(true)
+			x := &machineRecovering{r: r, in: in, dir: RecoveryDirectory(r.StateDir, in.ID)}
+			m := recoveryManifest()
+			m.Data = &manifest.Data{Volumes: map[string]manifest.Volume{"uploads": {}}}
+			body, _ := json.Marshal(m)
+			rec := &machineRecoveryRecord{Input: in, ResourcesClaimed: true, Catalog: machineRecoveryCatalog{Revisions: []state.Revision{{App: m.App, Manifest: body}}}}
+			fake := dockertest.New(t)
+			n := x.names(&m)
+			labels := map[string]string{"bedrock.recovery": in.ID, docker.LabelOwner: docker.OwnerValue, docker.LabelApp: m.App, docker.LabelWorkload: "web", docker.LabelRevision: recoveryRevisionID(in.ID)}
+			if resource == "container" {
+				labels["bedrock.recovery"] = "someone-else"
+			}
+			fake.Add(dockertest.Container{Name: n.containers["web"], Running: true, Labels: labels})
+			networkLabels := map[string]string{docker.LabelOwner: docker.OwnerValue}
+			if resource == "network" {
+				networkLabels = nil
+			}
+			fake.AddNetwork(n.network, networkLabels)
+			fake.AddVolume(n.volumes["uploads"], map[string]string{docker.LabelOwner: docker.OwnerValue})
+			e, err := docker.Connect(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer e.Close()
+			if err := x.cleanup(rec, e); err == nil {
+				t.Fatal("cleanup deleted a replacement outside recovery ownership")
+			}
+			if _, exists := fake.Container(n.containers["web"]); !exists {
+				t.Fatal("cleanup removed resources before checking all ownership")
+			}
+			if len(fake.VolumeNames()) != 1 || len(fake.NetworkNames()) != 1 {
+				t.Fatal("refused cleanup deleted retained data or networks")
+			}
+		})
+	}
+}
+
+func TestRecoveryRehearsalResumesCleanupWithoutRecreatingResources(t *testing.T) {
+	r, _ := recoveryFixture(t)
+	in := recoveryInput(true)
+	x := &machineRecovering{r: r, in: in, dir: RecoveryDirectory(r.StateDir, in.ID)}
+	// Model interruption after private readiness and before the cleanup
+	// completion marker, when staged secrets may already have been removed.
+	if err := writeRecoveryJSON(x.recordPath(), map[string]any{"input": in, "rehearsal_cleanup_started": true}); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	step := x.step("ready", "prove private readiness", func(context.Context, io.Writer) error {
+		called = true
+		return errors.New("staged artifacts have already been removed")
+	})
+	if err := step.Apply(context.Background(), io.Discard); err != nil || called {
+		t.Fatalf("cleanup resume recreated private resources: called=%v, err=%v", called, err)
+	}
+	dockertest.New(t)
+	finish := x.step("finish", "complete cleanup", x.finish)
+	if err := finish.Apply(context.Background(), io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := x.load()
+	if err != nil || rec.FinishedAt.IsZero() {
+		t.Fatalf("cleanup retry did not complete its proof: %+v, %v", rec, err)
+	}
+}
+
+func TestRecoveryRehearsalCleanupFailurePreservesItsReadinessProof(t *testing.T) {
+	r, _ := recoveryFixture(t)
+	in := recoveryInput(true)
+	x := &machineRecovering{r: r, in: in, dir: RecoveryDirectory(r.StateDir, in.ID)}
+	m := recoveryManifest()
+	body, _ := json.Marshal(m)
+	rec := &machineRecoveryRecord{Input: in, ResourcesClaimed: true, Catalog: machineRecoveryCatalog{Revisions: []state.Revision{{App: m.App, Manifest: body}}}, Ready: map[string]bool{m.App: true}}
+	if err := x.save(rec); err != nil {
+		t.Fatal(err)
+	}
+	fake := dockertest.New(t)
+	name := x.names(&m).containers["web"]
+	fake.Add(dockertest.Container{Name: name, Running: true})
+	finish := x.step("finish", "complete cleanup", x.finish)
+	if err := finish.Apply(context.Background(), io.Discard); err == nil {
+		t.Fatal("foreign resource must interrupt cleanup")
+	}
+	rec, err := x.load()
+	if err != nil || !rec.RehearsalCleanupStarted || !rec.Ready[m.App] || !rec.FinishedAt.IsZero() {
+		t.Fatalf("failed cleanup lost its proof or completion ordering: %+v, %v", rec, err)
+	}
+	fake.Remove(name)
+	if err := finish.Apply(context.Background(), io.Discard); err != nil {
+		t.Fatalf("cleanup did not resume after the conflict was resolved: %v", err)
+	}
+}
+
+func TestRecoveryPrivateStartRefusesReplacedContainer(t *testing.T) {
+	r, _ := recoveryFixture(t)
+	in := recoveryInput(true)
+	x := &machineRecovering{r: r, in: in, dir: RecoveryDirectory(r.StateDir, in.ID)}
+	m := recoveryManifest()
+	body, _ := json.Marshal(m)
+	rev := state.Revision{App: m.App, Manifest: body}
+	fake := dockertest.New(t)
+	name := x.names(&m).containers["web"]
+	fake.Add(dockertest.Container{Name: name, Running: false})
+	e, err := docker.Connect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if err := x.startPrivate(context.Background(), &machineRecoveryRecord{}, e, rev, io.Discard); err == nil || !strings.Contains(err.Error(), "ownership") {
+		t.Fatalf("private start adopted foreign container: %v", err)
+	}
+	if container, ok := fake.Container(name); !ok || container.Running {
+		t.Fatal("private recovery started or removed the foreign container")
+	}
+}
+
+func TestRecoveryCleanupRetainsDataWhenAWriterCannotBeRemoved(t *testing.T) {
+	r, _ := recoveryFixture(t)
+	in := recoveryInput(true)
+	x := &machineRecovering{r: r, in: in, dir: RecoveryDirectory(r.StateDir, in.ID)}
+	m := recoveryManifest()
+	m.Data = &manifest.Data{Volumes: map[string]manifest.Volume{"uploads": {}}}
+	body, _ := json.Marshal(m)
+	rec := &machineRecoveryRecord{Input: in, ResourcesClaimed: true, Catalog: machineRecoveryCatalog{Revisions: []state.Revision{{App: m.App, Manifest: body}}}}
+	fake := dockertest.New(t)
+	n := x.names(&m)
+	fake.Add(dockertest.Container{Name: n.containers["web"], Running: true, Labels: map[string]string{"bedrock.recovery": in.ID, docker.LabelOwner: docker.OwnerValue, docker.LabelApp: m.App, docker.LabelWorkload: "web", docker.LabelRevision: recoveryRevisionID(in.ID)}})
+	fake.AddNetwork(n.network, map[string]string{docker.LabelOwner: docker.OwnerValue})
+	fake.AddVolume(n.volumes["uploads"], map[string]string{docker.LabelOwner: docker.OwnerValue})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/stop") {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"message":"writer stop unavailable"}`)
+			return
+		}
+		fake.ServeHTTP(w, request)
+	}))
+	defer server.Close()
+	t.Setenv("DOCKER_HOST", "tcp"+strings.TrimPrefix(server.URL, "http"))
+	e, err := docker.Connect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if err := x.cleanup(rec, e); err == nil {
+		t.Fatal("writer removal failure was ignored")
+	}
+	if len(fake.VolumeNames()) != 1 || len(fake.NetworkNames()) != 1 {
+		t.Fatal("cleanup discarded data or networks while its writer could still run")
+	}
+}
+
+func TestRecoveryCutoverOwnershipAdoptsPreviousLiveSpecs(t *testing.T) {
+	r, _ := recoveryFixture(t)
+	in := recoveryInput(false)
+	x := &machineRecovering{r: r, in: in, dir: RecoveryDirectory(r.StateDir, in.ID)}
+	m := recoveryManifest()
+	fake := dockertest.New(t)
+	n := x.names(&m)
+	// Existing receipts may have reached normal cutover specs, which used
+	// the app/revision ownership labels before a readiness marker was saved.
+	fake.Add(dockertest.Container{Name: n.containers["web"], Running: true, Labels: map[string]string{
+		docker.LabelOwner: docker.OwnerValue, docker.LabelApp: m.App, docker.LabelWorkload: "web", docker.LabelRevision: recoveryRevisionID(in.ID),
+	}})
+	e, err := docker.Connect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if err := x.checkRecoveryContainers(context.Background(), e, &m, n, true); err != nil {
+		t.Fatalf("interrupted cutover cannot adopt its old live specs: %v", err)
+	}
+}
+
+func TestRecoveryCleanupChecksAllOwnershipLabels(t *testing.T) {
+	for _, changed := range []string{docker.LabelOwner, docker.LabelApp, docker.LabelWorkload, docker.LabelRevision} {
+		t.Run(changed, func(t *testing.T) {
+			r, _ := recoveryFixture(t)
+			in := recoveryInput(true)
+			x := &machineRecovering{r: r, in: in, dir: RecoveryDirectory(r.StateDir, in.ID)}
+			m := recoveryManifest()
+			body, _ := json.Marshal(m)
+			rec := &machineRecoveryRecord{Input: in, ResourcesClaimed: true, Catalog: machineRecoveryCatalog{Revisions: []state.Revision{{App: m.App, Manifest: body}}}}
+			fake := dockertest.New(t)
+			name := x.names(&m).containers["web"]
+			labels := map[string]string{"bedrock.recovery": in.ID, docker.LabelOwner: docker.OwnerValue, docker.LabelApp: m.App, docker.LabelWorkload: "web", docker.LabelRevision: recoveryRevisionID(in.ID)}
+			labels[changed] = "foreign"
+			fake.Add(dockertest.Container{Name: name, Running: true, Labels: labels})
+			e, err := docker.Connect(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer e.Close()
+			if err := x.cleanup(rec, e); err == nil {
+				t.Fatal("matching recovery ID concealed changed resource ownership")
+			}
+			if container, exists := fake.Container(name); !exists || !container.Running {
+				t.Fatal("foreign container changed despite its ownership mismatch")
 			}
 		})
 	}

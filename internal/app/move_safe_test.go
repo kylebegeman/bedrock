@@ -826,3 +826,32 @@ func TestMoveFinalCaptureFailureRecordsFailureAndKeepsSourceFenced(t *testing.T)
 		t.Fatal("capture failure resumed source writers")
 	}
 }
+
+func TestMoveStageCannotRegressCutoverWriterAuthority(t *testing.T) {
+	for _, phase := range []string{"cutting-over", "cutover"} {
+		t.Run(phase, func(t *testing.T) {
+			ctx := context.Background()
+			store, m, h, dir := safeMoveFixture(t)
+			in := MoveStageInput{Source: dir, Revision: MoveTargetRevision(h), Handoff: h}
+			stage := MoveStage{Deploy: Deploy{Store: store, Secrets: newSecrets(t)}, Hostname: func() string { return "target" }}
+			raw, _ := json.Marshal(in)
+			plan, err := stage.Plan(ctx, raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := saveMigration(store.Path(), &migrationRecord{Handoff: h, Role: "target", Phase: phase, TargetRevision: in.Revision}); err != nil {
+				t.Fatal(err)
+			}
+			if err := plan.Steps[0].Apply(ctx, io.Discard); err == nil || !strings.Contains(err.Error(), "cutover") {
+				t.Fatalf("reviewed staging can regress %s writer authority: %v", phase, err)
+			}
+			if _, err := stage.Plan(ctx, raw); err == nil || !strings.Contains(err.Error(), "cutover") {
+				t.Fatalf("staging can regress %s writer authority: %v", phase, err)
+			}
+			record, err := readMigration(store.Path(), m.App)
+			if err != nil || record.Phase != phase {
+				t.Fatalf("rejected staging changed authority: %+v, %v", record, err)
+			}
+		})
+	}
+}

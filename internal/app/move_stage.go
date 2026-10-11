@@ -129,6 +129,9 @@ func (s MoveStage) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan,
 	if record != nil && (record.Role != "target" || !sameMigration(record.Handoff, h) || record.Handoff.Snapshot != h.Snapshot || record.TargetRevision != in.Revision) {
 		return nil, errors.New("target already holds another migration; do not overwrite its data")
 	}
+	if record != nil && (record.Phase == "cutting-over" || record.Phase == "cutover") {
+		return nil, errors.New("target cutover has already begun; retry move cutover instead of staging its live data again")
+	}
 	if active, err := s.Deploy.Store.RevisionWithStatus(ctx, m.App, state.RevisionActive); err != nil {
 		return nil, err
 	} else if active != nil {
@@ -163,6 +166,9 @@ func (s MoveStage) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan,
 			}
 			if existing != nil {
 				if existing.Role == "target" && sameMigration(existing.Handoff, h) && existing.Handoff.Snapshot == h.Snapshot && existing.TargetRevision == in.Revision {
+					if existing.Phase == "cutting-over" || existing.Phase == "cutover" {
+						return errors.New("target cutover has already begun; retry move cutover instead of staging its live data again")
+					}
 					return nil
 				}
 				return errors.New("target migration changed")

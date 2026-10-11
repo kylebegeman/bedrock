@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kylebegeman/bedrock/internal/docker"
 	"github.com/kylebegeman/bedrock/internal/docker/dockertest"
 	"github.com/kylebegeman/bedrock/internal/restic"
 	"github.com/kylebegeman/bedrock/internal/state"
@@ -92,7 +93,7 @@ func TestRecoveryAbandonPreservesDataAndUnblocksTheMachine(t *testing.T) {
 	}
 	s := dockertest.New(t)
 	n := x.names(&m)
-	s.Add(dockertest.Container{Name: n.containers["web"], Running: true, Labels: map[string]string{"bedrock.recovery": in.ID}})
+	s.Add(dockertest.Container{Name: n.containers["web"], Running: true, Labels: map[string]string{"bedrock.recovery": in.ID, docker.LabelOwner: docker.OwnerValue, docker.LabelApp: m.App, docker.LabelWorkload: "web", docker.LabelRevision: recoveryRevisionID(in.ID)}})
 	def := RecoverAbandon{Recovery: r}
 	raw, _ := json.Marshal(RecoverCutoverInput{ID: in.ID})
 	plan, err := def.Plan(context.Background(), raw)
@@ -244,5 +245,53 @@ func TestRecoveryCutoverMarksItsStartBeforeRuntimeMutation(t *testing.T) {
 	report, err := ReadMachineRecoveryReport(r.StateDir, in.ID)
 	if err != nil || report.Status != "cutover-incomplete" {
 		t.Fatal("a begun interrupted cutover must be visible in the recovery report")
+	}
+}
+
+func TestCompletedRecoveryCutoverDoesNotReplayLiveChanges(t *testing.T) {
+	ctx := context.Background()
+	r, _ := recoveryFixture(t)
+	in := recoveryInput(false)
+	x := &machineRecovering{r: r, in: in, dir: RecoveryDirectory(r.StateDir, in.ID)}
+	m := recoveryManifest()
+	body, _ := json.Marshal(m)
+	recovered := state.Revision{App: m.App, ID: recoveryRevisionID(in.ID), Manifest: body, Status: state.RevisionFailed, CreatedAt: time.Now()}
+	if err := r.Store.SaveRevision(ctx, recovered); err != nil {
+		t.Fatal(err)
+	}
+	newer := recovered
+	newer.ID, newer.Status = "newer-live", state.RevisionActive
+	if err := r.Store.SaveRevision(ctx, newer); err != nil {
+		t.Fatal(err)
+	}
+	rec := &machineRecoveryRecord{Input: in, Snapshot: resticSnapshot(in.Snapshot), FinishedAt: time.Now(), StateInstalled: true, CutoverStarted: true, Cutover: true,
+		Catalog: machineRecoveryCatalog{Revisions: []state.Revision{{App: m.App, Manifest: body, Images: map[string]string{"web": "sha256:" + strings.Repeat("b", 64)}}}}, Ready: map[string]bool{m.App: true}, CutoverReady: map[string]bool{m.App: true}}
+	if err := x.save(rec); err != nil {
+		t.Fatal(err)
+	}
+	// A crash after recording completion can leave the reservation behind.
+	if err := x.reserve(rec); err != nil {
+		t.Fatal(err)
+	}
+	fake := dockertest.New(t)
+	raw, _ := json.Marshal(RecoverCutoverInput{ID: in.ID})
+	plan, err := (RecoverCutover{Recovery: r}).Plan(ctx, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range plan.Steps {
+		if err := step.Apply(ctx, io.Discard); err != nil {
+			t.Fatalf("completed cutover replay %s: %v", step.Name, err)
+		}
+	}
+	active, err := r.Store.RevisionWithStatus(ctx, m.App, state.RevisionActive)
+	if err != nil || active == nil || active.ID != newer.ID {
+		t.Fatalf("completed recovery reactivated stale code: %+v, %v", active, err)
+	}
+	if len(fake.Calls()) != 0 {
+		t.Fatalf("completed recovery changed Docker: %v", fake.Calls())
+	}
+	if err := CheckMachineRecoveryWriteAccess(r.Store.Path()); err != nil {
+		t.Fatalf("completed recovery did not release its orphaned reservation: %v", err)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -90,6 +91,7 @@ func (p *Prober) Observe(ctx context.Context) []Condition {
 	e, err := p.Connect(ctx)
 	if err != nil {
 		conditions = append(conditions, Condition{Key: "host:docker", Subject: "docker", Severity: state.SeverityCritical, Message: "docker isn't answering: " + err.Error()})
+		conditions = append(conditions, p.unobservedIncidents(ctx)...)
 		return append(conditions, p.watches(ctx)...)
 	}
 	defer e.Close()
@@ -99,8 +101,22 @@ func (p *Prober) Observe(ctx context.Context) []Condition {
 
 	active, err := p.Store.ActiveRevisions(ctx)
 	if err != nil {
+		conditions = append(conditions, p.unobservedIncidents(ctx)...)
 		return append(conditions, Condition{Key: "host:state", Subject: "the state store", Severity: state.SeverityCritical, Message: err.Error()})
 	}
+	currentContainers := map[string]bool{}
+	for _, rev := range active {
+		for _, container := range rev.Containers {
+			currentContainers[container] = true
+		}
+	}
+	p.restartsMu.Lock()
+	for container := range p.restarts {
+		if !currentContainers[container] {
+			delete(p.restarts, container)
+		}
+	}
+	p.restartsMu.Unlock()
 	type finding struct {
 		app      string
 		severity string
@@ -124,6 +140,22 @@ func (p *Prober) Observe(ctx context.Context) []Condition {
 		}
 	}
 	return append(conditions, p.watches(ctx)...)
+}
+
+// Missing observations during an infrastructure outage cannot certify that
+// an existing app or edge incident recovered.
+func (p *Prober) unobservedIncidents(ctx context.Context) []Condition {
+	incidents, err := p.Store.OpenIncidents(ctx)
+	if err != nil {
+		return nil
+	}
+	var conditions []Condition
+	for _, incident := range incidents {
+		if strings.HasPrefix(incident.Key, "app:") || incident.Key == "host:edge" {
+			conditions = append(conditions, Condition{Key: incident.Key, Unknown: true})
+		}
+	}
+	return conditions
 }
 
 // app looks at one app's containers, health, checks, certificates and
@@ -346,7 +378,7 @@ func healthProblem(ctx context.Context, info *docker.Info, w manifest.Workload) 
 	if w.Kind == manifest.Static {
 		port, _ = strconv.Atoi(docker.StaticPort)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://%s:%d%s", ip, port, w.Health.Path), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+net.JoinHostPort(ip, strconv.Itoa(port))+w.Health.Path, nil)
 	if err != nil {
 		return err.Error()
 	}

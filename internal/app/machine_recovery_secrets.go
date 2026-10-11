@@ -180,6 +180,13 @@ func SealRecoveryIdentity(sec *secrets.Store, stateDir, id string, input io.Read
 	if err := f.Close(); err != nil {
 		return "", err
 	}
+	// The protected artifact and its workspace must survive before its
+	// checksum is admitted into the operation journal.
+	for _, path := range []string{dir, filepath.Dir(dir), stateDir} {
+		if err := syncRecoveryDirectory(path); err != nil {
+			return "", err
+		}
+	}
 	sum := sha256.Sum256(encrypted.Bytes())
 	return hex.EncodeToString(sum[:]), nil
 }
@@ -333,7 +340,7 @@ func resealRecoverySecrets(sourceDir, destination string, source, target *age.X2
 				cleanup()
 				return nil, err
 			}
-			if err := os.WriteFile(filepath.Join(stage, file.Name()), sealed.Bytes(), 0o600); err != nil {
+			if err := writeRecoveryFile(filepath.Join(stage, file.Name()), sealed.Bytes()); err != nil {
 				cleanup()
 				return nil, err
 			}
@@ -358,7 +365,7 @@ func resealRecoverySecrets(sourceDir, destination string, source, target *age.X2
 			cleanup()
 			return nil, errors.New("source current secret version is missing")
 		}
-		if err := os.WriteFile(filepath.Join(stage, "current"), []byte(strconv.Itoa(current)+"\n"), 0o600); err != nil {
+		if err := writeRecoveryFile(filepath.Join(stage, "current"), []byte(strconv.Itoa(current)+"\n")); err != nil {
 			cleanup()
 			return nil, err
 		}
@@ -380,6 +387,9 @@ func resealRecoverySecrets(sourceDir, destination string, source, target *age.X2
 		}
 		if err := os.Rename(stage, dest); err != nil {
 			cleanup()
+			return nil, err
+		}
+		if err := syncRecoveryDirectory(destination); err != nil {
 			return nil, err
 		}
 		mapping[app] = versions

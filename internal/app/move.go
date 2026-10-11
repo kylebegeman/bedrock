@@ -149,6 +149,12 @@ func ReadHandoff(r io.Reader) (*Handoff, error) {
 	if strings.TrimSpace(h.App) == "" {
 		return nil, errors.New("this isn't a handoff: it names no app")
 	}
+	if !manifest.ValidApp(h.App) {
+		return nil, errors.New("this isn't a handoff: it names an invalid app")
+	}
+	if err := dec.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return nil, errors.New("this isn't a handoff: expected one complete JSON document")
+	}
 	return &h, nil
 }
 

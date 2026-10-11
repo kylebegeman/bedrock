@@ -244,6 +244,9 @@ func (x *machineRecovering) startPrivate(ctx context.Context, rec *machineRecove
 		return err
 	}
 	n := x.names(&m)
+	if err := x.checkRecoveryContainers(ctx, e, &m, n, false); err != nil {
+		return err
+	}
 	if err := e.EnsureInternalNetwork(ctx, n.network); err != nil {
 		return err
 	}
@@ -339,48 +342,130 @@ func (x *machineRecovering) startPrivate(ctx context.Context, rec *machineRecove
 	return nil
 }
 
+// Recorded names reserve resources, but a container or network can be
+// replaced outside Bedrock between attempts. Validate every existing private
+// resource before removing any container or restored volume.
+func (x *machineRecovering) checkPrivateResources(ctx context.Context, rec *machineRecoveryRecord, e *docker.Engine) error {
+	for _, rev := range rec.Catalog.Revisions {
+		var m manifest.Manifest
+		if err := json.Unmarshal(rev.Manifest, &m); err != nil {
+			return err
+		}
+		n := x.names(&m)
+		if err := x.checkRecoveryContainers(ctx, e, &m, n, false); err != nil {
+			return err
+		}
+		if found, err := e.NetworkExists(ctx, n.network); err != nil {
+			return err
+		} else if found {
+			owned, err := e.Networks(ctx, n.network)
+			if err != nil {
+				return err
+			}
+			if !slices.Contains(owned, n.network) {
+				return fmt.Errorf("recovery network %s is no longer owned by bedrock", n.network)
+			}
+		}
+	}
+	return nil
+}
+
+func (x *machineRecovering) checkRecoveryContainers(ctx context.Context, e *docker.Engine, m *manifest.Manifest, n drillNames, allowLive bool) error {
+	containers := make([]string, 0, len(n.containers)+2)
+	roles := map[string]string{n.postgres: postgresWorkload, n.objects: objectsWorkload}
+	for _, name := range sortedKeys(n.containers) {
+		containers = append(containers, n.containers[name])
+		roles[n.containers[name]] = name
+	}
+	if m.PostgresVersion() != "" {
+		containers = append(containers, n.postgres)
+	}
+	if m.HasObjects() {
+		containers = append(containers, n.objects)
+	}
+	for _, name := range containers {
+		info, err := e.Inspect(ctx, name)
+		if docker.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		owned := info.Labels[docker.LabelOwner] == docker.OwnerValue && info.Labels[docker.LabelApp] == m.App
+		privateRole := roles[name]
+		if name == n.postgres || name == n.objects {
+			privateRole = "recovery"
+		}
+		private := owned && info.Labels["bedrock.recovery"] == x.in.ID && info.Labels[docker.LabelWorkload] == privateRole
+		if name != n.postgres && name != n.objects {
+			private = private && info.Labels[docker.LabelRevision] == recoveryRevisionID(x.in.ID)
+		}
+		if private {
+			continue
+		}
+		// Earlier interrupted cutovers already used normal live specs.
+		// Their exact app/revision labels remain ownership evidence, while
+		// private rehearsal resources always require their recovery ID.
+		live := allowLive && !x.in.Rehearsal && info.Labels["bedrock.recovery"] == "" &&
+			owned && info.Labels[docker.LabelWorkload] == roles[name]
+		if name != n.postgres && name != n.objects {
+			live = live && info.Labels[docker.LabelRevision] == recoveryRevisionID(x.in.ID)
+		}
+		if !live {
+			return fmt.Errorf("refusing to change container %s because its recovery ownership changed", name)
+		}
+	}
+	return nil
+}
+
 func (x *machineRecovering) cleanup(rec *machineRecoveryRecord, e *docker.Engine) error {
 	if !rec.ResourcesClaimed {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
+	if err := x.checkPrivateResources(ctx, rec, e); err != nil {
+		return err
+	}
 	var failures []error
 	for _, rev := range rec.Catalog.Revisions {
 		var m manifest.Manifest
 		_ = json.Unmarshal(rev.Manifest, &m)
 		n := x.names(&m)
-		for _, c := range n.containers {
-			if err := e.Remove(ctx, c, 5*time.Second); err != nil {
-				failures = append(failures, err)
-			}
+		for _, name := range sortedKeys(n.containers) {
+			failures = append(failures, e.Remove(ctx, n.containers[name], 5*time.Second))
 		}
 		if m.PostgresVersion() != "" {
-			if err := e.Remove(ctx, n.postgres, 5*time.Second); err != nil {
-				failures = append(failures, err)
-			}
-			if _, err := e.RemoveVolume(ctx, n.postgresVolume); err != nil {
-				failures = append(failures, err)
-			}
+			failures = append(failures, e.Remove(ctx, n.postgres, 5*time.Second))
 		}
 		if m.HasObjects() {
-			if err := e.Remove(ctx, n.objects, 5*time.Second); err != nil {
-				failures = append(failures, err)
-			}
+			failures = append(failures, e.Remove(ctx, n.objects, 5*time.Second))
 		}
-		if err := e.RemoveNetwork(ctx, n.network); err != nil {
+	}
+	if err := errors.Join(failures...); err != nil {
+		return err // Retain all restored data while any writer could still run.
+	}
+	for _, rev := range rec.Catalog.Revisions {
+		var m manifest.Manifest
+		_ = json.Unmarshal(rev.Manifest, &m)
+		n := x.names(&m)
+		if m.PostgresVersion() != "" {
+			_, err := e.RemoveVolume(ctx, n.postgresVolume)
 			failures = append(failures, err)
 		}
-		for _, v := range n.volumes {
-			if _, err := e.RemoveVolume(ctx, v); err != nil {
-				failures = append(failures, err)
-			}
+		failures = append(failures, e.RemoveNetwork(ctx, n.network))
+		for _, name := range sortedKeys(n.volumes) {
+			_, err := e.RemoveVolume(ctx, n.volumes[name])
+			failures = append(failures, err)
 		}
-		if len(failures) == 0 {
-			if err := os.RemoveAll(n.dir); err != nil {
-				failures = append(failures, err)
-			}
-		}
+	}
+	if err := errors.Join(failures...); err != nil {
+		return err
+	}
+	for _, rev := range rec.Catalog.Revisions {
+		var m manifest.Manifest
+		_ = json.Unmarshal(rev.Manifest, &m)
+		failures = append(failures, os.RemoveAll(x.names(&m).dir))
 	}
 	return errors.Join(failures...)
 }

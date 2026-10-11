@@ -21,6 +21,9 @@ type Condition struct {
 	Subject  string
 	Severity string
 	Message  string
+	// Unknown holds an existing incident when its subject could not be
+	// observed, without recording a failure or a clean recovery round.
+	Unknown bool
 }
 
 // Notice is what a person gets told.
@@ -88,6 +91,16 @@ func (w *Watcher) init() {
 func (w *Watcher) Round(ctx context.Context, conditions []Condition) error {
 	w.init()
 	now := w.Now()
+	pending, err := w.Store.PendingResolvedIncidentNotices(ctx)
+	if err != nil {
+		return err
+	}
+	for _, incident := range pending {
+		w.notify(ctx, &incident, w.resolvedNotice(incident), now)
+		if err := w.Store.UpdateIncident(ctx, incident); err != nil {
+			return err
+		}
+	}
 	current := map[string]Condition{}
 	for _, c := range conditions {
 		current[c.Key] = c
@@ -102,6 +115,11 @@ func (w *Watcher) Round(ctx context.Context, conditions []Condition) error {
 	}
 
 	for key, c := range current {
+		if c.Unknown {
+			delete(w.failing, key)
+			delete(w.passing, key)
+			continue
+		}
 		w.failing[key]++
 		w.passing[key] = 0
 		inc, isOpen := openByKey[key]

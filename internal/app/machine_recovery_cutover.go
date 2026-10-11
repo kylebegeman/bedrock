@@ -72,6 +72,9 @@ func (c RecoverCutover) Plan(ctx context.Context, raw json.RawMessage) (*kernel.
 		}
 		var m manifest.Manifest
 		_ = json.Unmarshal(rev.Manifest, &m)
+		if rec.Cutover {
+			continue
+		}
 		if err := c.CloudflareOnly.checkRoutes(&m); err != nil {
 			return nil, err
 		}
@@ -79,7 +82,7 @@ func (c RecoverCutover) Plan(ctx context.Context, raw json.RawMessage) (*kernel.
 			return nil, err
 		}
 	}
-	return &kernel.Plan{Target: "recovery " + in.ID, Recovery: kernel.Resume, Steps: []kernel.Step{
+	plan := &kernel.Plan{Target: "recovery " + in.ID, Recovery: kernel.Resume, Steps: []kernel.Step{
 		{Name: "begin", Change: "record the start of reviewed cutover before changing target runtime", Apply: func(ctx context.Context, out io.Writer) error {
 			rec, err := x.load()
 			if err != nil {
@@ -131,6 +134,9 @@ func (c RecoverCutover) Plan(ctx context.Context, raw json.RawMessage) (*kernel.
 					return err
 				}
 				if !rec.CutoverReady[rev.App] {
+					if err := x.checkRecoveryContainers(ctx, e, &m, n, true); err != nil {
+						return err
+					}
 					// These are recovery-owned containers on restored volumes,
 					// never original-source or unrelated target workloads.
 					for _, name := range n.containers {
@@ -286,5 +292,26 @@ func (c RecoverCutover) Plan(ctx context.Context, raw json.RawMessage) (*kernel.
 			fmt.Fprintln(out, "machine recovery cutover complete")
 			return nil
 		}},
-	}}, nil
+	}}
+	for i := range plan.Steps {
+		apply := plan.Steps[i].Apply
+		finish := plan.Steps[i].Name == "finish"
+		plan.Steps[i].Apply = func(ctx context.Context, out io.Writer) error {
+			rec, err := x.load()
+			if err != nil {
+				return err
+			}
+			if rec.Cutover {
+				// A completed recovery ID remains a historical proof even
+				// after later deployments. Only a reservation left behind
+				// between its completion marker and release needs repair.
+				if finish {
+					return x.releaseReservation()
+				}
+				return nil
+			}
+			return apply(ctx, out)
+		}
+	}
+	return plan, nil
 }

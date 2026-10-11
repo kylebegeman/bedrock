@@ -65,6 +65,9 @@ func (a RecoverAbandon) Plan(ctx context.Context, raw json.RawMessage) (*kernel.
 					return err
 				}
 				defer e.Close()
+				if err := x.checkPrivateResources(ctx, rec, e); err != nil {
+					return err
+				}
 				for _, rev := range rec.Catalog.Revisions {
 					var m manifest.Manifest
 					_ = json.Unmarshal(rev.Manifest, &m)

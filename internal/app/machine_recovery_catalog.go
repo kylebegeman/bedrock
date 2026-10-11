@@ -117,6 +117,10 @@ func writeRecoveryJSON(path string, value any) error {
 	if err != nil {
 		return err
 	}
+	return writeRecoveryFile(path, append(data, '\n'))
+}
+
+func writeRecoveryFile(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
@@ -129,7 +133,7 @@ func writeRecoveryJSON(path string, value any) error {
 	if err := f.Chmod(0o600); err != nil {
 		return err
 	}
-	if _, err := f.Write(append(data, '\n')); err != nil {
+	if _, err := f.Write(data); err != nil {
 		return err
 	}
 	if err := f.Sync(); err != nil {

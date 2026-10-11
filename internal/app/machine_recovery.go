@@ -48,26 +48,27 @@ func (RecoverMachine) Kind() string { return RecoverMachineKind }
 // machineRecoveryRecord is persisted between steps independently of the
 // target's journal. No private identity or decrypted values are stored here.
 type machineRecoveryRecord struct {
-	Input                 RecoverMachineInput    `json:"input"`
-	Snapshot              restic.Snapshot        `json:"machine_snapshot"`
-	Catalog               machineRecoveryCatalog `json:"catalog"`
-	StartedAt             time.Time              `json:"started_at"`
-	FinishedAt            time.Time              `json:"finished_at,omitempty"`
-	Fetched               bool                   `json:"fetched"`
-	SecretsReady          bool                   `json:"secrets_ready"`
-	ImagesReady           bool                   `json:"images_ready"`
-	ResourcesClaimed      bool                   `json:"resources_claimed"`
-	ProfileApplied        bool                   `json:"profile_applied"`
-	IntegrationsRecovered bool                   `json:"integrations_recovered"`
-	StateInstalled        bool                   `json:"state_installed"`
-	DataReady             map[string]bool        `json:"data_ready"`
-	DatabaseReady         map[string]bool        `json:"database_ready"`
-	Ready                 map[string]bool        `json:"ready"`
-	SecretVersions        map[string]map[int]int `json:"secret_versions"`
-	CutoverReady          map[string]bool        `json:"cutover_ready"`
-	CutoverStarted        bool                   `json:"cutover_started"`
-	Cutover               bool                   `json:"cutover"`
-	AbandonedAt           time.Time              `json:"abandoned_at,omitempty"`
+	Input                   RecoverMachineInput    `json:"input"`
+	Snapshot                restic.Snapshot        `json:"machine_snapshot"`
+	Catalog                 machineRecoveryCatalog `json:"catalog"`
+	StartedAt               time.Time              `json:"started_at"`
+	FinishedAt              time.Time              `json:"finished_at,omitempty"`
+	Fetched                 bool                   `json:"fetched"`
+	SecretsReady            bool                   `json:"secrets_ready"`
+	ImagesReady             bool                   `json:"images_ready"`
+	ResourcesClaimed        bool                   `json:"resources_claimed"`
+	RehearsalCleanupStarted bool                   `json:"rehearsal_cleanup_started,omitempty"`
+	ProfileApplied          bool                   `json:"profile_applied"`
+	IntegrationsRecovered   bool                   `json:"integrations_recovered"`
+	StateInstalled          bool                   `json:"state_installed"`
+	DataReady               map[string]bool        `json:"data_ready"`
+	DatabaseReady           map[string]bool        `json:"database_ready"`
+	Ready                   map[string]bool        `json:"ready"`
+	SecretVersions          map[string]map[int]int `json:"secret_versions"`
+	CutoverReady            map[string]bool        `json:"cutover_ready"`
+	CutoverStarted          bool                   `json:"cutover_started"`
+	Cutover                 bool                   `json:"cutover"`
+	AbandonedAt             time.Time              `json:"abandoned_at,omitempty"`
 }
 
 type machineRecovering struct {
@@ -205,8 +206,10 @@ func (r RecoverMachine) cleanTarget(ctx context.Context) error {
 
 func (x *machineRecovering) step(name, change string, apply func(context.Context, io.Writer) error) kernel.Step {
 	return kernel.Step{Name: name, Change: change, Apply: func(ctx context.Context, out io.Writer) error {
-		if rec, err := x.load(); err == nil && !rec.FinishedAt.IsZero() {
-			return nil
+		if rec, err := x.load(); err == nil {
+			if !rec.FinishedAt.IsZero() || x.in.Rehearsal && rec.RehearsalCleanupStarted && name != "finish" {
+				return nil
+			}
 		}
 		err := apply(ctx, out)
 		if err != nil && !x.in.Rehearsal {
@@ -222,7 +225,7 @@ func (x *machineRecovering) step(name, change string, apply func(context.Context
 		if err != nil && x.in.Rehearsal {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
-			if rec, loadErr := x.load(); loadErr == nil && rec.ResourcesClaimed {
+			if rec, loadErr := x.load(); loadErr == nil && rec.ResourcesClaimed && !rec.RehearsalCleanupStarted {
 				if e, connectErr := docker.Connect(cleanupCtx); connectErr == nil {
 					cleanupErr := x.cleanup(rec, e)
 					e.Close()
@@ -607,7 +610,7 @@ func (x *machineRecovering) installAppSecrets(rec *machineRecoveryRecord) error 
 				os.RemoveAll(temp)
 				return err
 			}
-			if err := os.WriteFile(filepath.Join(temp, f.Name()), data, 0o600); err != nil {
+			if err := writeRecoveryFile(filepath.Join(temp, f.Name()), data); err != nil {
 				os.RemoveAll(temp)
 				return err
 			}
@@ -637,6 +640,14 @@ func (x *machineRecovering) finish(ctx context.Context, out io.Writer) error {
 		}
 	}
 	if x.in.Rehearsal {
+		if !rec.RehearsalCleanupStarted {
+			// Once cleanup starts, retries must finish removing scratch
+			// resources without depending on their deleted staged secrets.
+			rec.RehearsalCleanupStarted = true
+			if err := x.save(rec); err != nil {
+				return err
+			}
+		}
 		e, err := docker.Connect(ctx)
 		if err != nil {
 			return err

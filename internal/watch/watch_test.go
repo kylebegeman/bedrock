@@ -195,3 +195,35 @@ func TestADeployUnderWayIsFoundByTheAppsName(t *testing.T) {
 		t.Fatal("a finished deploy still counts as under way")
 	}
 }
+
+func TestAFailedRecoveryNoticeIsRetriedAfterResolution(t *testing.T) {
+	ctx := context.Background()
+	notifier := &fakeNotifier{}
+	w, now := newWatcher(t, notifier)
+	w.OpenAfter, w.ResolveAfter = 1, 1
+	if err := w.Round(ctx, []Condition{down("hello")}); err != nil {
+		t.Fatal(err)
+	}
+	notifier.fail = true
+	*now = now.Add(time.Minute)
+	if err := w.Round(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if open, err := w.Store.OpenIncidents(ctx); err != nil || len(open) != 0 {
+		t.Fatalf("failed mail should not keep resolved incident open: %+v, %v", open, err)
+	}
+	notifier.fail = false
+	*now = now.Add(time.Minute)
+	if err := w.Round(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(notifier.sent) != 2 || !strings.Contains(notifier.sent[1].Subject, "recovered") {
+		t.Fatalf("failed recovery mail was lost: %+v", notifier.sent)
+	}
+	if err := w.Round(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(notifier.sent) != 2 {
+		t.Fatal("successful recovery notice repeated")
+	}
+}
