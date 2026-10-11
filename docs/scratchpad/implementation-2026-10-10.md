@@ -178,3 +178,43 @@ pending for the next frozen milestone.
 The frozen corrected proof and documentation snapshot passed `make check`:
 formatting, vet, the complete Go suite and all 28 lane safeguard tests. Only
 this verification note was added afterward; runtime source is unchanged.
+
+## Corrected product rerun on `26f465b`
+
+The clean rerun passed the earlier operational assertions plus authenticated
+HTTPS deployment and cross-origin credential redirect refusal. It stopped
+before any notes/data/release work when the independent storage fixture could
+not pull its pinned MinIO tag: the registry returned HTTP 401. Investigation
+also found missing `server /data` arguments in that fixture command. Preserve
+the report as a failed proof, not evidence of backup or recovery success:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-product-final-26f465b/report.md`.
+A reproducible, independently ready storage fixture is required before rerun.
+
+All 26 local README and feature-document links and anchors resolve after the
+setup documentation corrections. Production source remains unchanged by the
+proof-fixture corrections.
+
+Both official historical MinIO release binaries were independently downloaded
+and verified against their published ARM64/AMD64 SHA-256 values. Their static
+ELF architectures were checked. A scratch fixture image using the ARM64
+artifact passed an actual local HTTP health check with explicit server/data
+arguments. The corrected fixture is being proven independently on the guarded
+guest before another complete product run.
+
+The existing production `ObjectsImage` digest also returned HTTP 401; an
+identical official Docker Hub mirror could not be verified. Its exact release
+provenance is absent from the introducing commit. Preserve the production pin
+and track the compatibility-dependent resolution in
+`docs/technical/minio-image-availability.md`, linked from README. The disposable
+fixture's historical release is not evidence of equivalence to that digest.
+
+The exact corrected storage setup now passes on the guarded Linux guest,
+including artifact checksum, running release version, real HTTP health,
+repeat setup and credential-output privacy. All 28 lane safeguard tests,
+shellcheck and whitespace checks pass. The fixture is ready before the full
+product rerun, so registry availability is no longer a hidden prerequisite.
+
+The frozen storage-fixture/documentation snapshot passed `make check`:
+formatting, vet, the complete Go suite and 28 lane safeguards. All 30 local
+README, lane, feature and technical-document links/anchors resolve. Only this
+verification note was added afterward; production source remains unchanged.

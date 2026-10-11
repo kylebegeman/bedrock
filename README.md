@@ -636,11 +636,16 @@ remains available for initial binary installation.
 | [docs/features/machine-recovery.md](docs/features/machine-recovery.md) | self-contained recovery and rehearsals |
 | [docs/features/safe-moves.md](docs/features/safe-moves.md) | source fencing and deliberate target cutover |
 | [docs/features/release-safety.md](docs/features/release-safety.md) | release rehearsal and data-aware rollback |
+| [docs/technical/minio-image-availability.md](docs/technical/minio-image-availability.md) | open object-service image distribution issue |
 | [lane/README.md](lane/README.md) | the proving ground |
 
 The disposable lane reports which operational workflows ran and which need
 public DNS, external storage or other explicit prerequisites. Unit checks and
 operational proofs are recorded separately.
+
+Fresh pulls of the pinned MinIO object-service image currently return HTTP 401.
+The [dependency issue](docs/technical/minio-image-availability.md) records the
+evidence and required compatibility checks for a replacement.
 
 ## License
 

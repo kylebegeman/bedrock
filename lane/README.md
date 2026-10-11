@@ -106,7 +106,14 @@ locally created QEMU machine.
 Select proofs in dependency order. Dependencies are explicit; selecting
 `m7` does not silently execute private-app proofs or real Cloudflare calls.
 Independent storage/email fixture setup uses MinIO/Mailpit on guest loopback,
-with throwaway credentials retained on the guest:
+with throwaway credentials retained on the guest.
+
+The storage fixture builds a scratch image from the official historical MinIO
+release binary, with published SHA-256 values pinned for each architecture.
+The image build needs no base-image registry or network. Downloads are verified
+before building; the fixture binds only to guest loopback.
+
+To prepare fixtures independently:
 
 ```sh
 lane/prove.sh --config /absolute/path/to/lane.env --setup storage m7
