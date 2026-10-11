@@ -29,13 +29,13 @@ jobs:
     name: Disposable Linux daemon recovery proof
     runs-on: ubuntu-24.04
     timeout-minutes: 25
-    env:
-      LANE_VM_STATE: ${{ runner.temp }}/bedrock-lane
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Set isolated lane state
+        run: echo "LANE_VM_STATE=$RUNNER_TEMP/bedrock-lane" >> "$GITHUB_ENV"
       - name: Provision a dedicated Linux guest
         run: lane/vm.sh up
       - name: Prove daemon recovery
