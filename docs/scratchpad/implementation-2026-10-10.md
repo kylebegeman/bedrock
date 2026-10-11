@@ -258,3 +258,38 @@ and hashed outside the checkout but has not yet been applied.
 The frozen restart-safe fixture snapshot passed `make check`: all 32 lane
 safeguards, formatting, vet and the complete Go suite. Only this evidence note
 was added afterward. Production Go source is unchanged by this milestone.
+
+
+## Proof worker shutdown contract
+
+The clean `c33aeac` run passed checkpointed upgrade and the full pinned profile
+bootstrap, including identity and encrypted integration transfer. It was
+intentionally interrupted after bootstrap completed, before deploying further
+fixtures, when an independent shutdown preflight confirmed a fixture defect.
+The interrupted report and `interruption.md` are retained at
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-product-final-c33aeac`.
+This partial run is not a passing product proof.
+
+Both original BusyBox PID 1 worker loops exited 137 after the actual default
+60-second backup grace, without an OOM kill. Bedrock correctly refuses to
+capture volume data after that forced shutdown. Trap/background-wait variants
+exited zero in 0.060 seconds with a 15-second stop grace. Exact commands,
+image digest, container state and ownership-checked cleanup of all four local
+containers are preserved in `worker-shutdown-preflight.json` in that report.
+All repeating product/transfer fixture workers will use clean signal handlers;
+notes retain their marker initialization. Production quiescing is unchanged.
+
+
+The exact corrected commands extracted from the two frozen scripts passed
+real Docker stop probes with the full 60-second grace: notes exited zero in
+0.063 seconds, and the simple worker in 0.057 seconds. Notes retained its
+original marker and both owned probes were removed. Source-file hashes and
+results are in `corrected-worker-shutdown.json`. All eight assembled inline
+manifests passed the current CLI, including the appended HTTPS check, with
+results in `corrected-inline-manifests.json` in the same report directory.
+
+The corrected frozen scripts passed `make check`: all 32 lane safeguards,
+formatting, vet and the full Go suite. Shellcheck and whitespace checks pass.
+Only this verification note was added after the check. Production Go source
+remains unchanged; full product and two-machine proofs will run from the next
+clean committed snapshot.

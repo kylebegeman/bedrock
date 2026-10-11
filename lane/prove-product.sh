@@ -113,7 +113,7 @@ workloads:
   worker:
     kind: worker
     image: busybox:1.37
-    command: [sh, -c, 'while :; do sleep 10; done']
+    command: [sh, -c, 'trap "exit 0" TERM INT; while :; do sleep 10 & wait "$!"; done']
 YAML
 before=$(last_operation)
 br check "$work/hello" --host --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["valid"] and r["host_preflight"]["valid"], r.get("diagnostics")'
@@ -134,7 +134,7 @@ workloads:
   worker:
     kind: worker
     image: busybox:1.37
-    command: [sh, -c, 'while :; do sleep 10; done']
+    command: [sh, -c, 'trap "exit 0" TERM INT; while :; do sleep 10 & wait "$!"; done']
 YAML
 br deploy "$work/preview" --yes
 br preview pin lane-preview --yes
@@ -215,7 +215,7 @@ workloads:
   worker:
     kind: worker
     image: busybox:1.37
-    command: [sh, -c, 'while :; do sleep 10; done']
+    command: [sh, -c, 'trap "exit 0" TERM INT; while :; do sleep 10 & wait "$!"; done']
 YAML
 sleep 1
 br deploy "$work/hello" --yes
@@ -229,7 +229,7 @@ workloads:
     kind: worker
     image: busybox:1.37
     user: "0"
-    command: [sh, -c, 'test -f /files/proof || printf original >/files/proof; while :; do sleep 10; done']
+    command: [sh, -c, 'test -f /files/proof || printf original >/files/proof; trap "exit 0" TERM INT; while :; do sleep 10 & wait "$!"; done']
     mounts: [{volume: files, path: /files}]
     health: {command: [sh, -c, 'test "$(cat /files/proof)" = original'], timeout: 5s}
 data:
@@ -247,7 +247,7 @@ workloads:
     kind: worker
     image: busybox:1.37
     user: "0"
-    command: [sh, -c, 'while :; do sleep 10; done']
+    command: [sh, -c, 'trap "exit 0" TERM INT; while :; do sleep 10 & wait "$!"; done']
     mounts: [{volume: files, path: /files}]
     health: {command: [sh, -c, 'test "$(cat /files/proof)" = candidate'], timeout: 5s}
   migrate:

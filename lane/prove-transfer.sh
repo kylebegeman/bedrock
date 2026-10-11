@@ -129,7 +129,7 @@ workloads:
   worker:
     kind: worker
     image: busybox:1.37
-    command: [sh, -c, 'while :; do sleep 10; done']
+    command: [sh, -c, 'trap "exit 0" TERM INT; while :; do sleep 10 & wait "$!"; done']
 YAML
 cat >"$work/notes/bedrock.yaml" <<'YAML'
 app: notes
@@ -138,7 +138,7 @@ workloads:
     kind: worker
     image: busybox:1.37
     user: "0"
-    command: [sh, -c, 'test -f /files/proof || printf original >/files/proof; while :; do sleep 10; done']
+    command: [sh, -c, 'test -f /files/proof || printf original >/files/proof; trap "exit 0" TERM INT; while :; do sleep 10 & wait "$!"; done']
     mounts: [{volume: files, path: /files}]
     health: {command: [sh, -c, 'test "$(cat /files/proof)" = original'], timeout: 5s}
 data:
