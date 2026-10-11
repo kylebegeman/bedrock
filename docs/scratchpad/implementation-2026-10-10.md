@@ -489,3 +489,68 @@ reservation projects 2230.23 MiB usable RAM. Projected backend reserve is
 minimum. These estimates require actual post-boot memory, doctor and resource
 verification before another full proof. Fresh guests should follow the documented
 3072 MiB defaults, rather than this retained-source fixture configuration.
+
+
+## Retained target RAM repair and guard diagnostics
+
+A subsequent clean `8cfd743` preflight timed out inside the existing source
+configuration guard at 60 seconds, before evaluating guest memory. The isolated
+unchanged guard later passed in 13.91 seconds; direct local Docker/app inventory
+passed in 3.67 seconds. No deadline was extended or unrelated process stopped.
+Backend paging had increased, but the measurements do not establish the cause
+of the earlier transient delay. Current source guest memory remained healthy
+and guest swap had not been used.
+
+The already-approved target-only 2304 MiB repair was applied at
+`2026-10-11T02:35:58Z` after a fresh safe-boundary and capacity check. The exact
+boot bytes have SHA-256
+`77261b4cbcb29e6817c1fd40e305fbe4dc02b4439d47df95cf921fc5bb90794d`
+and retain mode 0644. Container, image, disk, keys and identity were preserved;
+source binding and 1536 MiB RAM were unchanged. Pre-stop backend available
+memory was 3275.17 MiB, with projected post-change reserve of 1995.17 MiB.
+The target stopped cleanly and restarted without OOM. Application provenance:
+`bedrock-transfer-final-d104afc/target-memory-preparation/target2304-application/application.json`
+under the retained external artifact root. Actual usable memory, host doctor
+and a fresh clean-commit transfer preflight must pass before full verification.
+
+Read-only guard diagnosis also found a concrete safety defect: `ls --json`
+suppressed Docker connection/list failures and omitted unmanaged inventory,
+while the disposable guard treated that omission as an empty list. A focused
+explicit-evidence correction and failure regressions are in progress. The
+next full transfer must use the clean committed correction, with a reviewed
+transition for the retained binaries rather than a weakened guard.
+
+
+## Explicit disposable inventory evidence
+
+The bounded correction adds `unmanaged_known` to `ls --json`, true only after
+a successful all-container Docker inventory. Existing app/backup fields and
+successful unmanaged-list omission remain compatible. Unavailable Docker
+keeps the app listing usable and reports false; human output identifies
+unknown inventory without printing raw Docker endpoint or error details.
+
+The guard captures the POSIX producer exit before JSON parsing, validates
+shapes and the exact completion boolean with checks unaffected by Python
+optimization, and refuses remote Docker connection overrides. Unknown
+inventory can pass only for the empty pre-Docker `m1` to `m2` machine, with
+explicit absence of the documented commands, sockets, data and service-unit
+footprints. Existing files and broken symlinks count as installation evidence;
+missing Bedrock cannot bypass an existing Docker installation. Older binaries
+without completion evidence require a separately verified disposable transition.
+
+Failure regressions reproduced the old fail-open behavior before the fix.
+Six focused CLI tests cover complete and unavailable inventories, retained
+app/backup metadata and error privacy; 34 guard/fixture tests cover the POSIX
+producer exit, malformed evidence under optimization, fresh provisioning,
+installation footprints and connection overrides. `make check` passed on the
+frozen corrected source: all 71 lane tests, shell syntax/shellcheck, Python AST,
+formatting, vet and the complete Go suite. Independent read-only contract
+review found no blocking fresh-setup or inventory regression.
+
+The production delta since the passing `39e93a5` product proof is limited to
+`ls` evidence and its human unknown-state message. Deployment, backup, release
+and recovery paths are unchanged. The final two-machine run must exercise the
+new live CLI evidence and strict guard on both guests after the reviewed
+legacy transition. Repeating unrelated product fixtures is not required by
+this bounded inventory change. Only this evidence note was added after the
+checks; executable source remained frozen.

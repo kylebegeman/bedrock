@@ -22,19 +22,27 @@ class TargetSafety(unittest.TestCase):
         self.marker = self.work / "bedrock-lane-id"
         self.marker.write_text(IDENTITY)
         self.marker.chmod(0o600)
-        (self.work / "registry.json").write_text('{"apps":[]}')
+        (self.work / "registry.json").write_text('{"apps":[],"unmanaged_known":true}')
         for name in ("key", "known_hosts"):
             (self.work / name).write_text("test fixture\n")
         self.script("id", "#!/bin/sh\necho 0\n")
-        self.script("bedrock", '#!/bin/sh\ncat "$LANE_TEST_ROOT/registry.json"\n')
+        self.script("bedrock", '#!/bin/sh\ncat "$LANE_TEST_ROOT/registry.json"\nexit "${LANE_TEST_REGISTRY_EXIT:-0}"\n')
         self.script("stat", "#!/usr/bin/env python3\nimport os,sys\ns=os.stat(sys.argv[3]); print(int(os.environ.get('LANE_TEST_OWNER', '0')) if sys.argv[2]=='%u' else oct(s.st_mode & 0o777)[2:])\n")
-        self.script("ssh", '''#!/usr/bin/env python3
+        self.script("ssh", r'''#!/usr/bin/env python3
 import os,sys,subprocess
 if os.environ.get("LANE_TEST_UNREACHABLE"): raise SystemExit(255)
 if sys.argv[-2:] == ["uname", "-m"]: print("x86_64"); raise SystemExit(0)
 script=sys.stdin.read() if sys.argv[-1].startswith("sh -s") else sys.argv[-1]
-for original, local in (("/etc/bedrock-production", "/bedrock-production"), ("/etc/bedrock-lane-id", "/bedrock-lane-id"), ("/root/.lane-minio-key", "/minio-key")):
+for original, local in (("/etc/bedrock-production", "/bedrock-production"), ("/etc/bedrock-lane-id", "/bedrock-lane-id"), ("/root/.lane-minio-key", "/minio-key"),
+                        ("/var/run/docker.sock", "/footprint/var-run-docker.sock"), ("/run/docker.sock", "/footprint/run-docker.sock"),
+                        ("/run/user/", "/footprint/run-user/"), ("/var/lib/docker", "/footprint/docker-data"),
+                        ("/etc/systemd/system/docker.", "/footprint/etc-systemd-docker."),
+                        ("/usr/lib/systemd/system/docker.", "/footprint/usr-lib-systemd-docker."),
+                        ("/lib/systemd/system/docker.", "/footprint/lib-systemd-docker.")):
     script=script.replace(original, os.environ["LANE_TEST_ROOT"] + local)
+script=script.replace("command -v bedrock", "test \"${LANE_TEST_BEDROCK_ABSENT:-}\" != true")
+script=script.replace("command -v docker ", "test \"${LANE_TEST_DOCKER_PRESENT:-true}\" = true ")
+script=script.replace("command -v dockerd ", "test \"${LANE_TEST_DOCKERD_PRESENT:-}\" = true ")
 result=subprocess.run(["sh", "-s", "--", os.environ["LANE_TEST_ID"]], input=script, text=True)
 raise SystemExit(result.returncode)
 ''')
@@ -53,7 +61,7 @@ raise SystemExit(result.returncode)
 
     def environment(self, **extra):
         return {**os.environ, "PATH": str(self.bin) + os.pathsep + os.environ["PATH"], "LANE_CONFIG": str(self.config),
-                "LANE_TEST_ROOT": str(self.work), "LANE_TEST_ID": IDENTITY, **extra}
+                "LANE_TEST_ROOT": str(self.work), "LANE_TEST_ID": IDENTITY, "DOCKER_HOST": "", "DOCKER_CONTEXT": "", **extra}
 
     def run_guard(self, **extra):
         return subprocess.run(["bash", "-c", '. "$1/common.sh"; echo PROOF_CAN_START', "test", str(HERE)],
@@ -159,16 +167,113 @@ else:
         self.assertIn("PROOF_CAN_START", result.stdout)
 
     def test_own_fixture_apps_are_accepted(self):
-        (self.work / "registry.json").write_text('{"apps":[{"name":"hello"},{"name":"notes"}]}')
+        (self.work / "registry.json").write_text('{"apps":[{"name":"hello"},{"name":"notes"}],"unmanaged_known":true}')
         self.assertEqual(self.run_guard().returncode, 0)
 
     def test_empty_registry_null_matches_the_cli_contract(self):
-        (self.work / "registry.json").write_text('{"apps":null}')
+        (self.work / "registry.json").write_text('{"apps":null,"unmanaged_known":true}')
         self.assertEqual(self.run_guard().returncode, 0)
 
     def test_unmanaged_foreign_container_is_refused(self):
-        (self.work / "registry.json").write_text('{"apps":null,"unmanaged":["production-database"]}')
+        (self.work / "registry.json").write_text('{"apps":null,"unmanaged_known":true,"unmanaged":["production-database"]}')
         self.refused()
+
+    def test_missing_or_unknown_docker_inventory_is_refused(self):
+        for inventory in ({}, {"unmanaged_known": False}, {"unmanaged_known": None},
+                          {"unmanaged_known": "true"}, {"unmanaged_known": 1}):
+            with self.subTest(inventory=inventory):
+                (self.work / "registry.json").write_text(json.dumps({"apps": [], **inventory}))
+                self.refused()
+
+    def test_valid_registry_from_a_failed_producer_is_refused(self):
+        result = self.refused(LANE_TEST_REGISTRY_EXIT="7")
+        self.assertIn("registry", result.stderr.lower())
+
+    def test_malformed_inventory_shapes_are_refused(self):
+        malformed = ({"apps": {}}, {"apps": [None]}, {"apps": [{"name": 1}]},
+                     {"apps": [{"name": ""}]}, {"unmanaged": None}, {"unmanaged": ""},
+                     {"unmanaged": {}}, {"unmanaged": [None]}, {"unmanaged": [1]},
+                     {"unmanaged": [""]})
+        for fields in malformed:
+            with self.subTest(fields=fields):
+                (self.work / "registry.json").write_text(json.dumps({"apps": [], "unmanaged_known": True, **fields}))
+                self.refused(PYTHONOPTIMIZE="1")
+
+    def test_unmanaged_lane_fixtures_are_accepted_when_inventory_is_known(self):
+        (self.work / "registry.json").write_text(json.dumps({"apps": [], "unmanaged_known": True,
+                                                          "unmanaged": ["lane-mailpit", "lane-minio", "lane-cloudflare"]}))
+        self.assertEqual(self.run_guard().returncode, 0)
+
+    def test_pre_docker_bedrock_with_an_empty_registry_is_accepted(self):
+        (self.work / "registry.json").write_text('{"apps":null,"unmanaged_known":false}')
+        result = self.run_guard(LANE_TEST_DOCKER_PRESENT="false")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("PROOF_CAN_START", result.stdout)
+
+    def test_unknown_inventory_with_deployed_apps_is_refused_before_docker(self):
+        (self.work / "registry.json").write_text('{"apps":[{"name":"notes"}],"unmanaged_known":false}')
+        self.refused(LANE_TEST_DOCKER_PRESENT="false")
+
+    def test_pre_docker_missing_or_malformed_completion_evidence_is_refused(self):
+        for known in (None, "false", 0):
+            with self.subTest(known=known):
+                (self.work / "registry.json").write_text(json.dumps({"apps": [], "unmanaged_known": known}))
+                self.refused(LANE_TEST_DOCKER_PRESENT="false")
+        (self.work / "registry.json").write_text('{"apps":[]}')
+        self.refused(LANE_TEST_DOCKER_PRESENT="false")
+
+    def test_pre_docker_unknown_inventory_with_unmanaged_names_is_refused(self):
+        (self.work / "registry.json").write_text('{"apps":[],"unmanaged_known":false,"unmanaged":["lane-minio"]}')
+        self.refused(LANE_TEST_DOCKER_PRESENT="false")
+
+    def test_a_fresh_machine_without_bedrock_or_docker_is_accepted(self):
+        result = self.run_guard(LANE_TEST_DOCKER_PRESENT="false", LANE_TEST_BEDROCK_ABSENT="true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_bedrock_absence_does_not_bypass_a_docker_installation(self):
+        self.refused(LANE_TEST_BEDROCK_ABSENT="true")
+
+    def test_docker_commands_require_complete_inventory(self):
+        (self.work / "registry.json").write_text('{"apps":[],"unmanaged_known":false}')
+        for present in ({"LANE_TEST_DOCKER_PRESENT": "true"},
+                        {"LANE_TEST_DOCKER_PRESENT": "false", "LANE_TEST_DOCKERD_PRESENT": "true"}):
+            with self.subTest(present=present):
+                self.refused(**present)
+
+    def test_docker_connection_overrides_cannot_substitute_another_machines_inventory(self):
+        for known in (False, True):
+            for name in ("DOCKER_HOST", "DOCKER_CONTEXT"):
+                for bedrock_absent in ("", "true"):
+                    with self.subTest(known=known, override=name, bedrock_absent=bedrock_absent):
+                        (self.work / "registry.json").write_text(json.dumps({"apps": [], "unmanaged_known": known}))
+                        result = self.refused(LANE_TEST_DOCKER_PRESENT="false", LANE_TEST_BEDROCK_ABSENT=bedrock_absent,
+                                              **{name: "private-endpoint-value"})
+                        self.assertNotIn("private-endpoint-value", result.stdout + result.stderr)
+
+    def test_docker_files_and_broken_symlinks_require_complete_inventory(self):
+        (self.work / "registry.json").write_text('{"apps":[],"unmanaged_known":false}')
+        paths = ("run-docker.sock", "var-run-docker.sock", "run-user/1000/docker.sock", "docker-data",
+                 "etc-systemd-docker.service", "usr-lib-systemd-docker.service", "lib-systemd-docker.service",
+                 "etc-systemd-docker.socket", "usr-lib-systemd-docker.socket", "lib-systemd-docker.socket")
+        for name in paths:
+            for symlink in (False, True):
+                with self.subTest(path=name, symlink=symlink):
+                    path = self.work / "footprint" / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    if symlink:
+                        path.symlink_to(self.work / "absent-target")
+                    elif name == "docker-data":
+                        path.mkdir()
+                    else:
+                        path.touch()
+                    try:
+                        self.refused(LANE_TEST_DOCKER_PRESENT="false")
+                        self.refused(LANE_TEST_DOCKER_PRESENT="false", LANE_TEST_BEDROCK_ABSENT="true")
+                    finally:
+                        if path.is_dir() and not path.is_symlink():
+                            path.rmdir()
+                        else:
+                            path.unlink()
 
     def test_missing_apps_field_is_refused(self):
         (self.work / "registry.json").write_text('{}')
@@ -179,7 +284,7 @@ else:
         self.refused(BEDROCK_LANE_DESTROY="127.0.0.1")
 
     def test_foreign_app_cannot_be_overridden(self):
-        (self.work / "registry.json").write_text('{"apps":[{"name":"customer-production"}]}')
+        (self.work / "registry.json").write_text('{"apps":[{"name":"customer-production"}],"unmanaged_known":true}')
         self.refused(BEDROCK_LANE_DESTROY="127.0.0.1")
 
     def test_unreachable_target_is_not_treated_as_empty(self):

@@ -39,17 +39,45 @@ set -eu
 [ -f /etc/bedrock-lane-id ] && [ ! -L /etc/bedrock-lane-id ] || { echo 'Remote disposable identity is missing.' >&2; exit 1; }
 [ "$(stat -c %u /etc/bedrock-lane-id)" = 0 ] && [ "$(stat -c %a /etc/bedrock-lane-id)" = 600 ] || { echo 'Remote identity must be owned by root with mode 600.' >&2; exit 1; }
 [ "$(cat /etc/bedrock-lane-id)" = "$1" ] || { echo 'Remote disposable identity differs from LANE_ID.' >&2; exit 1; }
+# Inventory must describe this guest, never a configured remote engine.
+[ -z "${DOCKER_HOST:-}" ] && [ -z "${DOCKER_CONTEXT:-}" ] || { echo 'Refusing Docker connection overrides: lane inventory must describe this machine.' >&2; exit 1; }
+# m1 installs Bedrock before m2 installs Docker. Only an explicitly absent
+# Docker installation can explain unknown inventory on that empty machine.
+lane_docker_absent() {
+  if command -v docker >/dev/null 2>&1 || command -v dockerd >/dev/null 2>&1; then return 1; fi
+  for path in /run/docker.sock /var/run/docker.sock /run/user/*/docker.sock /var/lib/docker \
+    /etc/systemd/system/docker.service /etc/systemd/system/docker.socket \
+    /lib/systemd/system/docker.service /lib/systemd/system/docker.socket \
+    /usr/lib/systemd/system/docker.service /usr/lib/systemd/system/docker.socket; do
+    [ ! -e "$path" ] && [ ! -L "$path" ] || return 1
+  done
+}
+docker_absent=false
+if lane_docker_absent; then docker_absent=true; fi
 if command -v bedrock >/dev/null 2>&1; then
-  bedrock ls --json | python3 -c 'import json,sys
+  # POSIX sh has no pipefail: capture the producer status before parsing.
+  registry=$(bedrock ls --json) || { echo 'Refusing unreadable app/container registry.' >&2; exit 1; }
+  printf '%s\n' "$registry" | python3 -c 'import json,sys
+def require(condition, message):
+    if not condition: raise SystemExit(message)
 registry=json.load(sys.stdin)
-assert isinstance(registry, dict) and "apps" in registry and (registry["apps"] is None or isinstance(registry["apps"], list)), "unreadable app registry"
+require(isinstance(registry, dict) and "apps" in registry, "unreadable app registry")
+apps=registry["apps"]
+require(apps is None or isinstance(apps, list), "unreadable app registry")
+apps=[] if apps is None else apps
+require(all(isinstance(a, dict) and isinstance(a.get("name"), str) and a["name"] for a in apps), "unreadable app names")
+known=registry.get("unmanaged_known")
+require(type(known) is bool, "Refusing missing Docker inventory evidence; install a Bedrock build that reports unmanaged_known.")
+unmanaged=registry.get("unmanaged", [])
+require(isinstance(unmanaged, list) and all(isinstance(name, str) and name for name in unmanaged), "unreadable unmanaged container registry")
+require(known or (sys.argv[1] == "true" and not apps and not unmanaged), "Refusing unknown Docker inventory; Docker must answer before lane work can start.")
 allowed={"hello", "site", "notes", "begamin", "dragon-writer", "lane-preview"}
-foreign=[a["name"] for a in (registry["apps"] or []) if a["name"] not in allowed]
+foreign=[a["name"] for a in apps if a["name"] not in allowed]
 if foreign: raise SystemExit("Refusing machine with non-lane apps: " + ", ".join(foreign))
-unmanaged=registry.get("unmanaged") or []
-assert isinstance(unmanaged, list), "unreadable unmanaged container registry"
 foreign=[name for name in unmanaged if name not in {"lane-mailpit", "lane-minio", "lane-cloudflare"}]
-if foreign: raise SystemExit("Refusing machine with unmanaged non-lane containers: " + ", ".join(foreign))'
+if foreign: raise SystemExit("Refusing machine with unmanaged non-lane containers: " + ", ".join(foreign))' "$docker_absent"
+else
+  [ "$docker_absent" = true ] || { echo 'Refusing Docker installation without a readable Bedrock inventory.' >&2; exit 1; }
 fi
 printf 'DISPOSABLE:%s\n' "$1"
 GUARD

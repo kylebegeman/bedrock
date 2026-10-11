@@ -102,6 +102,26 @@ it. SSH failure, a changed host key, malformed app registry, non-fixture
 apps and unmanaged non-fixture containers also refuse it. The allowed app
 names are the lane fixtures, not a wildcard prefix.
 
+`bedrock ls --json` reports `unmanaged_known: true` only after a successful
+Docker inventory, including an empty inventory. Its app listing remains useful
+when Docker is unavailable, with `unmanaged_known: false`; unknown inventory
+cannot authorize lane work. The guard checks the command exit separately from
+JSON parsing, validates inventory shapes, and requires this explicit evidence.
+Older installed builds without the field are refused. Update them through a
+separately verified disposable-target binary transition before using these guards.
+Remote `DOCKER_HOST` and `DOCKER_CONTEXT` overrides are refused because they
+could make inventory describe another machine.
+
+Fresh provisioning and the `m1` to `m2` sequence remain supported before Docker
+is installed. That exception requires no deployed apps or unmanaged names and
+explicit absence of `docker` and `dockerd` commands, `/var/lib/docker`, Docker
+sockets at `/run/docker.sock`, `/var/run/docker.sock`, and `/run/user/*/docker.sock`,
+and `docker.service` and `docker.socket` units under `/etc/systemd/system`,
+`/lib/systemd/system`, and `/usr/lib/systemd/system`. Existing paths and broken
+symlinks both count as installation evidence. A Docker footprint without Bedrock
+is also refused until its inventory can be verified. A stopped, broken, or
+partially installed Docker engine cannot take the fresh-machine exception.
+
 ```sh
 lane/prove.sh --config /absolute/path/to/lane.env --check m1 m2
 lane/prove.sh --config /absolute/path/to/lane.env m1 m2
