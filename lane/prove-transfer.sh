@@ -155,7 +155,7 @@ dst move test "$work/notes" --handoff "$work/rehearsal.json" --yes
 [[ "$(notes_marker source_run)" == original ]]
 target_run 'test -z "$(docker ps -aq --filter name=bedrock.notes.rehearse.move-test-)" && test -z "$(docker volume ls -q --filter name=bedrock.notes.rehearse.move-test-)" && test -z "$(docker network ls -q --filter name=bedrock.notes.rehearse.move-test-)"'
 src move final notes --to bedrock-lane-target --yes >"$work/final.json"
-source_run 'test -f /var/lib/bedrock/locks/notes.migration.json && test -z "$(docker ps -q --filter label=bedrock.app=notes --filter label=bedrock.workload=worker)"; systemctl restart bedrock'
+source_run 'set -eu; test -f /var/lib/bedrock/locks/notes.migration.json; writers=$(docker ps -q --filter label=bedrock.app=notes --filter label=bedrock.workload=worker); test -z "$writers"; systemctl restart bedrock'
 expect_refusal 'fenced|migration|move resume' src deploy "$work/notes" --yes
 dst move stage "$work/notes" --handoff "$work/final.json" --yes
 target_run 'test -f /var/lib/bedrock/locks/notes.migration.json && test -z "$(docker ps -q --filter label=bedrock.app=notes --filter label=bedrock.workload=worker)"'

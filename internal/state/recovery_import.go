@@ -149,7 +149,7 @@ func (s *Store) ImportMachineRecovery(ctx context.Context, sourceDBPath, recover
 			return fmt.Errorf("machine recovery refuses to overwrite existing app %s", app)
 		}
 	}
-	now := time.Now().UTC().Unix()
+	now := unix(time.Now().UTC())
 	for _, table := range tables {
 		query := "INSERT INTO " + table.name + " (" + strings.Join(table.columns, ",") + ") VALUES (" + strings.TrimSuffix(strings.Repeat("?,", len(table.columns)), ",") + ")"
 		if table.name == "watches" {

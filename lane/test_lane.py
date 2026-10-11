@@ -328,5 +328,57 @@ else:
         self.refused()
 
 
+
+class TransferFenceRestart(unittest.TestCase):
+    def run_restart_probe(self, fence_present=True, writer_present=False, docker_exit=0):
+        temp = tempfile.TemporaryDirectory(prefix="bedrock-transfer-fence-")
+        self.addCleanup(temp.cleanup)
+        work = Path(temp.name)
+        bindir = work / "bin"
+        bindir.mkdir()
+        fence = work / "notes.migration.json"
+        if fence_present:
+            fence.touch()
+        marker = work / "daemon-restarted"
+        scripts = {
+            "docker": '#!/bin/sh\nprintf "%s" "$LANE_TEST_WRITER"\nexit "$LANE_TEST_DOCKER_EXIT"\n',
+            "systemctl": '#!/bin/sh\n: > "$LANE_TEST_RESTART_MARKER"\n',
+        }
+        for name, source in scripts.items():
+            executable = bindir / name
+            executable.write_text(source)
+            executable.chmod(0o755)
+        commands = [shlex.split(line)[1] for line in (HERE / "prove-transfer.sh").read_text().splitlines()
+                    if line.startswith("source_run ") and "notes.migration.json" in line
+                    and "systemctl restart bedrock" in line]
+        self.assertEqual(len(commands), 1, "expected one source fence/restart probe")
+        command = commands[0].replace("/var/lib/bedrock/locks/notes.migration.json", shlex.quote(str(fence)))
+        environment = {**os.environ, "PATH": str(bindir) + os.pathsep + os.environ["PATH"],
+                       "LANE_TEST_WRITER": "active-writer" if writer_present else "",
+                       "LANE_TEST_DOCKER_EXIT": str(docker_exit), "LANE_TEST_RESTART_MARKER": str(marker)}
+        result = subprocess.run(["sh", "-c", command], env=environment, capture_output=True, text=True, timeout=5)
+        return result, marker
+
+    def test_missing_source_fence_blocks_restart_and_proof(self):
+        result, marker = self.run_restart_probe(fence_present=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(marker.exists())
+
+    def test_running_source_writer_blocks_restart_and_proof(self):
+        result, marker = self.run_restart_probe(writer_present=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(marker.exists())
+
+    def test_failed_source_inventory_blocks_restart_and_proof(self):
+        result, marker = self.run_restart_probe(docker_exit=7)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(marker.exists())
+
+    def test_fenced_source_without_writers_allows_restart(self):
+        result, marker = self.run_restart_probe()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(marker.exists())
+
+
 if __name__ == "__main__":
     unittest.main()
