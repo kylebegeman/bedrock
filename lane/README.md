@@ -35,13 +35,31 @@ records the exact guest checksum and provider image ID, generates guest/deploy
 SSH keys, and boots a separate guest kernel. SSH is
 forwarded only on localhost. QEMU uses software virtualization, so boot and
 package upgrades take longer than on a VPS. A 24 GiB sparse guest disk and
-3 GiB guest memory are configured. The guest supports systemd and reboot;
+3 GiB guest memory are configured by default. New provider images cap QEMU's
+TCG translated-code cache at 128 MiB. Guest RAM is only part of provider
+memory use: budget the TCG cache, QEMU overhead, Docker's Linux backend and
+any other running containers as well. The guest supports systemd and reboot;
 it is not a container pretending to be a host.
+
+Set `LANE_VM_MEMORY_MIB` when creating a new VM to select an ASCII decimal
+integer from 512 through 65536 MiB, without leading zeros. The chosen RAM and
+cache size are recorded in
+`machine.json` and `lane.env`. Running `up` on an existing VM preserves its
+container settings, disk and SSH identity; an explicit differing RAM request
+is refused. Use a fresh state directory to create a VM with different RAM.
+The minimum accepted value validates configuration, not proof capacity.
 
 To reproduce an earlier guest image exactly, retain its Docker image and run
 `LANE_VM_PROVIDER_IMAGE=sha256:<provider-image-id> lane/vm.sh up` with a fresh
-state directory. The image must carry the lane provider label. The report
-records the immutable provider ID and guest checksum. The default build
+state directory. The image must carry the lane provider label. A retained
+image with an older boot policy remains unchanged and cannot accept an
+explicit RAM override; its RAM and cache metadata are left unknown because
+the current defaults do not describe it. Unknown resource keys are omitted
+from `lane.env`, so exporting that config cannot create an empty RAM override.
+Rebuild the current provider image
+for configurable RAM and the cache cap. Existing providers also retain their
+boot policy and keep unrecorded resource fields unknown. The report records
+the immutable provider ID and guest checksum. The default build
 checks Canonical's current Ubuntu 24.04 release; it does not claim all future
 Ubuntu point releases have already been tested.
 
@@ -190,8 +208,25 @@ lane/prove.sh --config /path/to/source/lane.env \
   --target-config /path/to/clean-target/lane.env transfer
 ```
 
-Create the second guest in a separate `LANE_VM_STATE` directory. Both
-connections pass the same pinned-host-key and disposable-identity guards;
+Create the second guest in a separate `LANE_VM_STATE` directory. For a
+Docker backend with limited RAM, this recipe assigns 1536 MiB to the source
+and 1024 MiB to the clean target using current provider images:
+
+```sh
+LANE_VM_STATE=/absolute/path/to/source LANE_VM_MEMORY_MIB=1536 lane/vm.sh up
+lane/prove.sh --config /absolute/path/to/source/lane.env m2
+LANE_VM_STATE=/absolute/path/to/clean-target LANE_VM_MEMORY_MIB=1024 lane/vm.sh up
+lane/prove.sh --config /absolute/path/to/source/lane.env \
+  --target-config /absolute/path/to/clean-target/lane.env transfer
+```
+
+Use fresh state directories for both provisioning commands. Their combined
+guest RAM is 2560 MiB, with a further 128 MiB TCG cache cap per provider and
+other host overhead. Leave headroom for the Docker backend and other work;
+a smaller guest may still exhaust its own RAM during package installation,
+image builds or recovery. The recipe changes no existing VM settings.
+
+Both connections pass the same pinned-host-key and disposable-identity guards;
 the runner refuses identical identities or different architectures. The
 source must already have working host setup. The target is bootstrapped
 from a pinned binary and keeps its own encryption identity.

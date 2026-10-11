@@ -357,3 +357,68 @@ and exact ownership-checked cleanup returns to success after each. Evidence:
 `/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-transfer-provider-resources/cleanup-filter-probe-eb7d2810d231/report.md`.
 Only this evidence note was added after the full check. Another clean frozen
 product proof and the two-machine proof remain required.
+
+
+## Full product success on `39e93a5`
+
+The full operational product proof passed on clean commit
+`39e93a56222dfa3dd7ffe598996a50c1ed7bf1b1`, source tree SHA-256
+`3b350ba4afaa3deaa1f86b89ecbabb1015c42b1f36b8e42c1c61ef4627a7ee76`.
+Report and independent transcript/receipt review:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-product-final-39e93a5`.
+It proves checkpointed upgrade and pinned bootstrap, identity/connection/source
+approval binding, source preflight, preview retention/cleanup, authenticated
+HTTPS and cross-origin refusal, real volume backups, scratch release rehearsal,
+explicit checkpoint data rollback, exact machine recovery rehearsal, source
+fencing and deliberate resume. The independent review found no contradictory
+result. Public DNS/CA issuance and cross-host cutover are outside that proof.
+
+The previously failed exact machine snapshot also recovered successfully with
+the same recovery ID, retaining its failed receipt and validating scratch
+cleanup. Static Linux AMD64/ARM64 builds and Linux ARM64 CLI test compilation
+passed. All 32 local documentation links and anchors resolved. Production Go
+source has not changed since this passing product snapshot.
+
+## Transfer infrastructure failure and bounded resource repair
+
+The first clean two-machine transfer attempt on `39e93a5` failed during target
+host setup, before migration, storage transfer or recovery. The source provider
+suffered a confirmed backend OOM at `2026-10-11T01:35:04Z`, exit 137. After the
+target transport failed, provider-local inspection established no active host,
+apt or dpkg writers and an expired operation lease. Only the positively owned
+proof group was stopped at that safe boundary. Preserve the failed report,
+client bootstrap journal, bindings and guest receipts:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-transfer-final-39e93a5`.
+This is infrastructure evidence, not a passing transfer proof.
+
+Installed QEMU 8.2.2 reserved approximately 1 GiB of executable translation
+cache per provider in addition to guest RAM. Installed help and official
+versioned source confirm the `tb-size` property. Exact provider boot overrides
+now assign 1536 MiB to source, 1024 MiB to destination, and cap each cache at
+128 MiB. They preserve the original boot mode, containers, disks, keys,
+identities and provider images. No global Docker setting or unrelated process
+changed. Initial live measurements showed 127.9 MiB translation mappings per
+provider and 3.79 GiB backend memory available; these are boot measurements,
+not peak workload claims. Original/override bytes, hashes, metadata and
+capacity evidence are retained under the failed transfer report.
+
+Both refreshed endpoints require byte-only provider-local SSH bridges after
+Docker published forwarding failed. The bridges retain pinned host keys,
+private client keys, exact endpoints, provider ownership and disposable guards.
+Source readiness and supported expired target-operation recovery are in
+progress. A new clean-commit transfer run remains required. The old client
+bootstrap receipt will remain tied to its original endpoint; a fresh reviewed
+bootstrap will be used for the changed endpoint.
+
+The reproducible lane repair adds canonical ASCII integer RAM configuration,
+a fixed cache cap, recorded resource metadata, safe reuse of existing settings,
+and immutable retained-image inspection. Unknown legacy resource keys are
+omitted from generated configs, preserving export-and-reuse behavior. Validation
+must precede destructive reset, including retained boot-policy compatibility.
+Final review found that reset initially validated retained-image compatibility
+after deletion. It now prepares that policy before deletion and reuses the
+inspected immutable image ID. Three regressions reproduced the failure first,
+then passed with the correction, including a mutable tag changing at deletion.
+The final snapshot passed `make check`: 49 lane safeguards, shell syntax and
+shellcheck, Python AST, formatting, vet and the full Go suite. Only this
+evidence note was added after those checks; production Go source is unchanged.
