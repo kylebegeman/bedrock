@@ -16,6 +16,8 @@ import time
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
+# Match host doctor: usable guest MemTotal, excluding reserved RAM and swap.
+BOOTSTRAP_MEMORY_BYTES = 2 * 1024**3
 PROOFS = {
     "transfer": {"title": "Two-host staged migration and clean machine recovery", "needs": "prepared disposable source plus --target-config for a separate clean matching-architecture Linux guest", "timeout": 7200},
     "product": {"title": "Bootstrap, remote approvals, previews, release and recovery safety", "needs": "disposable Ubuntu/Debian; package/image-network access; loopback HTTPS and MinIO fixtures", "timeout": 5400},
@@ -111,6 +113,26 @@ def prerequisites(args, settings: dict) -> list[str]:
     return problems
 
 
+def guest_memory_bytes(config: str) -> int:
+    """Read usable guest memory through the same guarded path as proofs."""
+    try:
+        result = remote(config, "cat /proc/meminfo", timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        raise RuntimeError("Guest MemTotal probe failed; memory readiness is unknown.") from None
+    if result.returncode:
+        raise RuntimeError("Guest MemTotal probe failed; memory readiness is unknown.")
+    lines = [line for line in result.stdout.splitlines() if line.startswith("MemTotal:")]
+    match = re.fullmatch(r"MemTotal:[ \t]+([0-9]+)[ \t]+kB[ \t]*", lines[0]) if len(lines) == 1 else None
+    if match is not None:
+        try:
+            value = int(match.group(1)) * 1024
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    raise RuntimeError("Guest MemTotal is missing or malformed; memory readiness is unknown.")
+
+
 def redact(text: str) -> str:
     text = re.sub(r"AGE-SECRET-KEY-1[A-Z0-9]+", "[redacted private key]", text)
     text = re.sub(r"(?im)(password|token|key|secret)\s*[=:]\s*[^\s]+", r"\1=[redacted]", text)
@@ -134,6 +156,10 @@ def write_report(directory: Path, report: dict) -> None:
     if report.get("secondary_target"):
         other = report["secondary_target"]
         lines += [f"Destination architecture: `{other.get('LANE_ARCH', 'unknown')}`", f"Destination provider: `{other.get('LANE_PROVIDER') or 'dedicated SSH'}`", f"Destination guest image SHA256: `{other.get('LANE_OS_IMAGE_SHA256') or 'owner-provisioned'}`", ""]
+    for key, name in (("target", "Source"), ("secondary_target", "Destination")):
+        target = report.get(key, {})
+        if "memory_total_bytes" in target:
+            lines += [f"{name} guest MemTotal: {target['memory_total_bytes']} bytes", ""]
     if report.get("installed_binary"):
         lines += ["Installed binary:", "", "```text", report["installed_binary"], "```", ""]
     if report.get("secondary_installed_binary"):
@@ -198,6 +224,25 @@ def main() -> int:
             ready = remote(args.target_config, 'test "$(id -u)" = 0 && test "$(uname -s)" = Linux && test "$(cat /proc/1/comm)" = systemd && command -v python3 >/dev/null')
             if ready.returncode:
                 report["problems"].append("transfer: destination must run Linux/systemd with root SSH and Python 3")
+        memory_targets = []
+        bootstrap_source = any(proof in ("m2", "product") for proof in args.proofs)
+        if bootstrap_source or "transfer" in args.proofs:
+            minimum = BOOTSTRAP_MEMORY_BYTES if bootstrap_source else 0
+            memory_targets.append(("source", args.config, report["target"], minimum))
+        if "transfer" in args.proofs and args.target_config:
+            memory_targets.append(("transfer destination", args.target_config,
+                                   report["secondary_target"], BOOTSTRAP_MEMORY_BYTES))
+        for name, config, target, minimum in memory_targets:
+            target["memory_minimum_bytes"] = minimum
+            try:
+                target["memory_total_bytes"] = guest_memory_bytes(config)
+            except RuntimeError as error:
+                report["problems"].append(f"{name}: {error}")
+                continue
+            if target["memory_total_bytes"] < minimum:
+                report["problems"].append(
+                    f"{name}: guest MemTotal is {target['memory_total_bytes']} bytes; "
+                    "host doctor/bootstrap requires at least 2 GiB reported guest memory.")
         # Fail early on implicit historical fixture dependencies.
         preceding = set()
         for proof in args.proofs:

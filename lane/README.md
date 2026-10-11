@@ -47,7 +47,12 @@ cache size are recorded in
 `machine.json` and `lane.env`. Running `up` on an existing VM preserves its
 container settings, disk and SSH identity; an explicit differing RAM request
 is refused. Use a fresh state directory to create a VM with different RAM.
-The minimum accepted value validates configuration, not proof capacity.
+The accepted range validates provisioning configuration, not proof capacity.
+`m2`, product bootstrap and the transfer destination require at least 2 GiB
+reported by the guest's `/proc/meminfo` `MemTotal`; swap does not count.
+Configured RAM includes reserved guest memory, so 2048 MiB can report less
+than 2 GiB. Keep the 3072 MiB default for fresh setup and bootstrap proofs.
+The proof runner checks this requirement before running those workflows.
 
 To reproduce an earlier guest image exactly, retain its Docker image and run
 `LANE_VM_PROVIDER_IMAGE=sha256:<provider-image-id> lane/vm.sh up` with a fresh
@@ -208,23 +213,24 @@ lane/prove.sh --config /path/to/source/lane.env \
   --target-config /path/to/clean-target/lane.env transfer
 ```
 
-Create the second guest in a separate `LANE_VM_STATE` directory. For a
-Docker backend with limited RAM, this recipe assigns 1536 MiB to the source
-and 1024 MiB to the clean target using current provider images:
+Create the second guest in a separate `LANE_VM_STATE` directory. This baseline
+uses the default 3072 MiB for each new guest and prepares the source before
+starting the destination:
 
 ```sh
-LANE_VM_STATE=/absolute/path/to/source LANE_VM_MEMORY_MIB=1536 lane/vm.sh up
+LANE_VM_STATE=/absolute/path/to/source lane/vm.sh up
 lane/prove.sh --config /absolute/path/to/source/lane.env m2
-LANE_VM_STATE=/absolute/path/to/clean-target LANE_VM_MEMORY_MIB=1024 lane/vm.sh up
+LANE_VM_STATE=/absolute/path/to/clean-target lane/vm.sh up
 lane/prove.sh --config /absolute/path/to/source/lane.env \
   --target-config /absolute/path/to/clean-target/lane.env transfer
 ```
 
-Use fresh state directories for both provisioning commands. Their combined
-guest RAM is 2560 MiB, with a further 128 MiB TCG cache cap per provider and
-other host overhead. Leave headroom for the Docker backend and other work;
-a smaller guest may still exhaust its own RAM during package installation,
-image builds or recovery. The recipe changes no existing VM settings.
+Use fresh state directories and leave `LANE_VM_MEMORY_MIB` unset for the default.
+Budget 6 GiB of guest RAM plus two 128 MiB TCG caches, QEMU overhead, the Docker
+backend and other running work. Check available backend memory before starting
+the second guest. Legal smaller allocations are useful for selected lightweight
+workflows, but do not establish that setup, bootstrap or a complete proof will
+pass. The actual destination `MemTotal` check also applies to retained guests.
 
 Both connections pass the same pinned-host-key and disposable-identity guards;
 the runner refuses identical identities or different architectures. The

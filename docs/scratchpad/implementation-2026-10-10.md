@@ -422,3 +422,42 @@ then passed with the correction, including a mutable tag changing at deletion.
 The final snapshot passed `make check`: 49 lane safeguards, shell syntax and
 shellcheck, Python AST, formatting, vet and the full Go suite. Only this
 evidence note was added after those checks; production Go source is unchanged.
+
+
+## Transfer capacity-policy failure on `d104afc`
+
+The fresh two-machine run failed at destination bootstrap verification before
+storage transfer, migration or recovery. The retained 1024 MiB destination
+reported 0.9 GiB `MemTotal`; doctor correctly refuses less than 2 GiB. Host
+setup and both reviewed-binary upgrades succeeded. Preserve the failed report:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-transfer-final-d104afc`.
+The first target setup receipt also recovered successfully under its original
+ID, with one interruption, before canonical daemon restoration and this run.
+
+The earlier fresh 1536/1024 MiB recipe is invalid: source `m2` also requires
+doctor. This session's retained source was set up and passed product verification
+at 3072 MiB before its bounded memory reduction. Legal provisioning RAM is not
+proof capacity. Doctor reads guest `MemTotal`, excluding reserved RAM, and swap
+cannot satisfy the minimum. The documentation now uses the 3072 MiB defaults
+for fresh guests and budgets backend/cache/other-work headroom explicitly.
+Production memory policy and runtime are unchanged.
+
+The failed run's 20 resource samples showed no provider OOM, source maximum
+RSS 1316.56 MiB, destination maximum 1218.80 MiB, and minimum backend available
+memory 2075.10 MiB. A larger destination requires a measured capacity plan,
+verification of its actual `MemTotal` and doctor, then a fresh clean-commit run.
+The read-only memory preflight now refuses insufficient `m2`/product sources
+and transfer destinations before fixture or proof mutation. It records actual
+guest memory, allows a smaller already-prepared transfer source, and leaves the
+lightweight `m1` proof unrestricted. Malformed or failed probes block safely
+without serializing raw output. Seven test-first regressions reproduced the
+boundary failures and pass with the correction. The snapshot passed
+`make check`: 56 lane tests, shell syntax/shellcheck, Python AST, formatting,
+vet and the full Go suite. Only this evidence note was added afterward.
+
+The proof's EXIT cleanup removed the failed fresh client bootstrap journal,
+profile and target bindings before they could be copied. Applying-step public
+projections, the failed verify receipt ID/transcript, exact binaries and all
+guest setup/upgrade receipts remain. This is a retention limitation, not evidence
+of client-journal resume. The next artifact collector will preserve applying
+public state promptly. Original failed 39e93a5 bootstrap state remains retained.
