@@ -239,12 +239,18 @@ func (f *Facts) gatherSSH(ctx context.Context, env Env) {
 		f.SSH.RootLogin = kv["permitrootlogin"]
 	}
 	if keys, err := env.ReadFile("/root/.ssh/authorized_keys"); err == nil {
-		for _, line := range strings.Split(keys, "\n") {
-			if t := strings.TrimSpace(line); t != "" && !strings.HasPrefix(t, "#") {
-				f.SSH.RootKeys++
-			}
+		f.SSH.RootKeys = authorizedKeyCount(keys)
+	}
+}
+
+func authorizedKeyCount(keys string) int {
+	count := 0
+	for _, line := range strings.Split(keys, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			count++
 		}
 	}
+	return count
 }
 
 // gatherUpkeep reads updates, time, logs, the push user, fail2ban and

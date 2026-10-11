@@ -10,10 +10,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
+	"github.com/kylebegeman/bedrock/internal/compat"
 	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/state"
 	"github.com/kylebegeman/bedrock/internal/version"
 )
 
@@ -57,20 +60,64 @@ func (c *Client) Version(ctx context.Context) (version.Info, error) {
 	return info, err
 }
 
+// Capabilities describes the connected daemon's supported contracts.
+func (c *Client) Capabilities(ctx context.Context) (compat.Info, error) {
+	var info compat.Info
+	err := c.getJSON(ctx, "/v1/capabilities", &info)
+	return info, err
+}
+
 // List implements Runner.
 func (c *Client) List(ctx context.Context, limit int) ([]Summary, error) {
+	return c.ListFiltered(ctx, state.OperationFilter{Limit: limit})
+}
+
+// ListFiltered implements Runner. Filters use their own endpoint so an older
+// daemon cannot ignore them and return unrelated history.
+func (c *Client) ListFiltered(ctx context.Context, filter state.OperationFilter) ([]Summary, error) {
+	query := url.Values{"limit": {strconv.Itoa(filter.Limit)}}
+	path := "/v1/operations"
+	if filter.Target != "" || filter.Kind != "" || filter.Failed || !filter.Since.IsZero() {
+		path += "/history"
+	}
+	if filter.Target != "" {
+		query.Set("app", filter.Target)
+	}
+	if filter.Kind != "" {
+		query.Set("kind", filter.Kind)
+	}
+	if filter.Failed {
+		query.Set("failed", "true")
+	}
+	if !filter.Since.IsZero() {
+		query.Set("since", filter.Since.Format(time.RFC3339Nano))
+	}
 	var rows []Summary
-	err := c.getJSON(ctx, "/v1/operations?limit="+strconv.Itoa(limit), &rows)
+	err := c.getJSON(ctx, path+"?"+query.Encode(), &rows)
 	return rows, err
 }
 
 // Receipt implements Runner.
 func (c *Client) Receipt(ctx context.Context, id string) (*kernel.Receipt, error) {
 	var receipt kernel.Receipt
-	if err := c.getJSON(ctx, "/v1/operations/"+id, &receipt); err != nil {
+	if err := c.getJSON(ctx, "/v1/operations/"+url.PathEscape(id), &receipt); err != nil {
 		return nil, err
 	}
 	return &receipt, nil
+}
+
+// Output implements Runner. Saved output is returned only on this explicit
+// request; ordinary receipts never acquire output fields.
+func (c *Client) Output(ctx context.Context, id, step string) (*kernel.OperationOutput, error) {
+	query := url.Values{}
+	if step != "" {
+		query.Set("step", step)
+	}
+	var output kernel.OperationOutput
+	if err := c.getJSON(ctx, "/v1/operations/"+url.PathEscape(id)+"/output?"+query.Encode(), &output); err != nil {
+		return nil, err
+	}
+	return &output, nil
 }
 
 // Plan implements Runner.
@@ -158,11 +205,20 @@ func (c *Client) stream(ctx context.Context, req RunRequest, each func(kernel.Ev
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64<<10), 4<<20)
 	for scanner.Scan() {
-		var ev kernel.Event
-		if err := json.Unmarshal(scanner.Bytes(), &ev); err != nil {
+		var envelope struct {
+			kernel.Event
+			Code       string `json:"code"`
+			Retryable  bool   `json:"retryable"`
+			APIVersion int    `json:"api_version"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &envelope); err != nil {
 			return fmt.Errorf("bad event from the daemon: %w", err)
 		}
+		ev := envelope.Event
 		if ev.Type == kernel.EventError {
+			if envelope.Code != "" {
+				return &Error{Message: ev.Message, Code: envelope.Code, Retryable: envelope.Retryable, APIVersion: envelope.APIVersion}
+			}
 			return errors.New(ev.Message)
 		}
 		each(ev)
@@ -177,11 +233,9 @@ func (c *Client) stream(ctx context.Context, req RunRequest, each func(kernel.Ev
 }
 
 func apiError(resp *http.Response) error {
-	var body struct {
-		Error string `json:"error"`
-	}
+	var body compat.Problem
 	if err := json.NewDecoder(resp.Body).Decode(&body); err == nil && body.Error != "" {
-		return errors.New(body.Error)
+		return &Error{Message: body.Error, Code: body.Code, Retryable: body.Retryable, APIVersion: body.APIVersion, Status: resp.StatusCode}
 	}
-	return fmt.Errorf("daemon answered %s", resp.Status)
+	return &Error{Message: fmt.Sprintf("daemon answered %s", resp.Status), Code: "daemon_response", Status: resp.StatusCode}
 }

@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -28,6 +29,13 @@ func TestBackupRunsRememberTheLastGoodOne(t *testing.T) {
 	good, err := s.LastGoodBackupRun(ctx, "dw", BackupRunBackup)
 	if err != nil || good == nil || good.ID != id1 || good.Snapshot != "abcd1234" || good.Bytes != 4096 || !good.SnapshotAt.Equal(t0) {
 		t.Fatalf("good: %+v %v", good, err)
+	}
+	byID, err := s.BackupRun(ctx, id1)
+	if err != nil || byID != *good {
+		t.Fatalf("run by ID: %+v %v; want %+v", byID, err, good)
+	}
+	if _, err := s.BackupRun(ctx, 0); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown run ID: %v", err)
 	}
 	drill, _ := s.LastBackupRun(ctx, "dw", BackupRunDrill)
 	if drill == nil || drill.Finished() {

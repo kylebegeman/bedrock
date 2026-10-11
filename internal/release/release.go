@@ -56,10 +56,18 @@ func AssetName(version, goos, goarch string) string {
 // agree and nothing more: anyone who can replace one can replace both. Pass
 // a checksum from reviewed source when that distinction matters.
 func Fetch(ctx context.Context, version, dir, sha256Hex string) (string, error) {
+	return FetchPlatform(ctx, version, dir, sha256Hex, runtime.GOOS, runtime.GOARCH)
+}
+
+// FetchPlatform downloads for the target platform rather than the client OS.
+func FetchPlatform(ctx context.Context, version, dir, sha256Hex, goos, goarch string) (string, error) {
+	if (goos != "linux" && goos != "darwin") || (goarch != "amd64" && goarch != "arm64") {
+		return "", fmt.Errorf("unsupported release platform %s/%s", goos, goarch)
+	}
 	if err := CheckVersion(version); err != nil {
 		return "", err
 	}
-	asset := AssetName(version, runtime.GOOS, runtime.GOARCH)
+	asset := AssetName(version, goos, goarch)
 	base := fmt.Sprintf("%s/releases/download/v%s", repo, version)
 
 	want := strings.ToLower(strings.TrimSpace(sha256Hex))
@@ -72,22 +80,24 @@ func Fetch(ctx context.Context, version, dir, sha256Hex string) (string, error) 
 			return "", err
 		}
 	}
-	if len(want) != 64 {
-		return "", fmt.Errorf("%q isn't a sha256 checksum", sha256Hex)
+	if decoded, err := hex.DecodeString(want); err != nil || len(decoded) != sha256.Size {
+		return "", fmt.Errorf("%q isn't a sha256 checksum", want)
 	}
 
 	// Not executable yet: a file that has not been checked must not be
 	// runnable, even for the moment between writing and verifying it.
 	path := filepath.Join(dir, asset)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	f, err := os.CreateTemp(dir, ".bedrock-download-*")
 	if err != nil {
 		return "", err
 	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	defer f.Close()
 	sum := sha256.New()
 	body, err := open(ctx, base+"/"+asset)
 	if err != nil {
 		f.Close()
-		os.Remove(path)
 		return "", fmt.Errorf("%s: %w", asset, err)
 	}
 	n, err := io.Copy(io.MultiWriter(f, sum), io.LimitReader(body, maxAsset))
@@ -95,21 +105,19 @@ func Fetch(ctx context.Context, version, dir, sha256Hex string) (string, error) 
 	closeErr := f.Close()
 	switch {
 	case err != nil:
-		os.Remove(path)
 		return "", fmt.Errorf("%s: %w", asset, err)
 	case closeErr != nil:
-		os.Remove(path)
 		return "", closeErr
 	case n >= maxAsset:
-		os.Remove(path)
 		return "", fmt.Errorf("%s is larger than %d bytes", asset, int64(maxAsset))
 	}
 	if got := hex.EncodeToString(sum.Sum(nil)); got != want {
-		os.Remove(path)
 		return "", fmt.Errorf("%s does not match its checksum: got %s, want %s", asset, got, want)
 	}
-	if err := os.Chmod(path, 0o755); err != nil {
-		os.Remove(path)
+	if err := os.Chmod(tmp, 0o755); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, path); err != nil {
 		return "", err
 	}
 	return path, nil

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -49,6 +50,8 @@ type Prober struct {
 	Connect func(ctx context.Context) (*docker.Engine, error)
 	// Root is the filesystem whose free space matters.
 	Root string
+	// CheckSecrets loads only the revision-bound credentials used by checks.
+	CheckSecrets func(app string, version int) (map[string]string, error)
 
 	// mu keeps rounds from overlapping.
 	mu sync.Mutex
@@ -88,6 +91,7 @@ func (p *Prober) Observe(ctx context.Context) []Condition {
 	e, err := p.Connect(ctx)
 	if err != nil {
 		conditions = append(conditions, Condition{Key: "host:docker", Subject: "docker", Severity: state.SeverityCritical, Message: "docker isn't answering: " + err.Error()})
+		conditions = append(conditions, p.unobservedIncidents(ctx)...)
 		return append(conditions, p.watches(ctx)...)
 	}
 	defer e.Close()
@@ -97,8 +101,22 @@ func (p *Prober) Observe(ctx context.Context) []Condition {
 
 	active, err := p.Store.ActiveRevisions(ctx)
 	if err != nil {
+		conditions = append(conditions, p.unobservedIncidents(ctx)...)
 		return append(conditions, Condition{Key: "host:state", Subject: "the state store", Severity: state.SeverityCritical, Message: err.Error()})
 	}
+	currentContainers := map[string]bool{}
+	for _, rev := range active {
+		for _, container := range rev.Containers {
+			currentContainers[container] = true
+		}
+	}
+	p.restartsMu.Lock()
+	for container := range p.restarts {
+		if !currentContainers[container] {
+			delete(p.restarts, container)
+		}
+	}
+	p.restartsMu.Unlock()
 	type finding struct {
 		app      string
 		severity string
@@ -124,9 +142,34 @@ func (p *Prober) Observe(ctx context.Context) []Condition {
 	return append(conditions, p.watches(ctx)...)
 }
 
+// Missing observations during an infrastructure outage cannot certify that
+// an existing app or edge incident recovered.
+func (p *Prober) unobservedIncidents(ctx context.Context) []Condition {
+	incidents, err := p.Store.OpenIncidents(ctx)
+	if err != nil {
+		return nil
+	}
+	var conditions []Condition
+	for _, incident := range incidents {
+		if strings.HasPrefix(incident.Key, "app:") || incident.Key == "host:edge" {
+			conditions = append(conditions, Condition{Key: incident.Key, Unknown: true})
+		}
+	}
+	return conditions
+}
+
 // app looks at one app's containers, health, checks, certificates and
 // backups and returns the worst severity and every problem.
 func (p *Prober) app(ctx context.Context, e *docker.Engine, rev state.Revision) (string, []string) {
+	fenced, err := app.MigrationSourceFenced(p.Store.Path(), rev.App)
+	if err != nil {
+		return state.SeverityCritical, []string{"its migration fence cannot be read: " + err.Error()}
+	}
+	if fenced {
+		// Final capture deliberately stops this source and suspends its
+		// checks and scheduled backups. Host probes remain independent.
+		return "", nil
+	}
 	var m manifest.Manifest
 	if err := json.Unmarshal(rev.Manifest, &m); err != nil {
 		return state.SeverityWarning, []string{"its manifest can't be read: " + err.Error()}
@@ -188,11 +231,21 @@ func (p *Prober) app(ctx context.Context, e *docker.Engine, rev state.Revision) 
 			worse(state.SeverityCritical)
 		}
 	}
-	for _, c := range m.Checks {
-		if err := app.RunCheck(ctx, c); err != nil {
-			problems = append(problems, strings.TrimPrefix(err.Error(), "check "))
+	values := map[string]string{}
+	if len(app.CheckSecretNames(&m)) > 0 {
+		if p.CheckSecrets == nil {
+			problems = append(problems, "check credentials cannot be loaded")
 			worse(state.SeverityCritical)
+		} else if loaded, err := p.CheckSecrets(rev.App, rev.SecretsVersion); err != nil {
+			problems = append(problems, "check credentials cannot be loaded")
+			worse(state.SeverityCritical)
+		} else {
+			values = loaded
 		}
+	}
+	for _, err := range app.RunAppChecks(ctx, e, &m, rev.Containers, values) {
+		problems = append(problems, strings.TrimPrefix(err.Error(), "check "))
+		worse(state.SeverityCritical)
 	}
 	for _, host := range m.Hosts() {
 		ready, why, expiry, found := edge.Certificate(ctx, host, EdgeAddress)
@@ -325,7 +378,7 @@ func healthProblem(ctx context.Context, info *docker.Info, w manifest.Workload) 
 	if w.Kind == manifest.Static {
 		port, _ = strconv.Atoi(docker.StaticPort)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://%s:%d%s", ip, port, w.Health.Path), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+net.JoinHostPort(ip, strconv.Itoa(port))+w.Health.Path, nil)
 	if err != nil {
 		return err.Error()
 	}

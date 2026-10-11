@@ -3,33 +3,50 @@ package app
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/containerd/errdefs"
 	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/bedrock/internal/docker/dockertest"
 	"github.com/kylebegeman/bedrock/internal/state"
 )
 
 // jobFixture is Docker as job runs see it: containers by name, with the
 // exit code each running one will end with.
 type jobFixture struct {
-	containers []docker.Info
-	exits      map[string]int
-	mu         sync.Mutex // adopted runs settle from their own goroutines
-	removed    []string
+	containers   []docker.Info
+	exits        map[string]int
+	mu           sync.Mutex // adopted runs settle from their own goroutines
+	removed      []string
+	inspectError error
 }
 
-func (f *jobFixture) Owned(context.Context) ([]docker.Info, error) { return f.containers, nil }
-func (f *jobFixture) Inspect(_ context.Context, name string) (*docker.Info, error) {
+func (f *jobFixture) Owned(context.Context) ([]docker.Info, error) {
 	for i := range f.containers {
-		if f.containers[i].Name == name {
+		if f.containers[i].ID == "" {
+			f.containers[i].ID = f.containers[i].Name
+		}
+	}
+	return f.containers, nil
+}
+func (f *jobFixture) Inspect(_ context.Context, name string) (*docker.Info, error) {
+	if f.inspectError != nil {
+		return nil, f.inspectError
+	}
+	for i := range f.containers {
+		if f.containers[i].Name == name || f.containers[i].ID == name {
 			return &f.containers[i], nil
 		}
 	}
-	return nil, errors.New("no such container")
+	return nil, errdefs.ErrNotFound
 }
 func (f *jobFixture) WaitExit(ctx context.Context, name string) (int, error) {
 	if code, ok := f.exits[name]; ok {
@@ -53,7 +70,7 @@ func TestJobRunsADeadDaemonLeftOpenAreSettledAtStart(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	t0 := time.Date(2026, 9, 22, 3, 0, 0, 0, time.UTC)
+	t0 := time.Now().UTC().Add(-time.Minute).Truncate(time.Millisecond)
 	start := func(workload, container string) int64 {
 		t.Helper()
 		id, err := store.StartJobRun(ctx, state.JobRun{App: "test", Workload: workload, Revision: "r1", Kind: JobCron, StartedAt: t0, Container: container})
@@ -71,7 +88,7 @@ func TestJobRunsADeadDaemonLeftOpenAreSettledAtStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	labels := func(workload string) map[string]string {
-		return map[string]string{docker.LabelApp: "test", docker.LabelWorkload: workload}
+		return imageLabels("test", workload, "r1")
 	}
 	e := &jobFixture{
 		containers: []docker.Info{
@@ -131,4 +148,157 @@ func mustRuns(t *testing.T, store *state.Store) []state.JobRun {
 		t.Fatal(err)
 	}
 	return runs
+}
+
+func TestJobReconciliationDoesNotMistakeInspectionFailureForADeletedContainer(t *testing.T) {
+	for _, problem := range []error{errors.New("Docker is temporarily unavailable"), context.Canceled} {
+		t.Run(problem.Error(), func(t *testing.T) {
+			ctx := context.Background()
+			store := releaseTestStore(t)
+			if _, err := store.StartJobRun(ctx, state.JobRun{App: "site", Workload: "nightly", Revision: "r1", Kind: JobCron, Container: "still-running", StartedAt: time.Now()}); err != nil {
+				t.Fatal(err)
+			}
+			e := &jobFixture{inspectError: problem}
+			adopted, err := reconcileJobRuns(ctx, store, e, mustOpen(t, store), time.Now(), func(string, ...any) {})
+			adopted.Wait()
+			if !errors.Is(err, problem) {
+				t.Fatalf("inspection error lost: %v", err)
+			}
+			if open := mustOpen(t, store); len(open) != 1 {
+				t.Fatalf("transient inspection retired a running job: %+v", open)
+			}
+		})
+	}
+}
+
+func TestStartupJobReconciliationRetriesTransientInspectionWithoutRestart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := releaseTestStore(t)
+	if _, err := store.StartJobRun(ctx, state.JobRun{App: "site", Workload: "nightly", Revision: "r1", Kind: JobCron, Container: "retry-job", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	fake := dockertest.New(t)
+	fake.Add(dockertest.Container{Name: "retry-job", Labels: imageLabels("site", "nightly", "r1"), ExitCode: 0})
+	var inspections atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/v"+dockertest.APIVersion)
+		if path == "/containers/retry-job/json" && inspections.Add(1) == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"message":"temporary Docker failure"}`))
+			return
+		}
+		fake.ServeHTTP(w, r)
+	}))
+	defer proxy.Close()
+	t.Setenv("DOCKER_HOST", "tcp"+strings.TrimPrefix(proxy.URL, "http"))
+	wait, err := StartJobReconciliation(ctx, store, func(string, ...any) {})
+	if err == nil {
+		t.Fatal("fixture did not exercise the initial inspection error")
+	}
+	done := make(chan struct{})
+	go func() { wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("transient inspection was not retried")
+	}
+	if open := mustOpen(t, store); len(open) != 0 {
+		t.Fatalf("recovered Docker left cron suppressed until another daemon restart: %+v", open)
+	}
+}
+
+func TestJobReconciliationRefusesAReplacedForeignContainer(t *testing.T) {
+	for _, changed := range []string{docker.LabelOwner, docker.LabelApp, docker.LabelWorkload, docker.LabelRevision} {
+		t.Run(changed, func(t *testing.T) {
+			ctx := context.Background()
+			store := releaseTestStore(t)
+			if _, err := store.StartJobRun(ctx, state.JobRun{App: "site", Workload: "nightly", Revision: "r1", Kind: JobCron, Container: "reused-name", StartedAt: time.Now()}); err != nil {
+				t.Fatal(err)
+			}
+			labels := imageLabels("site", "nightly", "r1")
+			labels[changed] = "foreign"
+			e := &jobFixture{containers: []docker.Info{{ID: "foreign-id", Name: "reused-name", Labels: labels}}}
+			adopted, err := reconcileJobRuns(ctx, store, e, mustOpen(t, store), time.Now(), func(string, ...any) {})
+			adopted.Wait()
+			if err == nil || len(e.removed) != 0 || len(mustOpen(t, store)) != 1 {
+				t.Fatalf("foreign container was settled or removed: err=%v removed=%v", err, e.removed)
+			}
+		})
+	}
+}
+
+func TestJobReconciliationUsesImmutableContainerID(t *testing.T) {
+	ctx := context.Background()
+	store := releaseTestStore(t)
+	if _, err := store.StartJobRun(ctx, state.JobRun{App: "site", Workload: "nightly", Revision: "r1", Kind: JobCron, Container: "reused-name", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	e := &jobFixture{containers: []docker.Info{{ID: "original-id", Name: "reused-name", Labels: imageLabels("site", "nightly", "r1")}}}
+	adopted, err := reconcileJobRuns(ctx, store, e, mustOpen(t, store), time.Now(), func(string, ...any) {})
+	adopted.Wait()
+	if err != nil || !slices.Equal(e.removed, []string{"original-id"}) {
+		t.Fatalf("job cleanup followed a mutable name: %v %v", e.removed, err)
+	}
+}
+
+func TestLegacyJobReconciliationDoesNotAdoptAnotherRevision(t *testing.T) {
+	run := state.JobRun{App: "site", Workload: "nightly", Revision: "r1"}
+	owned := []docker.Info{{ID: "newer-id", Name: "bedrock-site-nightly-job-newer", Running: true, Labels: imageLabels("site", "nightly", "r2")}}
+	if got := jobContainerOf(owned, run); got != "" {
+		t.Fatalf("legacy job adopted newer revision: %s", got)
+	}
+}
+
+func TestAdoptedCronKeepsItsOriginalWorkloadDeadline(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := releaseTestStore(t)
+	m := releaseTestManifest()
+	w := m.Workloads["web"]
+	w.Timeout = "10ms"
+	m.Workloads["web"] = w
+	releaseTestRevision(t, store, m, "r1", state.RevisionActive, time.Now())
+	if _, err := store.StartJobRun(ctx, state.JobRun{App: m.App, Workload: "web", Revision: "r1", Kind: JobCron, Container: "still-running", StartedAt: time.Now().Add(-time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	e := &jobFixture{containers: []docker.Info{{ID: "original-id", Name: "still-running", Running: true, Labels: imageLabels(m.App, "web", "r1")}}}
+	adopted, err := reconcileJobRuns(ctx, store, e, mustOpen(t, store), time.Now(), func(string, ...any) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { adopted.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		cancel()
+		<-done
+		t.Fatal("daemon restart reset the workload deadline")
+	}
+	runs, err := store.JobRuns(context.Background(), m.App, "web", 1)
+	if err != nil || len(runs) != 1 || runs[0].Error != "timed out" || runs[0].FinishedAt.IsZero() || !slices.Equal(e.removed, []string{"original-id"}) {
+		t.Fatalf("expired job was not stopped and recorded: %+v %v removed=%v", runs, err, e.removed)
+	}
+}
+
+func TestAdoptedCronDaemonCancellationKeepsItsRunOpen(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := releaseTestStore(t)
+	if _, err := store.StartJobRun(ctx, state.JobRun{App: "site", Workload: "nightly", Revision: "r1", Kind: JobCron, Container: "still-running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	e := &jobFixture{containers: []docker.Info{{ID: "original-id", Name: "still-running", Running: true, Labels: imageLabels("site", "nightly", "r1")}}}
+	adopted, err := reconcileJobRuns(ctx, store, e, mustOpen(t, store), time.Now(), func(string, ...any) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	adopted.Wait()
+	if len(mustOpen(t, store)) != 1 || len(e.removed) != 0 {
+		t.Fatalf("daemon cancellation settled or removed an unfinished cron: %v", e.removed)
+	}
 }

@@ -73,19 +73,33 @@ func TestEveryPreviewRouteIsBehindASignIn(t *testing.T) {
 	}
 }
 
-// A check runs twice, once through the edge, where a guarded route answers
-// 401. Keeping one would fail every preview deploy and roll it back.
-func TestAPreviewCarriesNoChecks(t *testing.T) {
-	p, err := PreviewOf(parent(t), "main", "preview.begam.in")
+// A content assertion must survive the route's new sign-in requirement.
+func TestAPreviewRewritesCompatibleChecksAndReportsUnsupportedOnes(t *testing.T) {
+	m := parent(t)
+	m.Checks = append(m.Checks,
+		manifest.Check{URL: "https://external.example.com/", Context: manifest.CheckEdge},
+		manifest.Check{URL: "https://kylebegeman.com:8443/"},
+		manifest.Check{URL: "https://bakery.kylebegeman.com/orders?q=new", Context: manifest.CheckEdge, HeadersFromSecrets: map[string]string{"Cookie": "CHECK_COOKIE"}},
+	)
+	p, skipped, err := PreviewOfWithReport(m, "feature/new-nav", "preview.begam.in")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(p.Checks) != 0 {
-		t.Fatalf("a preview kept %d check(s)", len(p.Checks))
+	if len(p.Checks) != 2 || len(skipped) != 2 {
+		t.Fatalf("checks %+v, skipped %+v", p.Checks, skipped)
 	}
-	// The parent must be untouched: it is still deployed.
-	if len(parent(t).Checks) != 1 {
-		t.Fatal("the parent lost its checks")
+	if p.Checks[0].URL != "https://feature-new-nav.kylebegeman.preview.begam.in/" || p.Checks[0].Contains != "Kyle" {
+		t.Fatal(p.Checks[0])
+	}
+	if p.Checks[1].URL != "https://feature-new-nav.bakery.preview.begam.in/orders?q=new" || p.Checks[1].HeadersFromSecrets["Cookie"] != "CHECK_COOKIE" {
+		t.Fatal(p.Checks[1])
+	}
+	p.Checks[1].HeadersFromSecrets["Cookie"] = "OTHER"
+	if m.Checks[3].HeadersFromSecrets["Cookie"] != "CHECK_COOKIE" || len(m.Checks) != 4 {
+		t.Fatal("preview mutated the parent")
+	}
+	if skipped[0].URL != "https://external.example.com/" || !strings.Contains(skipped[1].Reason, "port") {
+		t.Fatal(skipped)
 	}
 }
 

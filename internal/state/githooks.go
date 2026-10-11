@@ -16,8 +16,8 @@ type GitHook struct {
 	LastAt     time.Time `json:"last_at,omitempty"`
 }
 
-func (s *Store) migrateGitHooks(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `
+func (s *Store) migrateGitHooks(ctx context.Context, q migrationDB) error {
+	_, err := q.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS git_hooks (
   app         TEXT PRIMARY KEY,
   repo        TEXT NOT NULL,

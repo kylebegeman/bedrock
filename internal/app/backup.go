@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -113,7 +115,20 @@ func (b Backup) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 		return nil, fmt.Errorf("backups need the storage integration: %w", err)
 	}
 	if in.App == manifest.ReservedApp {
+		if b.Store != nil {
+			if err := checkReleaseStoreAccess(ctx, b.Store, ""); err != nil {
+				return nil, err
+			}
+		}
 		return b.machinePlan(st)
+	}
+	if b.Store != nil {
+		if err := CheckMigrationAccess(b.Store.Path(), in.App); err != nil {
+			return nil, err
+		}
+		if err := checkReleaseStoreAccess(ctx, b.Store, in.App); err != nil {
+			return nil, err
+		}
 	}
 	rev, err := b.Store.RevisionWithStatus(ctx, in.App, state.RevisionActive)
 	if err != nil {
@@ -148,6 +163,11 @@ type backingUp struct {
 	keep          restic.Keep
 	run           *backupRun
 	summary       *restic.Summary
+	// Receipts stay outside shared staging so another backup cannot replace
+	// the operation and snapshot this run must finish. Empty for other users
+	// of the capture helpers, which keep their own durable snapshot records.
+	receiptDir string
+	receipt    *backupSnapshotReceipt
 	// detail says what a finished run holds.
 	detail func() string
 }
@@ -156,7 +176,7 @@ func (b Backup) appPlan(st *integration.Storage, rev *state.Revision, m *manifes
 	app := rev.App
 	keep := m.KeepPolicy()
 	x := &backingUp{
-		b: b, owner: app, target: app,
+		b: b, owner: app, target: app, receiptDir: filepath.Join(b.StateDir, "backups", ".receipts"),
 		staging: filepath.Join(b.StateDir, "backups", app),
 		bucket:  st.Bucket(app),
 		keep:    restic.Keep{Daily: keep.Daily, Weekly: keep.Weekly, Monthly: keep.Monthly},
@@ -171,7 +191,7 @@ func (b Backup) appPlan(st *integration.Storage, rev *state.Revision, m *manifes
 	}
 	return &kernel.Plan{Target: app, Recovery: kernel.Resume, Steps: []kernel.Step{
 		x.appPrepareStep(rev, m),
-		x.appSnapshotStep(m),
+		x.appSnapshotStep(rev, m),
 		x.retentionStep(),
 	}}, nil
 }
@@ -183,7 +203,7 @@ func (b Backup) machinePlan(st *integration.Storage) (*kernel.Plan, error) {
 	hostname := b.Hostname()
 	target := MachineTarget(hostname)
 	x := &backingUp{
-		b: b, owner: manifest.ReservedApp, target: target,
+		b: b, owner: manifest.ReservedApp, target: target, receiptDir: filepath.Join(b.StateDir, "backups", ".receipts"),
 		staging: filepath.Join(b.StateDir, "backups", "machine"),
 		bucket:  st.Bucket(target),
 		keep:    restic.Keep{Daily: 7, Weekly: 4, Monthly: 6},
@@ -195,6 +215,204 @@ func (b Backup) machinePlan(st *integration.Storage) (*kernel.Plan, error) {
 		x.machineSnapshotStep(),
 		x.retentionStep(),
 	}}, nil
+}
+
+// backupSnapshotReceipt binds a run and its complete capture result to one
+// kernel operation. It survives staging cleanup and a completed run, because
+// the retention step may succeed before the kernel journals that success.
+type backupSnapshotReceipt struct {
+	Operation  string          `json:"operation"`
+	Owner      string          `json:"owner"`
+	Target     string          `json:"target"`
+	Bucket     string          `json:"bucket"`
+	Kind       string          `json:"kind"`
+	RunID      int64           `json:"run_id"`
+	RunStarted time.Time       `json:"run_started"`
+	Started    bool            `json:"capture_started,omitempty"`
+	Summary    *restic.Summary `json:"summary,omitempty"`
+}
+
+func (x *backingUp) receiptPath(ctx context.Context) string {
+	identity, _ := json.Marshal([]string{kernel.OperationID(ctx), x.owner, x.target, x.run.kind})
+	hash := sha256.Sum256(identity)
+	return filepath.Join(x.receiptDir, hex.EncodeToString(hash[:])+".json")
+}
+
+func (x *backingUp) readReceipt(ctx context.Context) (*backupSnapshotReceipt, error) {
+	path := x.receiptPath(ctx)
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("backup capture receipt must be a plain file")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var receipt backupSnapshotReceipt
+	if err := json.Unmarshal(data, &receipt); err != nil {
+		return nil, fmt.Errorf("read backup capture receipt: %w", err)
+	}
+	if receipt.Operation != kernel.OperationID(ctx) || receipt.Owner != x.owner || receipt.Target != x.target || receipt.Bucket != x.bucket || receipt.Kind != x.run.kind || receipt.RunID <= 0 || (x.run.id != 0 && receipt.RunID != x.run.id) {
+		return nil, errors.New("backup capture receipt belongs to another operation or run")
+	}
+	if s := receipt.Summary; s != nil && (!receipt.Started || !fullSnapshotID.MatchString(s.SnapshotID) || s.BackupStart.IsZero() || s.TotalFiles < 0 || s.TotalBytes < 0) {
+		return nil, errors.New("backup capture receipt has no exact snapshot identity")
+	}
+	run, err := x.run.store.BackupRun(ctx, receipt.RunID)
+	if err != nil {
+		return nil, fmt.Errorf("read backup capture run: %w", err)
+	}
+	if run.App != x.run.app || run.Kind != receipt.Kind || !run.StartedAt.Equal(receipt.RunStarted) {
+		return nil, errors.New("backup capture receipt belongs to another recorded run")
+	}
+	if run.OK && (receipt.Summary == nil || run.Snapshot != receipt.Summary.SnapshotID) {
+		return nil, errors.New("backup capture receipt differs from its completed run")
+	}
+	return &receipt, nil
+}
+
+func (x *backingUp) beginBackup(ctx context.Context) error {
+	if x.receiptDir == "" {
+		return x.run.begin(ctx)
+	}
+	receipt, err := x.readReceipt(ctx)
+	if err != nil {
+		return err
+	}
+	if receipt == nil {
+		if kernel.Attempt(ctx) > 1 {
+			return errors.New("interrupted backup has no capture receipt; inspect the repository and start a fresh backup")
+		}
+		started := time.Now().UTC().Truncate(time.Millisecond)
+		id, err := x.run.store.StartBackupRun(ctx, x.run.app, x.run.kind, started)
+		if err != nil {
+			return err
+		}
+		x.run.id = id
+		receipt = &backupSnapshotReceipt{Operation: kernel.OperationID(ctx), Owner: x.owner, Target: x.target, Bucket: x.bucket, Kind: x.run.kind, RunID: id, RunStarted: started}
+		if err := writeRecoveryJSON(x.receiptPath(ctx), receipt); err != nil {
+			return x.run.fail(fmt.Errorf("persist backup capture receipt: %w", err))
+		}
+	}
+	x.receipt, x.run.id, x.summary = receipt, receipt.RunID, receipt.Summary
+	return nil
+}
+
+// Only prepare may create a receipt. A legacy operation whose prepare step
+// already succeeded must not claim shared staging when its snapshot resumes.
+func (x *backingUp) preparedBackup(ctx context.Context) error {
+	if x.receiptDir == "" {
+		return x.run.begin(ctx)
+	}
+	receipt, err := x.readReceipt(ctx)
+	if err != nil {
+		return err
+	}
+	if receipt == nil {
+		return errors.New("backup has no prepared capture receipt; inspect the repository and start a fresh backup")
+	}
+	x.receipt, x.run.id, x.summary = receipt, receipt.RunID, receipt.Summary
+	return nil
+}
+
+func (x *backingUp) requireSnapshotStaging(ctx context.Context) error {
+	if x.receiptDir == "" {
+		return nil
+	}
+	if x.receipt.Started {
+		return errors.New("backup capture was interrupted without an exact snapshot receipt; inspect the repository and start a fresh backup")
+	}
+	owned, err := x.ownsStaging(ctx)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return errors.New("backup staging belongs to another operation; start a fresh backup")
+	}
+	return nil
+}
+
+func (x *backingUp) captureSnapshot(ctx context.Context, r restic.Runner, mounts []string) error {
+	if x.receiptDir != "" {
+		if err := x.requireSnapshotStaging(ctx); err != nil {
+			return err
+		}
+		x.receipt.Started = true
+		if err := writeRecoveryJSON(x.receiptPath(ctx), x.receipt); err != nil {
+			return err
+		}
+	}
+	summary, err := r.Backup(ctx, x.target, mounts, restic.DataRoot)
+	if err != nil {
+		return err
+	}
+	if x.receiptDir != "" {
+		if summary == nil || !fullSnapshotID.MatchString(summary.SnapshotID) || summary.BackupStart.IsZero() {
+			return errors.New("backup did not return an exact snapshot identity")
+		}
+		x.receipt.Summary = summary
+		if err := writeRecoveryJSON(x.receiptPath(ctx), x.receipt); err != nil {
+			return fmt.Errorf("persist exact backup snapshot %s: %w", summary.SnapshotID, err)
+		}
+	}
+	x.summary = summary
+	return nil
+}
+
+func (x *backingUp) resumeBackup(ctx context.Context) (bool, error) {
+	if x.receiptDir == "" {
+		if x.summary == nil {
+			return false, errors.New("backup has no exact snapshot receipt; start a fresh backup")
+		}
+		return false, x.run.begin(ctx)
+	}
+	receipt, err := x.readReceipt(ctx)
+	if err != nil {
+		return false, err
+	}
+	if receipt == nil || receipt.Summary == nil {
+		return false, errors.New("backup has no exact snapshot receipt; inspect the repository and start a fresh backup")
+	}
+	x.receipt, x.run.id, x.summary = receipt, receipt.RunID, receipt.Summary
+	run, err := x.run.store.BackupRun(ctx, receipt.RunID)
+	return run.OK && run.Finished(), err
+}
+
+func (x *backingUp) ownsStaging(ctx context.Context) (bool, error) {
+	data, err := os.ReadFile(x.staging + ".operation.json")
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var owner backupSnapshotReceipt
+	if err := json.Unmarshal(data, &owner); err != nil {
+		return false, fmt.Errorf("read backup staging owner: %w", err)
+	}
+	return owner.Operation == kernel.OperationID(ctx) && owner.RunID == x.run.id && owner.Owner == x.owner && owner.Target == x.target && owner.Bucket == x.bucket && owner.Kind == x.run.kind, nil
+}
+
+func (x *backingUp) discardStaging(ctx context.Context) error {
+	if x.receiptDir != "" {
+		owned, err := x.ownsStaging(ctx)
+		if err != nil || !owned {
+			return err
+		}
+	}
+	if err := os.RemoveAll(x.staging); err != nil {
+		return err
+	}
+	if x.receiptDir != "" {
+		return os.Remove(x.staging + ".operation.json")
+	}
+	return nil
 }
 
 // repo connects to Docker and opens the backup's repository. The caller
@@ -229,14 +447,20 @@ func (x *backingUp) appPrepareStep(rev *state.Revision, m *manifest.Manifest) ke
 	if m.PostgresVersion() != "" {
 		change += " and preserve its initialization scripts"
 	}
+	change += fmt.Sprintf(" for revision %s, secret version %d, manifest %s", rev.ID, rev.SecretsVersion, backupManifestHash(rev.Manifest))
 	return kernel.Step{
 		Name: "prepare", Change: change,
 		Apply: func(ctx context.Context, out io.Writer) error {
-			if err := x.run.begin(ctx); err != nil {
+			if err := x.beginBackup(ctx); err != nil {
 				return err
 			}
 			if err := resetDir(x.staging); err != nil {
 				return x.run.fail(err)
+			}
+			if x.receiptDir != "" {
+				if err := writeRecoveryJSON(x.staging+".operation.json", x.receipt); err != nil {
+					return x.run.fail(err)
+				}
 			}
 			if err := os.WriteFile(filepath.Join(x.staging, "manifest.json"), append(rev.Manifest, '\n'), 0o600); err != nil {
 				return x.run.fail(err)
@@ -263,13 +487,32 @@ func (x *backingUp) appPrepareStep(rev *state.Revision, m *manifest.Manifest) ke
 	}
 }
 
-func (x *backingUp) appSnapshotStep(m *manifest.Manifest) kernel.Step {
+func (x *backingUp) appSnapshotStep(rev *state.Revision, m *manifest.Manifest) kernel.Step {
 	app := x.target
 	return kernel.Step{
 		Name: "snapshot", Change: fmt.Sprintf("pause writers, dump and snapshot consistent data into bucket %s, then resume (30m limit)", x.bucket),
 		Apply: func(ctx context.Context, out io.Writer) error {
-			if err := x.run.begin(ctx); err != nil {
+			if err := checkReleaseStoreAccess(ctx, x.b.Store, app); err != nil {
 				return err
+			}
+			if err := x.preparedBackup(ctx); err != nil {
+				return err
+			}
+			if x.receiptDir != "" && x.summary != nil {
+				e, err := docker.Connect(ctx)
+				if err != nil {
+					return x.run.fail(err)
+				}
+				defer e.Close()
+				unlock, err := lockAppData(ctx, x.b.Store.Path(), app, true)
+				if err != nil {
+					return x.run.fail(err)
+				}
+				defer unlock()
+				return resumeWriters(ctx, e, quiesceFile(x.b.Store.Path(), app))
+			}
+			if err := x.requireSnapshotStaging(ctx); err != nil {
+				return x.run.fail(err)
 			}
 			e, r, err := x.repo(ctx)
 			if err != nil {
@@ -284,14 +527,28 @@ func (x *backingUp) appSnapshotStep(m *manifest.Manifest) kernel.Step {
 				mounts = append(mounts, restic.VolumeMount(docker.VolumeName(app, v), v, true))
 			}
 			err = withQuiescedWriters(ctx, e, x.b.Store.Path(), m, out, func(ctx context.Context) error {
+				if err := checkReleaseStoreAccess(ctx, x.b.Store, app); err != nil {
+					return err
+				}
+				if err := x.requireSnapshotStaging(ctx); err != nil {
+					return err
+				}
 				if m.PostgresVersion() != "" {
 					if err := x.dump(ctx, e, m, out); err != nil {
 						return err
 					}
 				}
-				var err error
-				x.summary, err = r.Backup(ctx, app, mounts, restic.DataRoot)
-				return err
+				active, err := x.b.Store.RevisionWithStatus(ctx, app, state.RevisionActive)
+				if err != nil {
+					return err
+				}
+				if active == nil || active.ID != rev.ID || active.SecretsVersion != rev.SecretsVersion || backupManifestHash(active.Manifest) != backupManifestHash(rev.Manifest) {
+					return errors.New("the active revision changed after this backup was prepared; start a fresh app backup")
+				}
+				if err := writeAppBackupProvenance(x.staging, *rev, time.Now().UTC()); err != nil {
+					return err
+				}
+				return x.captureSnapshot(ctx, r, mounts)
 			})
 			if err != nil {
 				return x.run.fail(err)
@@ -326,16 +583,24 @@ func (x *backingUp) machinePrepareStep(hostname string) kernel.Step {
 	return kernel.Step{
 		Name: "prepare", Change: "copy the state store, the sealed secrets and the host profile",
 		Apply: func(ctx context.Context, out io.Writer) error {
-			if err := x.run.begin(ctx); err != nil {
+			if err := checkReleaseStoreAccess(ctx, x.b.Store, ""); err != nil {
+				return err
+			}
+			if err := x.beginBackup(ctx); err != nil {
 				return err
 			}
 			if err := resetDir(x.staging); err != nil {
 				return x.run.fail(err)
 			}
+			if x.receiptDir != "" {
+				if err := writeRecoveryJSON(x.staging+".operation.json", x.receipt); err != nil {
+					return x.run.fail(err)
+				}
+			}
 			if err := b.Store.BackupTo(ctx, filepath.Join(x.staging, "state.db")); err != nil {
 				return x.run.fail(fmt.Errorf("copy the state store: %w", err))
 			}
-			if secretsDir := filepath.Join(b.StateDir, "secrets"); dirExists(secretsDir) {
+			if secretsDir := b.Secrets.Dir; dirExists(secretsDir) {
 				if out, err := exec.CommandContext(ctx, "cp", "-a", secretsDir, filepath.Join(x.staging, "secrets")).CombinedOutput(); err != nil {
 					return x.run.fail(fmt.Errorf("copy the secrets: %s", strings.TrimSpace(string(out))))
 				}
@@ -354,7 +619,10 @@ func (x *backingUp) machinePrepareStep(hostname string) kernel.Step {
 			if err := os.WriteFile(filepath.Join(x.staging, "machine.json"), append(info, '\n'), 0o600); err != nil {
 				return x.run.fail(err)
 			}
-			fmt.Fprintln(out, "state, secrets and profile copied")
+			if err := b.prepareMachineRecoveryCatalog(ctx, hostname, x.staging, out); err != nil {
+				return x.run.fail(err)
+			}
+			fmt.Fprintln(out, "state, secrets, profile and workload images copied")
 			return nil
 		},
 	}
@@ -364,8 +632,17 @@ func (x *backingUp) machineSnapshotStep() kernel.Step {
 	return kernel.Step{
 		Name: "snapshot", Change: fmt.Sprintf("snapshot them into bucket %s", x.bucket),
 		Apply: func(ctx context.Context, out io.Writer) error {
-			if err := x.run.begin(ctx); err != nil {
+			if err := checkReleaseStoreAccess(ctx, x.b.Store, ""); err != nil {
 				return err
+			}
+			if err := x.preparedBackup(ctx); err != nil {
+				return err
+			}
+			if x.receiptDir != "" && x.summary != nil {
+				return nil
+			}
+			if err := x.requireSnapshotStaging(ctx); err != nil {
+				return x.run.fail(err)
 			}
 			e, r, err := x.repo(ctx)
 			if err != nil {
@@ -375,8 +652,7 @@ func (x *backingUp) machineSnapshotStep() kernel.Step {
 			if err := x.ensure(ctx, r, out); err != nil {
 				return x.run.fail(err)
 			}
-			x.summary, err = r.Backup(ctx, x.target, []string{restic.DirMount(x.staging, true)}, restic.DataRoot)
-			if err != nil {
+			if err := x.captureSnapshot(ctx, r, []string{restic.DirMount(x.staging, true)}); err != nil {
 				return x.run.fail(err)
 			}
 			_ = x.b.Store.RecordIntegrationUse(ctx, integration.StorageName, "backup of the machine", time.Now().UTC())
@@ -392,8 +668,12 @@ func (x *backingUp) retentionStep() kernel.Step {
 	return kernel.Step{
 		Name: "retention", Change: fmt.Sprintf("keep %d daily, %d weekly and %d monthly snapshots", x.keep.Daily, x.keep.Weekly, x.keep.Monthly),
 		Apply: func(ctx context.Context, out io.Writer) error {
-			if err := x.run.begin(ctx); err != nil {
+			complete, err := x.resumeBackup(ctx)
+			if err != nil {
 				return err
+			}
+			if complete {
+				return x.discardStaging(ctx)
 			}
 			e, r, err := x.repo(ctx)
 			if err != nil {
@@ -404,22 +684,13 @@ func (x *backingUp) retentionStep() kernel.Step {
 			if err != nil {
 				return x.run.fail(err)
 			}
-			if x.summary == nil {
-				// Resumed after the snapshot step: take the newest.
-				latest, err := r.Latest(ctx, x.target)
-				if err != nil {
-					return x.run.fail(err)
-				}
-				x.summary = &restic.Summary{SnapshotID: latest.ID, BackupStart: latest.Time}
-				if latest.Summary != nil {
-					x.summary.TotalFiles, x.summary.TotalBytes = latest.Summary.TotalFiles, latest.Summary.TotalBytes
-				}
-			}
 			s := x.summary
-			if err := x.run.done(ctx, state.BackupRun{Snapshot: short(s.SnapshotID), SnapshotAt: s.BackupStart, Files: s.TotalFiles, Bytes: s.TotalBytes, Detail: x.detail()}); err != nil {
+			if err := x.run.done(ctx, state.BackupRun{Snapshot: s.SnapshotID, SnapshotAt: s.BackupStart, Files: s.TotalFiles, Bytes: s.TotalBytes, Detail: x.detail()}); err != nil {
 				return err
 			}
-			_ = os.RemoveAll(x.staging)
+			if err := x.discardStaging(ctx); err != nil {
+				return err
+			}
 			if removed > 0 {
 				fmt.Fprintf(out, "removed %d old snapshot(s)\n", removed)
 			} else {

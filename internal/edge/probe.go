@@ -3,6 +3,7 @@ package edge
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"sort"
@@ -52,8 +53,8 @@ func DNSProblem(host string, pointsAt, machineAddrs []string) string {
 }
 
 // CertificateReady reports whether the edge at addr serves a real
-// certificate for host: one that names the host and isn't Caddy's own
-// local authority's.
+// certificate for host: one that names the host, is currently valid, and
+// chains to a trusted authority.
 func CertificateReady(ctx context.Context, host, addr string) (bool, string) {
 	ready, why, _, _ := Certificate(ctx, host, addr)
 	return ready, why
@@ -74,6 +75,13 @@ func Certificate(ctx context.Context, host, addr string) (ready bool, why string
 	}
 	defer conn.Close()
 	certs := conn.(*tls.Conn).ConnectionState().PeerCertificates
+	return certificateReadiness(host, certs, time.Now(), nil)
+}
+
+// The TLS probe reads an unverified chain so a failed certificate still has
+// an expiry and useful diagnostics. Readiness requires browser-equivalent
+// hostname, validity and trust checks against this machine's root store.
+func certificateReadiness(host string, certs []*x509.Certificate, now time.Time, roots *x509.CertPool) (ready bool, why string, expiry time.Time, found bool) {
 	if len(certs) == 0 {
 		return false, "no certificate", time.Time{}, false
 	}
@@ -84,8 +92,15 @@ func Certificate(ctx context.Context, host, addr string) (ready bool, why string
 		return false, "only Caddy's local certificate so far", expiry, true
 	case leaf.VerifyHostname(host) != nil:
 		return false, "the certificate is for " + strings.Join(leaf.DNSNames, ", "), expiry, true
-	case time.Now().After(leaf.NotAfter):
+	case now.After(leaf.NotAfter):
 		return false, "the certificate expired " + leaf.NotAfter.Format(time.DateOnly), expiry, true
+	}
+	intermediates := x509.NewCertPool()
+	for _, cert := range certs[1:] {
+		intermediates.AddCert(cert)
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{DNSName: host, CurrentTime: now, Roots: roots, Intermediates: intermediates}); err != nil {
+		return false, "the certificate cannot be verified: " + err.Error(), expiry, true
 	}
 	return true, "issued by " + leaf.Issuer.CommonName, expiry, true
 }

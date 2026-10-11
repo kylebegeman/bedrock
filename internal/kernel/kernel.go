@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -145,6 +146,29 @@ type Receipt struct {
 	Version       string                `json:"bedrock"`
 }
 
+// StepOutput is a journaled step's saved diagnostic tail. Output is saved
+// when an execution finishes, so running steps may not have output yet.
+type StepOutput struct {
+	Index      int              `json:"index"`
+	Name       string           `json:"name"`
+	Status     state.StepStatus `json:"status"`
+	Error      string           `json:"error,omitempty"`
+	Output     string           `json:"output"`
+	FinishedAt time.Time        `json:"finished_at,omitempty"`
+}
+
+// OperationOutput is explicitly requested diagnostic output, separate from
+// ordinary receipts. Tails can contain both apply and compensation output;
+// each execution retains at most TailLinesPerExecution lines.
+type OperationOutput struct {
+	ID                    string       `json:"id"`
+	TailLinesPerExecution int          `json:"tail_lines_per_execution"`
+	Steps                 []StepOutput `json:"steps"`
+}
+
+// ErrUnknownStep means an output selector did not name a journaled step.
+var ErrUnknownStep = errors.New("unknown operation step")
+
 // Engine plans and applies operations against one store.
 type Engine struct {
 	store    *state.Store
@@ -269,6 +293,10 @@ func (e *Engine) RunExpecting(ctx context.Context, kind string, input json.RawMe
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stopRenewing := e.keepLease(ctx, op.ID, cancel)
+	defer stopRenewing()
 	return e.apply(ctx, op, plan, view, emit)
 }
 
@@ -291,32 +319,35 @@ func (e *Engine) Recover(ctx context.Context, emit func(Event)) (int, error) {
 			return 0, err
 		}
 		handled++
-		plan, view, planErr := e.plan(ctx, op.Kind, op.Input)
-		switch {
-		case planErr != nil:
-			if err := e.finish(ctx, op.ID, state.Failed, "interrupted, and the plan can't be rebuilt: "+planErr.Error(), emit); err != nil {
-				return 0, err
-			}
-			continue
-		case view.Digest != op.PlanDigest:
-			if err := e.finish(ctx, op.ID, state.Failed, "interrupted, and the plan changed since it started", emit); err != nil {
-				return 0, err
-			}
-			continue
-		}
-		emit(Event{Type: EventResumed, Operation: op.ID, At: now, Plan: view,
-			Message: fmt.Sprintf("interrupted %d time(s); %s", op.Interruptions, describeRecovery(plan.Recovery))})
-		if plan.Recovery == Compensate {
-			if _, err := e.compensate(ctx, op, plan, "interrupted before it finished", emit); err != nil {
-				return 0, err
-			}
-			continue
-		}
-		if _, err := e.apply(ctx, op, plan, view, emit); err != nil && !errors.Is(err, errCrashed) {
-			return 0, err
+		if err := e.recoverOperation(ctx, op, emit); err != nil && !errors.Is(err, errCrashed) {
+			return handled, err
 		}
 	}
 	return handled, nil
+}
+
+// Recovery owns the lease while rebuilding the plan as well as executing it:
+// planning and compensation can both take longer than the initial lease.
+func (e *Engine) recoverOperation(ctx context.Context, op *state.Operation, emit func(Event)) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stopRenewing := e.keepLease(ctx, op.ID, cancel)
+	defer stopRenewing()
+	plan, view, planErr := e.plan(ctx, op.Kind, op.Input)
+	switch {
+	case planErr != nil:
+		return e.finish(ctx, op.ID, state.Failed, "interrupted, and the plan can't be rebuilt: "+planErr.Error(), emit)
+	case view.Digest != op.PlanDigest:
+		return e.finish(ctx, op.ID, state.Failed, "interrupted, and the plan changed since it started", emit)
+	}
+	emit(Event{Type: EventResumed, Operation: op.ID, At: e.now(), Plan: view,
+		Message: fmt.Sprintf("interrupted %d time(s); %s", op.Interruptions, describeRecovery(plan.Recovery))})
+	if plan.Recovery == Compensate {
+		_, err := e.compensate(ctx, op, plan, "interrupted before it finished", emit)
+		return err
+	}
+	_, err := e.apply(ctx, op, plan, view, emit)
+	return err
 }
 
 func describeRecovery(r Recovery) string {
@@ -341,11 +372,6 @@ func Attempt(ctx context.Context) int {
 
 // apply runs the steps that haven't succeeded, under a lease it keeps renewing.
 func (e *Engine) apply(ctx context.Context, op *state.Operation, plan *Plan, view *PlanView, emit func(Event)) (*Receipt, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	stopRenewing := e.keepLease(ctx, op.ID, cancel)
-	defer stopRenewing()
-
 	steps, err := e.store.Steps(ctx, op.ID)
 	if err != nil {
 		return nil, err
@@ -365,7 +391,7 @@ func (e *Engine) apply(ctx context.Context, op *state.Operation, plan *Plan, vie
 		out := newLineWriter(func(line string) {
 			emit(Event{Type: EventStepOutput, Operation: op.ID, At: e.now(), Step: &StepView{Index: i, Name: st.Name}, Line: line})
 		})
-		stepErr := st.Apply(context.WithValue(ctx, attemptKey{}, steps[i].Attempts+1), out)
+		stepErr := st.Apply(context.WithValue(withOperationID(ctx, op.ID), attemptKey{}, steps[i].Attempts+1), out)
 		out.Flush()
 		finished := e.now()
 		status, errText := state.StepSucceeded, ""
@@ -476,8 +502,10 @@ func (e *Engine) keepLease(ctx context.Context, id string, lost context.CancelFu
 		interval = time.Second
 	}
 	done := make(chan struct{})
+	exited := make(chan struct{})
 	var once sync.Once
 	go func() {
+		defer close(exited)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -494,7 +522,7 @@ func (e *Engine) keepLease(ctx context.Context, id string, lost context.CancelFu
 			}
 		}
 	}()
-	return func() { once.Do(func() { close(done) }) }
+	return func() { once.Do(func() { close(done) }); <-exited }
 }
 
 // ReceiptOf builds the receipt for a recorded operation, finished or not.
@@ -510,6 +538,37 @@ func (e *Engine) ReceiptOf(ctx context.Context, id string) (*Receipt, error) {
 		}
 	}
 	return buildReceipt(op, steps), nil
+}
+
+// OutputOf returns saved tails for an operation, optionally selecting one
+// step by name or its one-based position. ReceiptOf intentionally omits them.
+func (e *Engine) OutputOf(ctx context.Context, id, selected string) (*OperationOutput, error) {
+	op, steps, err := e.store.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	out := &OperationOutput{ID: op.ID, TailLinesPerExecution: tailLines, Steps: make([]StepOutput, 0, len(steps))}
+	position, _ := strconv.Atoi(selected)
+	// Prefer an exact name when a step's name happens to be a number.
+	named := false
+	for _, st := range steps {
+		if st.Name == selected {
+			named = true
+			break
+		}
+	}
+	var names []string
+	for _, st := range steps {
+		names = append(names, st.Name)
+		if selected != "" && st.Name != selected && (named || position != st.Index+1) {
+			continue
+		}
+		out.Steps = append(out.Steps, StepOutput{Index: st.Index, Name: st.Name, Status: st.Status, Error: st.Error, Output: st.Output, FinishedAt: st.FinishedAt})
+	}
+	if selected != "" && len(out.Steps) == 0 {
+		return nil, fmt.Errorf("%w %q; choose a name or a one-based position: %s", ErrUnknownStep, selected, strings.Join(names, ", "))
+	}
+	return out, nil
 }
 
 func buildReceipt(op *state.Operation, steps []state.Step) *Receipt {
@@ -566,25 +625,45 @@ func digestBytes(b []byte) string {
 
 // lineWriter turns a step's output into lines and keeps a bounded tail.
 type lineWriter struct {
-	emit    func(string)
-	partial strings.Builder
-	tail    []string
+	mu        sync.Mutex
+	emit      func(string)
+	partial   strings.Builder
+	truncated bool
+	tail      []string
 }
 
-const tailLines = 40
+const (
+	tailLines    = 40
+	maxLineBytes = 64 << 10
+)
 
 func newLineWriter(emit func(string)) *lineWriter { return &lineWriter{emit: emit} }
 
 func (w *lineWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	for _, c := range p {
 		if c == '\n' {
-			w.line(w.partial.String())
-			w.partial.Reset()
+			w.flushLine()
 			continue
 		}
-		w.partial.WriteByte(c)
+		if w.partial.Len() < maxLineBytes {
+			w.partial.WriteByte(c)
+		} else {
+			w.truncated = true
+		}
 	}
 	return len(p), nil
+}
+
+func (w *lineWriter) flushLine() {
+	line := w.partial.String()
+	if w.truncated {
+		line += " [line truncated]"
+	}
+	w.line(line)
+	w.partial.Reset()
+	w.truncated = false
 }
 
 func (w *lineWriter) line(s string) {
@@ -598,14 +677,17 @@ func (w *lineWriter) line(s string) {
 
 // Flush emits a final line that had no newline.
 func (w *lineWriter) Flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if w.partial.Len() > 0 {
-		w.line(w.partial.String())
-		w.partial.Reset()
+		w.flushLine()
 	}
 }
 
 // Tail returns the last lines of output, newline-terminated.
 func (w *lineWriter) Tail() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if len(w.tail) == 0 {
 		return ""
 	}

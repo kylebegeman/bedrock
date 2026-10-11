@@ -26,7 +26,9 @@ import (
 	apps "github.com/kylebegeman/bedrock/internal/app"
 	"github.com/kylebegeman/bedrock/internal/gitdeploy"
 	"github.com/kylebegeman/bedrock/internal/host"
+	"github.com/kylebegeman/bedrock/internal/integration"
 	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/bedrock/internal/remote"
 	"github.com/kylebegeman/bedrock/internal/state"
 )
 
@@ -62,15 +64,11 @@ func newGitAllow(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			kf, err := gitdeploy.ReadKeys(gitdeploy.AuthorizedKeys)
-			if err != nil {
+			if err := updateKeys(func(kf *gitdeploy.KeyFile) error {
+				var err error
+				key, err = kf.Allow(key, appName)
 				return err
-			}
-			key, err = kf.Allow(key, appName)
-			if err != nil {
-				return err
-			}
-			if err := writeKeys(kf); err != nil {
+			}); err != nil {
 				return err
 			}
 			fmt.Fprintf(a.stdout, "%s may deploy %s\n", key.Fingerprint(), strings.Join(key.Apps, ", "))
@@ -88,14 +86,12 @@ func newGitDeny(a *app) *cobra.Command {
 		Short: "Stop a key from deploying an app; a key left with no apps is removed.",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
-			kf, err := gitdeploy.ReadKeys(gitdeploy.AuthorizedKeys)
-			if err != nil {
-				return err
-			}
-			if !kf.Deny(args[0], strings.Join(args[1:], " ")) {
-				return fmt.Errorf("no key named %s deploys %s", strings.Join(args[1:], " "), args[0])
-			}
-			if err := writeKeys(kf); err != nil {
+			if err := updateKeys(func(kf *gitdeploy.KeyFile) error {
+				if !kf.Deny(args[0], strings.Join(args[1:], " ")) {
+					return fmt.Errorf("no key named %s deploys %s", strings.Join(args[1:], " "), args[0])
+				}
+				return nil
+			}); err != nil {
 				return err
 			}
 			fmt.Fprintf(a.stdout, "that key no longer deploys %s\n", args[0])
@@ -251,6 +247,7 @@ func newGitWebhook(a *app) *cobra.Command {
 	cmd.Flags().StringVar(&repo, "repo", "", "the repository: git@github.com:you/app.git, https://..., or file:///path for a test")
 	cmd.Flags().StringVar(&hookBranch, "branch", gitdeploy.DefaultBranch, "the branch whose pushes deploy")
 	cmd.Flags().BoolVar(&off, "off", false, "stop deploying on webhooks and forget the secret and key")
+	a.guardSecretMutation(cmd, func([]string) string { return integration.App })
 	return cmd
 }
 
@@ -381,18 +378,18 @@ func execGit(sub, dir string) error {
 	return syscall.Exec(gitPath, []string{"git", sub, dir}, os.Environ())
 }
 
-// writeKeys writes the key file and gives it to the push user.
-func writeKeys(kf *gitdeploy.KeyFile) error {
+// updateKeys changes the key file atomically and gives it to the push user.
+func updateKeys(change func(*gitdeploy.KeyFile) error) error {
 	if runtime.GOOS == "linux" && os.Geteuid() != 0 {
 		return errors.New("changing who may push needs root")
 	}
-	if err := kf.Write(); err != nil {
+	if err := gitdeploy.UpdateKeys(gitdeploy.AuthorizedKeys, change); err != nil {
 		return err
 	}
-	if err := chownToPushUser(filepath.Dir(kf.Path)); err != nil {
+	if err := chownToPushUser(filepath.Dir(gitdeploy.AuthorizedKeys)); err != nil {
 		return err
 	}
-	return chownToPushUser(kf.Path)
+	return chownToPushUser(gitdeploy.AuthorizedKeys)
 }
 
 // chownToPushUser gives a path, and everything under it, to the bedrock user.
@@ -426,6 +423,13 @@ func remoteFor(ctx context.Context, appName string) string {
 // deployTo sends a source tree to a machine over SSH and deploys it
 // there, printing the machine's steps as they happen.
 func deployTo(ctx context.Context, a *app, dir, appName, target string) error {
+	if !gitdeploy.ValidApp(appName) {
+		return fmt.Errorf("%q isn't an app's name", appName)
+	}
+	connection := remote.Target{SSH: target}
+	if err := connection.Validate(); err != nil {
+		return err
+	}
 	files, err := sourceFiles(ctx, dir)
 	if err != nil {
 		return err
@@ -437,9 +441,10 @@ func deployTo(ctx context.Context, a *app, dir, appName, target string) error {
 		}
 	}
 	fmt.Fprintf(a.stderr, "sending %d files (%s) of %s to %s\n", len(files), bytesWord(size), appName, target)
-	ssh := strings.Fields(envOr("BEDROCK_SSH", "ssh"))
-	args := append(append([]string{}, ssh[1:]...), target, "bedrock", "receive", appName)
-	cmd := exec.CommandContext(ctx, ssh[0], args...)
+	cmd, err := targetTransport().Command(ctx, connection, "bedrock receive "+appName)
+	if err != nil {
+		return err
+	}
 	cmd.Stdout, cmd.Stderr = a.stdout, a.stderr
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -469,7 +474,7 @@ func sourceFiles(ctx context.Context, dir string) ([]string, error) {
 		var files []string
 		seen := map[string]bool{}
 		for _, f := range strings.Split(string(out), "\x00") {
-			if f == "" || seen[f] {
+			if f == "" || seen[f] || isEnvironmentFile(f) {
 				continue
 			}
 			seen[f] = true
@@ -488,13 +493,20 @@ func sourceFiles(ctx context.Context, dir string) ([]string, error) {
 		if d.IsDir() && (d.Name() == ".git" || d.Name() == "node_modules") {
 			return filepath.SkipDir
 		}
-		if !d.IsDir() {
+		if !d.IsDir() && !isEnvironmentFile(p) {
 			rel, _ := filepath.Rel(dir, p)
 			files = append(files, rel)
 		}
 		return nil
 	})
 	return files, err
+}
+
+// Environment configuration belongs in the sealed secret store. Keep this
+// exclusion common to legacy deploys and named-target snapshots.
+func isEnvironmentFile(path string) bool {
+	name := filepath.Base(path)
+	return name == ".env" || strings.HasPrefix(name, ".env.")
 }
 
 // writeTree writes files as a gzipped tar stream.

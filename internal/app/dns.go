@@ -157,9 +157,12 @@ const PointKind = "dns.point"
 
 // Point is the Definition for PointKind.
 type Point struct {
-	Store     *state.Store
-	Secrets   *secrets.Store
-	Addresses func(ctx context.Context) []string
+	// AllowMigration is internal authority for a validated cutover plan.
+	// Standalone DNS operations leave it empty and obey the writer fence.
+	AllowMigration string
+	Store          *state.Store
+	Secrets        *secrets.Store
+	Addresses      func(ctx context.Context) []string
 	// CloudflareOnly refuses to point a name straight at a machine that
 	// answers only Cloudflare.
 	CloudflareOnly CloudflareOnly
@@ -189,6 +192,15 @@ func (p Point) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, err
 	}
 	if app == "" {
 		return nil, fmt.Errorf("no app on this machine routes %s; deploy the app with it first, then point its name here", in.Host)
+	}
+	if err := CheckMigrationAccess(p.Store.Path(), app); err != nil {
+		record, readErr := readMigration(p.Store.Path(), app)
+		if readErr != nil {
+			return nil, readErr
+		}
+		if p.AllowMigration == "" || record == nil || record.Role != "target" || record.Handoff.Migration != p.AllowMigration || (record.Phase != "staged" && record.Phase != "cutting-over") {
+			return nil, err
+		}
 	}
 	if in.Proxied {
 		mode = manifest.DNSProxied

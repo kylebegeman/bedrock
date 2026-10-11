@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -116,5 +117,41 @@ func TestFetchSaysWhenTheVersionIsNotPublished(t *testing.T) {
 	_, err := Fetch(context.Background(), "0.9.9", t.TempDir(), "")
 	if err == nil || !strings.Contains(err.Error(), "not published") {
 		t.Fatalf("want a not-published error, got %v", err)
+	}
+}
+
+func TestFetchDoesNotFollowAnExistingAssetSymlink(t *testing.T) {
+	body := []byte("new binary")
+	serve(t, "0.7.4", body, "")
+	dir := t.TempDir()
+	victim := filepath.Join(t.TempDir(), "keep")
+	if err := os.WriteFile(victim, []byte("keep these bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	asset := filepath.Join(dir, AssetName("0.7.4", runtime.GOOS, runtime.GOARCH))
+	if err := os.Symlink(victim, asset); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Fetch(context.Background(), "0.7.4", dir, sumOf(body)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(victim)
+	if err != nil || string(got) != "keep these bytes" {
+		t.Fatalf("download overwrote symlink target: %q %v", got, err)
+	}
+}
+func TestFailedFetchPreservesPreviousVerifiedAsset(t *testing.T) {
+	serve(t, "0.7.4", []byte("wrong bytes"), "")
+	dir := t.TempDir()
+	asset := filepath.Join(dir, AssetName("0.7.4", runtime.GOOS, runtime.GOARCH))
+	if err := os.WriteFile(asset, []byte("previous verified binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Fetch(context.Background(), "0.7.4", dir, strings.Repeat("c", 64)); err == nil {
+		t.Fatal("checksum mismatch accepted")
+	}
+	got, err := os.ReadFile(asset)
+	if err != nil || string(got) != "previous verified binary" {
+		t.Fatalf("failed download destroyed previous asset: %q %v", got, err)
 	}
 }

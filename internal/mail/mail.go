@@ -34,7 +34,7 @@ type Message struct {
 // Send delivers a message. Port 465 speaks TLS from the start; other ports
 // start plain and upgrade with STARTTLS, which is required unless the
 // server is on this machine.
-func Send(ctx context.Context, s Server, m Message) error {
+func Send(ctx context.Context, s Server, m Message) (err error) {
 	if s.Host == "" || s.Port == 0 {
 		return errors.New("no mail server configured")
 	}
@@ -44,7 +44,6 @@ func Send(ctx context.Context, s Server, m Message) error {
 	addr := net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
 	dialer := &net.Dialer{Timeout: 15 * time.Second}
 	var conn net.Conn
-	var err error
 	tlsConfig := &tls.Config{ServerName: s.Host, MinVersion: tls.VersionTLS12}
 	if s.Port == 465 {
 		conn, err = (&tls.Dialer{NetDialer: dialer, Config: tlsConfig}).DialContext(ctx, "tcp", addr)
@@ -54,11 +53,18 @@ func Send(ctx context.Context, s Server, m Message) error {
 	if err != nil {
 		return fmt.Errorf("mail server %s: %w", addr, err)
 	}
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
-	} else {
-		_ = conn.SetDeadline(time.Now().Add(60 * time.Second))
+	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	defer stop()
+	defer func() {
+		if err != nil && ctx.Err() != nil {
+			err = ctx.Err()
+		}
+	}()
+	deadline := time.Now().Add(60 * time.Second)
+	if requested, ok := ctx.Deadline(); ok && requested.Before(deadline) {
+		deadline = requested
 	}
+	_ = conn.SetDeadline(deadline)
 	c, err := smtp.NewClient(conn, s.Host)
 	if err != nil {
 		conn.Close()

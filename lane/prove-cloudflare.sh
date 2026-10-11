@@ -9,13 +9,10 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=/dev/null
-. "$here/hostinger.env"
-: "${LANE_DOMAIN:?set LANE_DOMAIN in lane/hostinger.env; see hostinger.env.example}"
+# shellcheck source=lane/common.sh
+. "$here/common.sh"
+: "${LANE_DOMAIN:?set LANE_DOMAIN in the lane configuration; see ssh.env.example}"
 export LANE_DOMAIN
-ssh_opts=(-i "$KEY" -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes
-  -o UserKnownHostsFile="$here/known_hosts" -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
-box="root@$HOST"
 run() { ssh "${ssh_opts[@]}" "$box" "$@"; }
 fetch() { curl -sS --max-time 30 "$@"; }
 quiet() { grep -v '^  \.\.\.  '; }

@@ -304,7 +304,7 @@ func firewallDone(f Facts, ranges []string) bool {
 	}
 	guard := f.Firewall.WebGuard
 	if ranges == nil {
-		return f.Allows("80/tcp") && f.Allows("443/tcp") && len(f.CloudflareSources()) == 0 && !guard.Drops && guard.Hooks == 0
+		return f.Allows("80/tcp") && f.Allows("443/tcp") && len(f.CloudflareSources()) == 0 && !guard.Present()
 	}
 	have := f.CloudflareSources()
 	if f.WebOpen() || len(have) != len(ranges) || !guardCurrent(guard, ranges) {

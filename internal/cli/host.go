@@ -24,11 +24,17 @@ func newDoctor(a *app) *cobra.Command {
 			facts := host.Gather(cmd.Context(), host.RealEnv(), a.socket)
 			results := host.Diagnose(facts)
 			if a.json {
-				return json.NewEncoder(a.stdout).Encode(struct {
+				if err := json.NewEncoder(a.stdout).Encode(struct {
 					Facts   host.Facts    `json:"facts"`
 					Results []host.Result `json:"results"`
 					Worst   host.Verdict  `json:"worst"`
-				}{facts, results, host.Worst(results)})
+				}{facts, results, host.Worst(results)}); err != nil {
+					return err
+				}
+				if host.Worst(results) == host.Fail {
+					return quietError{code: 1}
+				}
+				return nil
 			}
 			w := tabwriter.NewWriter(a.stdout, 0, 4, 2, ' ', 0)
 			for _, r := range results {
@@ -121,6 +127,7 @@ func newHost(a *app) *cobra.Command {
 	a.mutatingFlags(maintain, &maintainPlan)
 
 	hostCmd.AddCommand(setup, reconcile, maintain)
+	addHostBootstrap(hostCmd, a)
 	return hostCmd
 }
 

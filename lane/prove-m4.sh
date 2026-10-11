@@ -7,31 +7,28 @@
 # Needs: *.$LANE_DOMAIN -> the box, and the staging directory made by the
 # session (sources without env files, and the archives), passed as $1. The
 # archives are begamin-data.tar.gz, one dragon_writer_*.dump and one
-# uploads_*.tar.gz; hostinger.env says how many chapters the dump holds
+# uploads_*.tar.gz; the lane configuration says how many chapters the dump holds
 # and, optionally, one upload to fetch (LANE_DW_DRAWING).
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 stage="${1:?usage: prove-m4.sh <staging dir with src/ and archives/>}"
-# shellcheck source=/dev/null
-. "$here/hostinger.env"
-: "${LANE_DOMAIN:?set LANE_DOMAIN in lane/hostinger.env; see hostinger.env.example}"
-: "${LANE_SITE_URL:?set LANE_SITE_URL in lane/hostinger.env; see hostinger.env.example}"
-: "${LANE_DW_CHAPTERS:?set LANE_DW_CHAPTERS in lane/hostinger.env; see hostinger.env.example}"
+# shellcheck source=lane/common.sh
+. "$here/common.sh"
+: "${LANE_DOMAIN:?set LANE_DOMAIN in the lane configuration; see ssh.env.example}"
+: "${LANE_SITE_URL:?set LANE_SITE_URL in the lane configuration; see ssh.env.example}"
+: "${LANE_DW_CHAPTERS:?set LANE_DW_CHAPTERS in the lane configuration; see ssh.env.example}"
 export LANE_DOMAIN LANE_SITE_URL LANE_DW_CHAPTERS
-ssh_opts=(-i "$KEY" -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes
-  -o UserKnownHostsFile="$here/known_hosts" -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
-box="root@$HOST"
 run() { ssh "${ssh_opts[@]}" "$box" "$@"; }
-put() { scp -q "${ssh_opts[@]}" "$1" "$box:$2"; }
+put() { scp -q "${scp_opts[@]}" "$1" "$box:$2"; }
 fetch() { curl -sS --max-time 30 "$@"; }
 # The fixtures name lane.example.com; the box answers for $LANE_DOMAIN.
 localize() { run "sed -i 's/lane\\.example\\.com/$LANE_DOMAIN/g' $*"; }
 quiet() { grep -v '^  \.\.\.  ' ; }
 
 echo "== build and install"
-(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/bedrock-linux-amd64 ./cmd/bedrock)
-put "$here/../bin/bedrock-linux-amd64" /usr/local/bin/bedrock.new
+(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -o bin/bedrock-linux-$LANE_ARCH ./cmd/bedrock)
+put "$here/../bin/bedrock-linux-$LANE_ARCH" /usr/local/bin/bedrock.new
 run 'chmod 755 /usr/local/bin/bedrock.new && mv -f /usr/local/bin/bedrock.new /usr/local/bin/bedrock && bedrock daemon install >/dev/null && bedrock version'
 
 echo "== copy the fixtures, the sources and the archives"

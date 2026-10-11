@@ -8,6 +8,7 @@
 package dockertest
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -77,10 +78,11 @@ type Server struct {
 	mu         sync.Mutex
 	containers map[string]*Container // by name
 	// volumes and networks are by name, with their labels.
-	volumes  map[string]map[string]string
-	networks map[string]map[string]string
-	calls    []string
-	next     int
+	volumes         map[string]map[string]string
+	networks        map[string]map[string]string
+	networkInternal map[string]bool
+	calls           []string
+	next            int
 	// OnCreate, when set, sees each container as it is created, before the
 	// response, while whatever it was created from still exists.
 	OnCreate func(c Container)
@@ -90,7 +92,7 @@ type Server struct {
 // Docker client's environment at it.
 func New(t *testing.T) *Server {
 	t.Helper()
-	s := &Server{containers: map[string]*Container{}, volumes: map[string]map[string]string{}, networks: map[string]map[string]string{}}
+	s := &Server{containers: map[string]*Container{}, volumes: map[string]map[string]string{}, networks: map[string]map[string]string{}, networkInternal: map[string]bool{}}
 	srv := httptest.NewServer(s)
 	t.Cleanup(srv.Close)
 	t.Setenv("DOCKER_HOST", "tcp"+strings.TrimPrefix(srv.URL, "http"))
@@ -150,6 +152,7 @@ func (s *Server) AddNetwork(name string, labels map[string]string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.networks[name] = labels
+	s.networkInternal[name] = false
 }
 
 // VolumeNames lists the volumes the stand-in holds, sorted.
@@ -209,7 +212,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []any{})
 	case strings.HasPrefix(path, "/images/") && strings.HasSuffix(path, "/json"):
 		ref := strings.TrimSuffix(strings.TrimPrefix(path, "/images/"), "/json")
-		writeJSON(w, http.StatusOK, map[string]any{"Id": "sha256:" + strings.NewReplacer("/", "-", ":", "-", "@", "-").Replace(ref), "Config": map[string]any{"User": ""}})
+		writeJSON(w, http.StatusOK, map[string]any{"Id": fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(ref))), "Config": map[string]any{"User": ""}})
 	case path == "/images/create":
 		writeJSON(w, http.StatusOK, map[string]any{"status": "pulled"})
 	case path == "/containers/json":
@@ -222,18 +225,42 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		items := []map[string]any{}
 		for _, name := range sortedNames(s.networks) {
-			items = append(items, map[string]any{"Name": name, "Labels": s.networks[name]})
+			items = append(items, map[string]any{"Name": name, "Labels": s.networks[name], "Internal": s.networkInternal[name]})
 		}
 		s.mu.Unlock()
 		writeJSON(w, http.StatusOK, items)
 	case strings.HasPrefix(path, "/networks/") && r.Method == http.MethodDelete:
+		name := strings.TrimPrefix(path, "/networks/")
 		s.mu.Lock()
-		delete(s.networks, strings.TrimPrefix(path, "/networks/"))
+		delete(s.networks, name)
+		delete(s.networkInternal, name)
 		s.mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
 	case strings.HasPrefix(path, "/networks/") && r.Method == http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]any{"Name": strings.TrimPrefix(path, "/networks/"), "Labels": map[string]string{}})
+		name := strings.TrimPrefix(path, "/networks/")
+		s.mu.Lock()
+		labels, exists := s.networks[name]
+		internal := s.networkInternal[name]
+		s.mu.Unlock()
+		if !exists {
+			writeJSON(w, http.StatusNotFound, map[string]string{"message": "network " + name + " not found"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"Name": name, "Labels": labels, "Internal": internal})
 	case path == "/networks/create":
+		var body struct {
+			Name     string
+			Labels   map[string]string
+			Internal bool
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": err.Error()})
+			return
+		}
+		s.mu.Lock()
+		s.networks[body.Name] = body.Labels
+		s.networkInternal[body.Name] = body.Internal
+		s.mu.Unlock()
 		writeJSON(w, http.StatusCreated, map[string]any{"Id": "n1"})
 	case path == "/volumes/create":
 		writeJSON(w, http.StatusCreated, map[string]any{"Name": "v1"})
@@ -322,6 +349,14 @@ func (s *Server) container(w http.ResponseWriter, r *http.Request, rest string) 
 	case action == "stop":
 		c.Running = false
 		w.WriteHeader(http.StatusNoContent)
+	case action == "update":
+		var body struct{ RestartPolicy struct{ Name string } }
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": err.Error()})
+			return
+		}
+		c.HostConfig.RestartPolicy = body.RestartPolicy
+		writeJSON(w, http.StatusOK, map[string]any{"Warnings": []string{}})
 	case action == "json":
 		if c.Running && c.ExitAfter > 0 {
 			c.ExitAfter--
@@ -338,6 +373,7 @@ func (s *Server) container(w http.ResponseWriter, r *http.Request, rest string) 
 			"State":           map[string]any{"Status": status, "Running": c.Running, "ExitCode": c.ExitCode},
 			"Config":          map[string]any{"Image": c.Image, "Labels": c.Labels, "User": c.User},
 			"Mounts":          c.Mounts,
+			"HostConfig":      c.HostConfig,
 			"NetworkSettings": map[string]any{"Networks": map[string]any{}},
 		})
 	case action == "logs":

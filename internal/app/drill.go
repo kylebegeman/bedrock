@@ -202,9 +202,6 @@ func (d *drillState) restoreStep() kernel.Step {
 			if err != nil {
 				return d.abort(e, err)
 			}
-			if d.restored.FilesRestored != d.restored.TotalFiles {
-				return d.abort(e, fmt.Errorf("restored %d of %d files", d.restored.FilesRestored, d.restored.TotalFiles))
-			}
 			d.details = append(d.details, fmt.Sprintf("%d files (%s) restored", d.restored.FilesRestored, HumanBytes(d.restored.BytesRestored)))
 			fmt.Fprintf(out, "snapshot %s from %s: %s\n", d.found.ShortID, d.found.Time.Local().Format("2006-01-02 15:04"), d.details[0])
 			return nil
@@ -226,16 +223,7 @@ func (d *drillState) pick(ctx context.Context, r restic.Runner) (*restic.Snapsho
 	if err != nil {
 		return nil, err
 	}
-	var found *restic.Snapshot
-	for i := range snaps {
-		if strings.HasPrefix(snaps[i].ID, d.snapshot) {
-			found = &snaps[i]
-		}
-	}
-	if found == nil {
-		return nil, fmt.Errorf("no snapshot %s for %s", d.snapshot, d.app)
-	}
-	return found, nil
+	return resolveRecoverySnapshot(snaps, d.snapshot)
 }
 
 func (d *drillState) databaseStep() kernel.Step {

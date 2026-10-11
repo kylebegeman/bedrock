@@ -45,7 +45,7 @@ type App struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-func (s *Store) migrateApps(ctx context.Context) error {
+func (s *Store) migrateApps(ctx context.Context, q migrationDB) error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS apps (
   name            TEXT PRIMARY KEY,
@@ -78,19 +78,19 @@ CREATE TABLE IF NOT EXISTS job_runs (
   container   TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS job_runs_app ON job_runs (app, workload, started_at DESC);`
-	if _, err := s.db.ExecContext(ctx, schema); err != nil {
+	if _, err := q.ExecContext(ctx, schema); err != nil {
 		return err
 	}
 	// Columns added after a table first shipped.
-	if err := s.ensureColumn(ctx, "revisions", "secrets_version", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+	if err := ensureColumn(ctx, q, "revisions", "secrets_version", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
-	return s.ensureColumn(ctx, "job_runs", "container", "TEXT NOT NULL DEFAULT ''")
+	return ensureColumn(ctx, q, "job_runs", "container", "TEXT NOT NULL DEFAULT ''")
 }
 
 // ensureColumn adds a column to a table that predates it.
-func (s *Store) ensureColumn(ctx context.Context, table, column, definition string) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT name FROM pragma_table_info(?)`, table)
+func ensureColumn(ctx context.Context, q migrationDB, table, column, definition string) error {
+	rows, err := q.QueryContext(ctx, `SELECT name FROM pragma_table_info(?)`, table)
 	if err != nil {
 		return err
 	}
@@ -107,7 +107,10 @@ func (s *Store) ensureColumn(ctx context.Context, table, column, definition stri
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, definition))
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	_, err = q.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, definition))
 	return err
 }
 
@@ -130,6 +133,24 @@ func (s *Store) SaveRevision(ctx context.Context, r Revision) error {
 	return err
 }
 
+// CreateRevision records a new revision without replacing existing authority.
+func (s *Store) CreateRevision(ctx context.Context, r Revision) error {
+	images, err := json.Marshal(r.Images)
+	if err != nil {
+		return err
+	}
+	containers, err := json.Marshal(r.Containers)
+	if err != nil {
+		return err
+	}
+	if r.Manifest == nil {
+		r.Manifest = json.RawMessage(`{}`)
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO revisions (app, id, status, manifest, images, containers, source, secrets_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.App, r.ID, string(r.Status), string(r.Manifest), string(images), string(containers), r.Source, r.SecretsVersion, unix(r.CreatedAt))
+	return err
+}
+
 // SetRevisionStatus changes one revision's status.
 func (s *Store) SetRevisionStatus(ctx context.Context, app, id string, status RevisionStatus) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE revisions SET status = ? WHERE app = ? AND id = ?`, string(status), app, id)
@@ -144,6 +165,13 @@ func (s *Store) Activate(ctx context.Context, app, id string, now time.Time) err
 		return err
 	}
 	defer tx.Rollback()
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM revisions WHERE app = ? AND id = ?`, app, id).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE revisions SET status = ? WHERE app = ? AND status = ? AND id <> ?`, string(RevisionRetired), app, string(RevisionPrevious), id); err != nil {
 		return err
 	}
@@ -249,9 +277,9 @@ func (s *Store) ActiveRevisions(ctx context.Context) ([]Revision, error) {
 	return out, rows.Err()
 }
 
-// RemoveApp forgets an app: its revisions, its job runs, its signals, its
-// incident and its webhook. Its backup runs stay, because they say where
-// its data went.
+// RemoveApp forgets an app: its revisions, release boundaries, job runs,
+// signals, incident and webhook. Release fences cannot survive their removed
+// revision history. Backup runs stay, because they say where its data went.
 func (s *Store) RemoveApp(ctx context.Context, app string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -260,6 +288,7 @@ func (s *Store) RemoveApp(ctx context.Context, app string) error {
 	defer tx.Rollback()
 	for _, q := range []struct{ query, arg string }{
 		{`DELETE FROM revisions WHERE app = ?`, app},
+		{`DELETE FROM release_boundaries WHERE app = ?`, app},
 		{`DELETE FROM apps WHERE name = ?`, app},
 		{`DELETE FROM job_runs WHERE app = ?`, app},
 		{`DELETE FROM signals WHERE app = ?`, app},

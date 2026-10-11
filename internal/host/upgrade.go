@@ -12,6 +12,7 @@ import (
 
 	"github.com/kylebegeman/bedrock/internal/api"
 	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/state"
 	"github.com/kylebegeman/bedrock/internal/version"
 )
 
@@ -33,6 +34,8 @@ const (
 // Upgrade is the Definition for UpgradeKind.
 type Upgrade struct {
 	Env Env
+	// Store is checkpointed before switching binaries.
+	Store *state.Store
 	// Socket is the daemon's, to ask it which build it runs.
 	Socket string
 	// DaemonVersion asks the daemon which build it runs, and says whether
@@ -97,6 +100,20 @@ func (u Upgrade) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, e
 	if err != nil {
 		return nil, err
 	}
+	candidate, err := probeCapabilities(ctx, env, in.Path)
+	if err != nil {
+		return nil, err
+	}
+	stateVersion := state.SchemaVersion
+	if u.Store != nil {
+		stateVersion, err = u.Store.Version(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := candidate.AcceptsState(stateVersion); err != nil {
+		return nil, fmt.Errorf("upgrade preflight: %w", err)
+	}
 	// The plan is re-built when the operation resumes on the new daemon, so
 	// nothing in a step's Change may depend on which build is running now;
 	// that goes in the notes.
@@ -106,7 +123,13 @@ func (u Upgrade) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, e
 		kernel.Step{
 			Name: "stage", Change: "keep the running binary as the previous one and stage " + described,
 			Note: doneIf(identity(target) == identity(running), "already the running build", fmt.Sprintf("replacing %s (%s)", running.Version, running.Commit)),
-			Apply: func(_ context.Context, out io.Writer) error {
+			Apply: func(ctx context.Context, out io.Writer) error {
+				if u.Store == nil {
+					return errors.New("upgrade needs an open state store for its checkpoint")
+				}
+				if _, err := checkpointUpgrade(ctx, u.Store, env, target); err != nil {
+					return err
+				}
 				if err := os.MkdirAll(env.Path(LibDir), 0o755); err != nil {
 					return err
 				}

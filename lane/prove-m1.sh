@@ -7,18 +7,15 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=/dev/null
-. "$here/hostinger.env"
-ssh_opts=(-i "$KEY" -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes
-  -o UserKnownHostsFile="$here/known_hosts" -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
-box="root@$HOST"
+# shellcheck source=lane/common.sh
+. "$here/common.sh"
 run() { ssh "${ssh_opts[@]}" "$box" "$@"; }
 
 echo "== build and copy"
-(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/bedrock-linux-amd64 ./cmd/bedrock)
+(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -o bin/bedrock-linux-$LANE_ARCH ./cmd/bedrock)
 # A running daemon keeps the old binary busy, so copy beside it and rename
 # over it: the running process keeps its inode, the next start gets the new one.
-scp -q "${ssh_opts[@]}" "$here/../bin/bedrock-linux-amd64" "$box:/usr/local/bin/bedrock.new"
+scp -q "${scp_opts[@]}" "$here/../bin/bedrock-linux-$LANE_ARCH" "$box:/usr/local/bin/bedrock.new"
 run 'chmod 755 /usr/local/bin/bedrock.new && mv -f /usr/local/bin/bedrock.new /usr/local/bin/bedrock && bedrock version'
 
 echo "== install the daemon"

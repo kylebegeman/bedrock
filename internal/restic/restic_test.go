@@ -161,3 +161,99 @@ func TestTheSecretsFileGivesAShellTheValuesAsTheyWere(t *testing.T) {
 		}
 	}
 }
+
+func TestReleaseCheckpointTagsAreCapturedAndKeptByRetention(t *testing.T) {
+	fake := dockertest.New(t)
+	var commands [][]string
+	fake.OnCreate = func(c dockertest.Container) {
+		commands = append(commands, append([]string(nil), c.Cmd...))
+		fake.Update(c.Name, func(c *dockertest.Container) {
+			c.ExitAfter = 1
+			if c.Cmd[0] == "backup" {
+				c.Logs = `{"message_type":"summary","snapshot_id":"` + strings.Repeat("a", 64) + `"}`
+			} else {
+				c.Logs = `[]`
+			}
+		})
+	}
+	r := runner(t)
+	r.BackupTags = []string{ReleaseCheckpointTag}
+	if _, err := r.Backup(context.Background(), "site", nil, DataRoot); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Forget(context.Background(), "site", Keep{Daily: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if len(commands) != 2 {
+		t.Fatalf("%v", commands)
+	}
+	hasPair := func(command []string, key, value string) bool {
+		for i := 1; i < len(command); i++ {
+			if command[i-1] == key && command[i] == value {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasPair(commands[0], "--tag", ReleaseCheckpointTag) || !hasPair(commands[1], "--keep-tag", ReleaseCheckpointTag) {
+		t.Fatalf("checkpoint could be pruned: %v", commands)
+	}
+}
+
+func TestRestoreRequiresVerifiedSuccessAndKeepsRawProgressCounters(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		logs      string
+		code      int
+		wantError string
+		want      RestoreSummary
+	}{
+		{name: "included ancestors", logs: `{"message_type":"summary","total_files":6,"files_restored":8,"total_bytes":671,"bytes_restored":671}`, want: RestoreSummary{TotalFiles: 6, FilesRestored: 8, TotalBytes: 671, BytesRestored: 671}},
+		{name: "already restored files", logs: `{"message_type":"summary","total_files":3,"files_restored":5,"files_skipped":3,"bytes_skipped":671}`, want: RestoreSummary{TotalFiles: 3, FilesRestored: 5}},
+		{name: "partial restore", code: 3, logs: `{"message_type":"error","error":{"message":"file restore failed"}}` + "\n" + summary, wantError: "file restore failed"},
+		{name: "verification failure", code: 1, logs: summary + `{"message_type":"exit_error","message":"verification failed"}`, wantError: "verification failed"},
+		{name: "missing summary", logs: `{"message_type":"status"}`, wantError: "no summary"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := dockertest.New(t)
+			var created dockertest.Container
+			var secretsDir string
+			fake.OnCreate = func(c dockertest.Container) {
+				created = c
+				for _, bind := range c.HostConfig.Binds {
+					src, dst, _ := strings.Cut(bind, ":")
+					if dst == secretsInside+":ro" {
+						secretsDir = src
+					}
+				}
+				fake.Update(c.Name, func(c *dockertest.Container) {
+					c.Logs, c.ExitCode, c.ExitAfter = tc.logs, tc.code, 1
+				})
+			}
+			got, err := runner(t).Restore(context.Background(), strings.Repeat("a", 64), "test", nil, "/data/app-data/notes")
+			if !slices.Contains(created.Cmd, "--verify") {
+				t.Errorf("restore must verify restored content: %v", created.Cmd)
+			}
+			if tc.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantError) || got != nil {
+					t.Errorf("failed restore returned a usable summary: %+v, %v", got, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if *got != tc.want {
+					t.Errorf("raw progress counters were changed: got %+v, want %+v", got, tc.want)
+				}
+			}
+			if _, exists := fake.Container(created.Name); exists {
+				t.Error("restore container outlived the completed run")
+			}
+			if secretsDir == "" {
+				t.Error("restore had no credential mount")
+			} else if _, err := os.Stat(secretsDir); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("restore credential file outlived the completed run: %v", err)
+			}
+		})
+	}
+}

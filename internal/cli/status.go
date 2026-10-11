@@ -132,15 +132,20 @@ func newLs(a *app) *cobra.Command {
 				return err
 			}
 			var unmanaged []string
+			// Docker failure leaves useful app status, but cannot prove an empty inventory.
+			unmanagedKnown := false
 			if engine, err := docker.Connect(ctx); err == nil {
-				unmanaged, _ = engine.Unowned(ctx)
+				if names, err := engine.Unowned(ctx); err == nil {
+					unmanaged, unmanagedKnown = names, true
+				}
 				engine.Close()
 			}
 			if a.json {
 				return json.NewEncoder(a.stdout).Encode(struct {
-					Apps      []appRow `json:"apps"`
-					Unmanaged []string `json:"unmanaged,omitempty"`
-				}{rows, unmanaged})
+					Apps           []appRow `json:"apps"`
+					Unmanaged      []string `json:"unmanaged,omitempty"`
+					UnmanagedKnown bool     `json:"unmanaged_known"`
+				}{rows, unmanaged, unmanagedKnown})
 			}
 			now := time.Now().UTC()
 			if len(rows) == 0 {
@@ -162,7 +167,9 @@ func newLs(a *app) *cobra.Command {
 					}
 				}
 			}
-			if len(unmanaged) > 0 {
+			if !unmanagedKnown {
+				fmt.Fprintln(a.stdout, "unmanaged containers: unknown (Docker inventory unavailable)")
+			} else if len(unmanaged) > 0 {
 				sort.Strings(unmanaged)
 				fmt.Fprintf(a.stdout, "not managed by bedrock: %s\n", strings.Join(unmanaged, ", "))
 			}

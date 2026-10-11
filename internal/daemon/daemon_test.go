@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -96,5 +98,31 @@ func TestASweepRecoversAnOperationWhoseLeaseOutlivesTheRestart(t *testing.T) {
 	}
 	if !bytes.Contains(log.Bytes(), []byte("recovering op-dead")) {
 		t.Fatalf("log: %s", log.String())
+	}
+}
+
+func TestSecondDaemonRefusesBeforeOpeningState(t *testing.T) {
+	stateDir := t.TempDir()
+	locks := filepath.Join(stateDir, "locks")
+	if err := os.MkdirAll(locks, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(filepath.Join(locks, "daemon.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var log bytes.Buffer
+	err = Run(ctx, Config{StateDir: stateDir, Socket: filepath.Join(t.TempDir(), "daemon.sock")}, &log)
+	if err == nil || !strings.Contains(err.Error(), "another daemon") {
+		t.Fatalf("duplicate daemon: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "state.db")); !os.IsNotExist(err) {
+		t.Fatalf("duplicate daemon touched state: %v", err)
 	}
 }

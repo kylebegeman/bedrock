@@ -1,11 +1,13 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,6 +68,9 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 	if err := checkPublishedPorts(ctx, r.store, m); err != nil {
 		return nil, err
 	}
+	if err := CheckRouteConflicts(ctx, r.store, m); err != nil {
+		return nil, err
+	}
 	for _, name := range m.WorkloadNames() {
 		if m.Workloads[name].LongRunning() {
 			r.containers[name] = docker.ContainerName(m.App, name, revision)
@@ -106,11 +111,14 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 	// runs them: an older release step against newer data is the wrong
 	// way round.
 	if releases := m.ReleaseWorkloads(); from != nil && len(releases) > 0 {
+		if m.HasData() && m.ReleaseCompatibility() != manifest.DataBackwardCompatible {
+			add(r.releaseCheckpointStep())
+		}
 		add(r.releaseStep(releases))
 	}
 	add(r.startStep())
 	add(r.readyStep())
-	if len(m.Checks) > 0 {
+	if len(verificationChecks(m).application) > 0 {
 		add(r.checksStep())
 	}
 	// Activation and certificate failures need the same recovery as a
@@ -119,7 +127,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 	if len(r.hosts) > 0 {
 		add(r.recoverOnFailure(r.certificatesStep()))
 	}
-	if len(m.Checks) > 0 {
+	if checks := verificationChecks(m); len(checks.edge)+len(checks.guards) > 0 {
 		add(r.verifyStep())
 	}
 	add(r.retireStep())
@@ -157,6 +165,19 @@ func (r *rollout) abandon(_ context.Context, e *docker.Engine, out io.Writer) er
 	if len(failures) > 0 {
 		return errors.Join(failures...)
 	}
+	current, err := r.store.RevisionWithStatus(ctx, r.m.App, state.RevisionActive)
+	if err != nil {
+		return err
+	}
+	if current != nil {
+		unsafe, err := unsafeReleaseBoundaries(ctx, r.store, current)
+		if err != nil {
+			return err
+		}
+		if len(unsafe) > 0 {
+			return unsafeRollbackError(r.m.App, unsafe)
+		}
+	}
 	return restartStoppedWorkloads(ctx, e, r.store, r.m.App, r.revision, out)
 }
 
@@ -174,6 +195,9 @@ func (r *rollout) pin(ctx context.Context) (*state.Revision, map[string]string, 
 	if err := checkSecrets(r.m, values); err != nil {
 		return nil, nil, 0, err
 	}
+	if err := checkVerificationSecrets(r.m, values); err != nil {
+		return nil, nil, 0, err
+	}
 	if rev.SecretsVersion != version {
 		rev.SecretsVersion = version
 		if err := r.store.SaveRevision(ctx, *rev); err != nil {
@@ -188,9 +212,23 @@ func (r *rollout) recordStep() kernel.Step {
 		Name: "record", Change: "record a new revision of " + r.m.App,
 		Note: notes("revision "+r.revision, noteCommit(r.from.commit)),
 		Apply: func(ctx context.Context, out io.Writer) error {
+			existing, err := r.store.GetRevision(ctx, r.m.App, r.revision)
+			if err == nil {
+				if kernel.Attempt(ctx) < 2 {
+					return fmt.Errorf("revision %s of %s already exists; choose a new revision", r.revision, r.m.App)
+				}
+				if !bytes.Equal(existing.Manifest, r.manifestJSON) || !maps.Equal(existing.Containers, r.containers) || existing.Source != r.from.commit {
+					return errors.New("recorded revision does not match this interrupted deployment")
+				}
+				fmt.Fprintf(out, "revision %s already recorded\n", r.revision)
+				return nil
+			}
+			if !errors.Is(err, state.ErrNotFound) {
+				return err
+			}
 			rev := state.Revision{App: r.m.App, ID: r.revision, Status: state.RevisionFailed, Manifest: r.manifestJSON,
 				Images: r.images, Containers: r.containers, Source: r.from.commit, CreatedAt: time.Now().UTC()}
-			if err := r.store.SaveRevision(ctx, rev); err != nil {
+			if err := r.store.CreateRevision(ctx, rev); err != nil {
 				return err
 			}
 			fmt.Fprintf(out, "revision %s\n", r.revision)
@@ -344,7 +382,7 @@ func (r *rollout) imageStep(group []string) kernel.Step {
 						return err
 					}
 				}
-				return saveImageReferences(ctx, r.store, r.m.App, r.revision, group, w.Image)
+				return recordImage(ctx, r.store, r.connect, r.m.App, r.revision, group, w.Image, r.images, out)
 			},
 		}
 	}
@@ -358,14 +396,35 @@ func (r *rollout) releaseStep(releases []string) kernel.Step {
 			if err != nil {
 				return err
 			}
+			boundary, err := r.prepareReleaseBoundary(ctx)
+			if err != nil {
+				return err
+			}
+			if boundary.Status == state.ReleaseCompleted {
+				fmt.Fprintln(out, "release jobs already completed; not replayed")
+				return nil
+			}
+			if boundary.Status != state.ReleasePrepared {
+				return fmt.Errorf("release %s has an uncertain or failed prior attempt (%s); release jobs are not replayed automatically; inspect the recorded jobs, rehearse a new candidate or restore checkpoint %s", r.revision, boundary.Status, boundary.Snapshot)
+			}
+			started, err := r.store.StartPreparedReleaseBoundary(ctx, r.m.App, r.revision, time.Now().UTC())
+			if err != nil {
+				return err
+			}
+			if !started {
+				return errors.New("release boundary changed; refusing to replay release jobs")
+			}
 			jobs := NewJobs(r.store, r.d.Secrets)
 			for _, name := range releases {
 				fmt.Fprintf(out, "%s:\n", name)
 				if _, err := jobs.Run(ctx, rev, name, nil, JobRelease, out); err != nil {
-					return fmt.Errorf("release workload %s: %w; nothing new started and the running revision still serves, though the release may already have changed the database", name, err)
+					failed := fmt.Errorf("release workload %s: %w; release may already have changed data; checkpoint %s", name, err, boundary.Snapshot)
+					cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					defer cancel()
+					return errors.Join(failed, r.store.FinishReleaseBoundary(cleanup, r.m.App, r.revision, state.ReleaseFailed, failed.Error(), time.Now().UTC()))
 				}
 			}
-			return nil
+			return r.store.FinishReleaseBoundary(ctx, r.m.App, r.revision, state.ReleaseCompleted, "", time.Now().UTC())
 		},
 	}
 }
@@ -475,8 +534,9 @@ func (r *rollout) readyStep() kernel.Step {
 }
 
 func (r *rollout) checksStep() kernel.Step {
+	checks := verificationChecks(r.m).application
 	return kernel.Step{
-		Name: "checks", Change: fmt.Sprintf("run %d check(s) against the new containers", len(r.m.Checks)),
+		Name: "checks", Change: fmt.Sprintf("run %d check(s) against the new containers", len(checks)),
 		// Before any traffic reaches it: a revision that answers wrong
 		// never goes live.
 		Apply: func(ctx context.Context, out io.Writer) error {
@@ -484,7 +544,7 @@ func (r *rollout) checksStep() kernel.Step {
 			if err != nil {
 				return err
 			}
-			for _, c := range r.m.Checks {
+			for _, c := range checks {
 				if err := runCheckDirect(ctx, e, r.m, r.containers, c); err != nil {
 					return errors.Join(err, r.abandon(ctx, e, out))
 				}
@@ -554,6 +614,19 @@ func (r *rollout) recoverOnFailure(step kernel.Step) kernel.Step {
 			}
 			return err
 		}
+		previous, lookupErr := r.store.RevisionWithStatus(cleanup, r.m.App, state.RevisionPrevious)
+		if lookupErr != nil {
+			return errors.Join(err, lookupErr)
+		}
+		if previous != nil {
+			unsafe, gateErr := unsafeReleaseBoundaries(cleanup, r.store, previous)
+			if gateErr != nil {
+				return errors.Join(err, gateErr)
+			}
+			if len(unsafe) > 0 {
+				return errors.Join(err, unsafeRollbackError(r.m.App, unsafe))
+			}
+		}
 		message, recoveryErr := revertSwitch(cleanup, r.store, r.d.Secrets, r.connect, r.m.App, r.revision, r.containers)
 		if recoveryErr != nil {
 			return fmt.Errorf("%w; recovery failed: %v", err, recoveryErr)
@@ -564,27 +637,37 @@ func (r *rollout) recoverOnFailure(step kernel.Step) kernel.Step {
 }
 
 func (r *rollout) verifyStep() kernel.Step {
-	return kernel.Step{
-		Name: "verify", Change: fmt.Sprintf("run %d check(s) through the edge", len(r.m.Checks)),
-		// The checks already passed against the containers; this proves the
-		// edge and the certificates. If it fails, the previous revision
-		// comes back before anyone notices.
+	checks := verificationChecks(r.m)
+	change := fmt.Sprintf("run %d check(s) through the edge", len(checks.edge))
+	if len(checks.guards) > 0 {
+		change += fmt.Sprintf(" and verify %d sign-in guard(s) deny anonymous requests", len(checks.guards))
+	}
+	return r.recoverOnFailure(kernel.Step{
+		Name: "verify", Change: change,
 		Apply: func(ctx context.Context, out io.Writer) error {
-			for _, c := range r.m.Checks {
-				if err := runCheck(ctx, c); err != nil {
-					cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-					revert, revertErr := revertSwitch(cleanup, r.store, r.d.Secrets, r.connect, r.m.App, r.revision, r.containers)
-					cancel()
-					if revertErr != nil {
-						return fmt.Errorf("%w; and putting the previous revision back failed too: %v", err, revertErr)
-					}
-					return fmt.Errorf("%w; %s", err, revert)
+			for _, c := range checks.guards {
+				if err := runGuardCheck(ctx, c); err != nil {
+					return err
+				}
+				fmt.Fprintf(out, "%s: sign-in guard denied anonymous access\n", c.URL)
+			}
+			var values map[string]string
+			if len(CheckSecretNames(r.m)) > 0 {
+				_, loaded, _, err := r.pin(ctx)
+				if err != nil {
+					return err
+				}
+				values = loaded
+			}
+			for _, c := range checks.edge {
+				if err := runEdgeCheck(ctx, c, values); err != nil {
+					return err
 				}
 				fmt.Fprintf(out, "%s ok\n", c.URL)
 			}
 			return nil
 		},
-	}
+	})
 }
 
 func (r *rollout) retireStep() kernel.Step {

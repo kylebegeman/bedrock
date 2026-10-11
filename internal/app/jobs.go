@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,6 +35,7 @@ type Jobs struct {
 	Secrets *secrets.Store
 	mu      sync.Mutex
 	running map[string]bool
+	waiting sync.WaitGroup
 }
 
 // NewJobs returns a job runner.
@@ -65,6 +67,17 @@ func (j *Jobs) RunWith(ctx context.Context, rev *state.Revision, workload string
 		return -1, err
 	}
 	defer unlock()
+	// A cron tick or approved command may have waited behind a backup or
+	// checkpoint restore. Never admit its captured older code to newer data.
+	if kind == JobCron || kind == JobRun {
+		active, err := j.Store.RevisionWithStatus(ctx, rev.App, state.RevisionActive)
+		if err != nil {
+			return -1, err
+		}
+		if active == nil || active.ID != rev.ID {
+			return -1, fmt.Errorf("revision %s of %s is no longer active; review the command against the active revision", rev.ID, rev.App)
+		}
+	}
 	var m manifest.Manifest
 	if err := json.Unmarshal(rev.Manifest, &m); err != nil {
 		return -1, err
@@ -121,20 +134,33 @@ func (j *Jobs) RunWith(ctx context.Context, rev *state.Revision, workload string
 	if err != nil {
 		return -1, err
 	}
-	timeout := time.Hour
-	if w.Timeout != "" {
-		if d, err := time.ParseDuration(w.Timeout); err == nil {
-			timeout = d
-		}
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := context.WithTimeout(ctx, jobTimeout(w))
 	defer cancel()
-	code, runErr := j.execute(runCtx, e, spec, out)
+	code, containerID, runErr := j.executeOwned(runCtx, e, spec, out)
+	if kind == JobCron && ctx.Err() != nil {
+		// The daemon is leaving, but Docker can finish this cron container.
+		// Keep its open run so the next daemon adopts it without replaying.
+		return code, runErr
+	}
+	if errors.Is(runErr, errJobOwnershipUnknown) {
+		// Docker may have started a writer whose ID could not be inspected.
+		// Preserve the durable guard until reconciliation verifies its outcome.
+		return code, runErr
+	}
 	// Removal and the record use a fresh context: the job's may have ended.
 	cleanup, cancelCleanup := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelCleanup()
-	output := e.LogTail(cleanup, spec.Name, 40)
-	_ = e.Remove(cleanup, spec.Name, 5*time.Second)
+	output := ""
+	if containerID != "" {
+		output = e.LogTail(cleanup, containerID, 40)
+		if code < 0 {
+			// An uncertain or timed out job may still write. Keep the run open
+			// unless its exact container is stopped, so cron cannot overlap it.
+			if err := e.Remove(cleanup, containerID, 5*time.Second); err != nil && !docker.IsNotFound(err) {
+				return code, errors.Join(runErr, err)
+			}
+		}
+	}
 	errText := ""
 	if runErr != nil {
 		errText = runErr.Error()
@@ -142,35 +168,86 @@ func (j *Jobs) RunWith(ctx context.Context, rev *state.Revision, workload string
 	if err := j.Store.FinishJobRun(cleanup, id, code, errText, output, time.Now().UTC()); err != nil {
 		return code, err
 	}
+	if containerID != "" && code >= 0 {
+		_ = e.Remove(cleanup, containerID, 5*time.Second)
+	}
 	return code, runErr
 }
 
-func (j *Jobs) execute(ctx context.Context, e *docker.Engine, spec docker.Spec, out io.Writer) (int, error) {
-	if err := e.Run(ctx, spec); err != nil {
-		return -1, err
+const defaultJobTimeout = time.Hour
+
+func jobTimeout(w manifest.Workload) time.Duration {
+	if w.Timeout != "" {
+		if timeout, err := time.ParseDuration(w.Timeout); err == nil && timeout > 0 {
+			return timeout
+		}
 	}
+	return defaultJobTimeout
+}
+
+func (j *Jobs) execute(ctx context.Context, e *docker.Engine, spec docker.Spec, out io.Writer) (int, error) {
+	code, _, err := j.executeOwned(ctx, e, spec, out)
+	return code, err
+}
+
+var errJobOwnershipUnknown = errors.New("the job container could not be identified; inspect bedrock jobs before rerunning")
+
+func (j *Jobs) executeOwned(ctx context.Context, e *docker.Engine, spec docker.Spec, out io.Writer) (int, string, error) {
+	runErr := e.Run(ctx, spec)
+	// Run can fail after creation, or refuse an existing foreign container.
+	// Inspect with a cleanup context even when the caller was cancelled, and
+	// retain an immutable ID only when every requested ownership label matches.
+	inspection, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	info, inspectErr := e.Inspect(inspection, spec.Name)
+	cancel()
+	if inspectErr != nil {
+		if !docker.IsNotFound(inspectErr) {
+			return -1, "", errors.Join(errJobOwnershipUnknown, runErr, inspectErr)
+		}
+		return -1, "", errors.Join(runErr, inspectErr)
+	}
+	expected := state.JobRun{App: spec.Labels[docker.LabelApp], Workload: spec.Labels[docker.LabelWorkload], Revision: spec.Labels[docker.LabelRevision]}
+	if !jobContainerMatches(info, expected) {
+		mismatch := errors.New("job container does not match its requested ownership and revision")
+		if runErr == nil {
+			mismatch = errors.Join(errJobOwnershipUnknown, mismatch)
+		}
+		return -1, "", errors.Join(runErr, mismatch)
+	}
+	for name, value := range spec.Labels {
+		if info.Labels[name] != value {
+			mismatch := fmt.Errorf("job container has another %s identity", name)
+			if runErr == nil {
+				mismatch = errors.Join(errJobOwnershipUnknown, mismatch)
+			}
+			return -1, "", errors.Join(runErr, mismatch)
+		}
+	}
+	if runErr != nil {
+		return -1, info.ID, runErr
+	}
+	id := info.ID
 	// The log copy may outlive the wait by a moment; once the job is done
 	// it writes nowhere, so the step's output is never written after it ends.
 	guarded := &closingWriter{w: out}
 	defer guarded.close()
 	logs := make(chan error, 1)
-	go func() { logs <- e.Logs(ctx, spec.Name, true, "all", guarded) }()
-	code, err := e.WaitExit(ctx, spec.Name)
+	go func() { logs <- e.Logs(ctx, id, true, "all", guarded) }()
+	code, err := e.WaitExit(ctx, id)
 	if errors.Is(err, context.DeadlineExceeded) {
-		_ = e.Remove(context.Background(), spec.Name, time.Second)
-		return -1, errors.New("timed out")
+		return -1, id, errors.New("timed out")
 	}
 	if err != nil {
-		return -1, err
+		return -1, id, err
 	}
 	select {
 	case <-logs:
 	case <-time.After(3 * time.Second):
 	}
 	if code != 0 {
-		return code, fmt.Errorf("exited with code %d", code)
+		return code, id, fmt.Errorf("exited with code %d", code)
 	}
-	return 0, nil
+	return 0, id, nil
 }
 
 // Tick runs every cron workload of every active revision that is due.
@@ -181,6 +258,19 @@ func (j *Jobs) Tick(ctx context.Context, now time.Time, log func(string, ...any)
 	if err != nil {
 		log("cron: %v", err)
 		return
+	}
+	// Reconciliation may be waiting for a surviving cron container from the
+	// previous daemon. Its run is durable even though this runner's map is new.
+	open, err := j.Store.OpenJobRuns(ctx)
+	if err != nil {
+		log("cron: %v", err)
+		return
+	}
+	adopted := map[string]bool{}
+	for _, run := range open {
+		if run.Kind == JobCron {
+			adopted[run.App+"/"+run.Workload] = true
+		}
 	}
 	for _, rev := range active {
 		var m manifest.Manifest
@@ -209,6 +299,9 @@ func (j *Jobs) Tick(ctx context.Context, now time.Time, log func(string, ...any)
 				continue
 			}
 			key := rev.App + "/" + name
+			if adopted[key] {
+				continue
+			}
 			j.mu.Lock()
 			busy := j.running[key]
 			if !busy {
@@ -219,7 +312,9 @@ func (j *Jobs) Tick(ctx context.Context, now time.Time, log func(string, ...any)
 				continue
 			}
 			rev := rev
+			j.waiting.Add(1)
 			go func() {
+				defer j.waiting.Done()
 				defer func() {
 					if p := recover(); p != nil {
 						log("cron %s: panic: %v\n%s", key, p, debug.Stack())
@@ -228,9 +323,9 @@ func (j *Jobs) Tick(ctx context.Context, now time.Time, log func(string, ...any)
 					delete(j.running, key)
 					j.mu.Unlock()
 				}()
-				// On its own context: a daemon restart must not kill a long
-				// job. The next daemon takes the run up again (ReconcileJobRuns).
-				code, err := j.Run(context.Background(), &rev, name, nil, JobCron, io.Discard)
+				// Stop tracking on daemon cancellation while Docker finishes the
+				// job. Its open durable run is adopted by the next daemon.
+				code, err := j.Run(ctx, &rev, name, nil, JobCron, io.Discard)
 				if err != nil {
 					log("cron %s: %v (exit %d)", key, err, code)
 					return
@@ -240,6 +335,10 @@ func (j *Jobs) Tick(ctx context.Context, now time.Time, log func(string, ...any)
 		}
 	}
 }
+
+// Wait drains cron trackers after the scheduler has stopped calling Tick.
+// Cancel the daemon context first; existing Docker jobs remain adoptable.
+func (j *Jobs) Wait() { j.waiting.Wait() }
 
 // RunDefinition is the Definition for RunKind.
 type RunDefinition struct {
@@ -286,6 +385,12 @@ func (r RunDefinition) Plan(ctx context.Context, raw json.RawMessage) (*kernel.P
 		Name: "run", Change: fmt.Sprintf("run %s in %s's environment", strings.Join(in.Command, " "), workload),
 		Note: note,
 		Apply: func(ctx context.Context, out io.Writer) error {
+			// Arbitrary commands can commit effects before an interruption.
+			// Reconciliation adopts the existing job; recovery must not create
+			// a second job when the previous outcome is uncertain.
+			if kernel.Attempt(ctx) > 1 {
+				return errors.New("the one-off command was interrupted and is not replayed automatically; inspect bedrock jobs before deliberately running it again")
+			}
 			_, err := r.Jobs.RunWith(ctx, rev, workload, in.Command, JobRun, JobOptions{Secrets: in.Secrets}, out)
 			return err
 		},
@@ -341,7 +446,7 @@ func jobSpec(m *manifest.Manifest, revision, workload string, w manifest.Workloa
 	if err != nil {
 		return spec, err
 	}
-	spec.Name = fmt.Sprintf("bedrock-%s-%s-job-%d", m.App, workload, time.Now().UnixMilli())
+	spec.Name = fmt.Sprintf("bedrock-%s-%s-job-%s", m.App, workload, rand.Text())
 	spec.Restart = false
 	// A job never takes traffic: it stays on the app's own network, and
 	// answers to none of the workload's names, which belong to the

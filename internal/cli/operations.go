@@ -8,11 +8,14 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/kylebegeman/bedrock/internal/api"
+	"github.com/kylebegeman/bedrock/internal/daemon"
 	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/bedrock/internal/state"
 	"github.com/kylebegeman/bedrock/internal/ui"
 )
 
@@ -28,6 +31,10 @@ func (a *app) operate(ctx context.Context, kind string, input any, planOnly bool
 	if err != nil {
 		return err
 	}
+	return a.operateRaw(ctx, runner, kind, raw, planOnly)
+}
+
+func (a *app) operateRaw(ctx context.Context, runner api.Runner, kind string, raw json.RawMessage, planOnly bool) error {
 	defer runner.Close()
 	r := a.renderer()
 	view, err := runner.Plan(ctx, kind, raw)
@@ -41,7 +48,8 @@ func (a *app) operate(ctx context.Context, kind string, input any, planOnly bool
 	// Naming the exact plan is the approval: an agent reads a plan, shows it,
 	// and applies that one. Asking again for a yes would be asking about a
 	// plan the person has already seen and named.
-	if !a.yes && a.digest == "" {
+	expect := a.digest
+	if !a.yes && expect == "" {
 		if !a.tty {
 			r.Plan(view)
 			return errors.New("this would change the machine; add --yes to apply it without a prompt, or --plan to only look")
@@ -52,9 +60,10 @@ func (a *app) operate(ctx context.Context, kind string, input any, planOnly bool
 		if s := strings.ToLower(strings.TrimSpace(answer)); s != "y" && s != "yes" {
 			return errors.New("not applied")
 		}
+		expect = view.Digest
 	}
 	var lastID string
-	receipt, err := runner.RunExpecting(ctx, kind, raw, a.digest, func(ev kernel.Event) {
+	receipt, err := runner.RunExpecting(ctx, kind, raw, expect, func(ev kernel.Event) {
 		if ev.Operation != "" {
 			lastID = ev.Operation
 		}
@@ -62,17 +71,48 @@ func (a *app) operate(ctx context.Context, kind string, input any, planOnly bool
 	})
 	if errors.Is(err, api.ErrDisconnected) {
 		if lastID != "" {
-			return fmt.Errorf("%w; the daemon finishes or undoes %s on its own: bedrock history %s", err, lastID, lastID)
+			return fmt.Errorf("%w; the daemon finishes or undoes %s on its own; inspect saved output: %s", err, lastID, a.historyOutputCommand(lastID))
 		}
 		return err
 	}
 	if err != nil {
+		if lastID != "" {
+			return fmt.Errorf("%w; inspect saved output: %s", err, a.historyOutputCommand(lastID))
+		}
 		return err
 	}
 	if receipt.Status != "succeeded" {
-		return fmt.Errorf("%s: %s", receipt.Status, receipt.Error)
+		return fmt.Errorf("%s: %s; inspect saved output: %s", receipt.Status, receipt.Error, a.historyOutputCommand(receipt.ID))
 	}
 	return nil
+}
+
+// historyOutputCommand keeps a diagnostic follow-up on the same state and
+// socket when the operator uses a nondefault installation.
+func (a *app) historyOutputCommand(id string) string {
+	command := "bedrock history " + shellArgument(id) + " --output"
+	if a.targetName != "" {
+		command += " --target " + shellArgument(a.targetName)
+		if a.targetsFile != defaultTargetsFile() {
+			command += " --targets-file " + shellArgument(a.targetsFile)
+		}
+	}
+	if a.stateDir != "" && a.stateDir != defaultStateDir() {
+		command += " --state-dir " + shellArgument(a.stateDir)
+	}
+	if a.socket != "" && a.socket != daemon.DefaultSocket {
+		command += " --socket " + shellArgument(a.socket)
+	}
+	return command
+}
+
+func shellArgument(value string) string {
+	if value != "" && strings.IndexFunc(value, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-._/:@", r))
+	}) == -1 {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 // mutatingFlags adds --plan, --yes and --digest to a command that changes
@@ -84,12 +124,53 @@ func (a *app) mutatingFlags(cmd *cobra.Command, planOnly *bool) {
 }
 
 func newHistory(a *app) *cobra.Command {
-	var limit int
+	var (
+		filter state.OperationFilter
+		since  string
+		output bool
+		step   string
+	)
 	cmd := &cobra.Command{
 		Use:   "history [operation-id]",
-		Short: "List recent operations, or show one receipt.",
-		Args:  cobra.MaximumNArgs(1),
+		Short: "List recent operations, show a receipt, or retrieve saved diagnostic output.",
+		Long: `List recent operations, show a receipt, or retrieve saved diagnostic output.
+
+List filters are combined and applied before --limit. --failed includes
+failed and compensated operations. --since accepts a positive duration
+such as 24h, or an RFC3339 timestamp such as 2026-10-10T12:00:00Z.
+
+  bedrock history --app api --kind app.deploy --failed --since 24h
+  bedrock history <operation-id> --output
+  bedrock history <operation-id> --output --step build-web
+
+Output is opt-in and contains saved tails, not a complete log. Each step
+execution keeps up to 40 lines; a running execution's output is saved when
+it finishes. --step selects an exact name or a one-based step position.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if filter.Limit < 1 {
+				return errors.New("--limit must be a positive integer")
+			}
+			if cmd.Flags().Changed("step") && (!output || step == "") {
+				return errors.New("--step needs --output and a step name or one-based position")
+			}
+			if output && len(args) == 0 {
+				return errors.New("--output needs an operation ID: bedrock history <operation-id> --output")
+			}
+			if len(args) == 1 {
+				for _, name := range []string{"app", "kind", "failed", "since"} {
+					if cmd.Flags().Changed(name) {
+						return fmt.Errorf("--%s filters the operation list; omit the operation ID to use it", name)
+					}
+				}
+			}
+			if cmd.Flags().Changed("since") {
+				var err error
+				filter.Since, err = historySince(since, time.Now())
+				if err != nil {
+					return err
+				}
+			}
 			ctx := cmd.Context()
 			runner, err := a.runner(ctx, fmt.Sprintf("cli-%d", os.Getpid()))
 			if err != nil {
@@ -98,6 +179,14 @@ func newHistory(a *app) *cobra.Command {
 			defer runner.Close()
 			r := a.renderer()
 			if len(args) == 1 {
+				if output {
+					saved, err := runner.Output(ctx, args[0], step)
+					if err != nil {
+						return err
+					}
+					r.Output(saved)
+					return nil
+				}
 				receipt, err := runner.Receipt(ctx, args[0])
 				if err != nil {
 					return err
@@ -105,7 +194,7 @@ func newHistory(a *app) *cobra.Command {
 				r.Receipt(receipt)
 				return nil
 			}
-			rows, err := runner.List(ctx, limit)
+			rows, err := runner.ListFiltered(ctx, filter)
 			if err != nil {
 				return err
 			}
@@ -117,8 +206,27 @@ func newHistory(a *app) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().IntVar(&limit, "limit", 20, "how many operations to list")
+	cmd.Flags().IntVar(&filter.Limit, "limit", 20, "how many matching operations to list")
+	cmd.Flags().StringVar(&filter.Target, "app", "", "only operations targeting this app")
+	cmd.Flags().StringVar(&filter.Kind, "kind", "", "only this operation kind, such as app.deploy")
+	cmd.Flags().BoolVar(&filter.Failed, "failed", false, "only failed or compensated operations")
+	cmd.Flags().StringVar(&since, "since", "", "operations created since a duration ago or an RFC3339 timestamp")
+	cmd.Flags().BoolVar(&output, "output", false, "show the operation's saved step-output tails instead of its receipt")
+	cmd.Flags().StringVar(&step, "step", "", "with --output, select a step by name or one-based position")
 	return cmd
+}
+
+func historySince(value string, now time.Time) (time.Time, error) {
+	if duration, err := time.ParseDuration(value); err == nil {
+		if duration <= 0 {
+			return time.Time{}, errors.New("--since needs a positive duration, such as 24h")
+		}
+		return now.Add(-duration).UTC(), nil
+	}
+	if since, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return since.UTC(), nil
+	}
+	return time.Time{}, fmt.Errorf("--since %q must be a positive duration such as 24h or an RFC3339 timestamp", value)
 }
 
 func newKernel(a *app) *cobra.Command {

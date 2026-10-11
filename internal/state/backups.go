@@ -2,6 +2,8 @@ package state
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 )
 
@@ -34,7 +36,7 @@ type BackupRun struct {
 // Finished reports whether the run ended, one way or the other.
 func (r BackupRun) Finished() bool { return !r.FinishedAt.IsZero() }
 
-func (s *Store) migrateBackups(ctx context.Context) error {
+func (s *Store) migrateBackups(ctx context.Context, q migrationDB) error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS backup_runs (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,7 +53,7 @@ CREATE TABLE IF NOT EXISTS backup_runs (
   error       TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS backup_runs_app ON backup_runs (app, kind, started_at DESC);`
-	_, err := s.db.ExecContext(ctx, schema)
+	_, err := q.ExecContext(ctx, schema)
 	return err
 }
 
@@ -72,6 +74,22 @@ func (s *Store) FinishBackupRun(ctx context.Context, id int64, r BackupRun) erro
 }
 
 const backupRunColumns = `id, app, kind, started_at, finished_at, ok, snapshot, snapshot_at, files, bytes, detail, error`
+
+// BackupRun returns the recorded run identified by id.
+func (s *Store) BackupRun(ctx context.Context, id int64) (BackupRun, error) {
+	var r BackupRun
+	var started, finished, snapshotAt int64
+	err := s.db.QueryRowContext(ctx, `SELECT `+backupRunColumns+` FROM backup_runs WHERE id = ?`, id).Scan(
+		&r.ID, &r.App, &r.Kind, &started, &finished, &r.OK, &r.Snapshot, &snapshotAt, &r.Files, &r.Bytes, &r.Detail, &r.Error)
+	if errors.Is(err, sql.ErrNoRows) {
+		return BackupRun{}, ErrNotFound
+	}
+	if err != nil {
+		return BackupRun{}, err
+	}
+	r.StartedAt, r.FinishedAt, r.SnapshotAt = fromUnix(started), fromUnix(finished), fromUnix(snapshotAt)
+	return r, nil
+}
 
 // BackupRuns lists runs newest first. An empty app means every app; an
 // empty kind means every kind.

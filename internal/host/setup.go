@@ -373,7 +373,7 @@ func (x *setting) firewallNote(ranges []string, done string) string {
 		return "Docker's published web ports are open to anyone"
 	case ranges != nil:
 		return "Cloudflare's ranges changed"
-	case len(f.CloudflareSources()) > 0 || f.Firewall.WebGuard.Drops:
+	case len(f.CloudflareSources()) > 0 || f.Firewall.WebGuard.Present():
 		return "the web is open only to Cloudflare"
 	default:
 		return "ssh, 80 or 443 not allowed"
@@ -494,6 +494,9 @@ func ensureHostsEntry(env Env, hostname string, out io.Writer) error {
 func ensureSwap(ctx context.Context, env Env, gib int, out io.Writer) error {
 	if active, _ := env.Run(ctx, "swapon", "--show=SIZE", "--noheadings", "--bytes"); strings.TrimSpace(active) != "" {
 		fmt.Fprintln(out, "swap already active")
+		if env.Exists("/swapfile") {
+			return persistSwap(env)
+		}
 		return nil
 	}
 	if !env.Exists("/swapfile") {
@@ -506,14 +509,26 @@ func ensureSwap(ctx context.Context, env Env, gib int, out io.Writer) error {
 			return err
 		}
 	}
-	fstab, _ := env.ReadFile("/etc/fstab")
-	if !strings.Contains(fstab, "/swapfile") {
-		if _, err := env.WriteFile("/etc/fstab", strings.TrimRight(fstab, "\n")+"\n/swapfile none swap sw 0 0\n", 0o644); err != nil {
-			return err
-		}
+	if err := persistSwap(env); err != nil {
+		return err
 	}
 	fmt.Fprintf(out, "%d GiB swap file active\n", gib)
 	return nil
+}
+
+func persistSwap(env Env) error {
+	fstab, err := env.ReadFile("/etc/fstab")
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	for _, line := range strings.Split(fstab, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[0] == "/swapfile" && fields[2] == "swap" {
+			return nil
+		}
+	}
+	_, err = env.WriteFile("/etc/fstab", strings.TrimRight(fstab, "\n")+"\n/swapfile none swap sw 0 0\n", 0o644)
+	return err
 }
 
 func ensureDocker(ctx context.Context, env Env, osID, codename, debArch string, install bool, out io.Writer) error {
@@ -583,7 +598,7 @@ const SSHDropIn = "/etc/ssh/sshd_config.d/00-bedrock.conf"
 // key to get back in with.
 func ensureSSHKeysOnly(ctx context.Context, env Env, out io.Writer) error {
 	keys, _ := env.ReadFile("/root/.ssh/authorized_keys")
-	if strings.TrimSpace(keys) == "" {
+	if authorizedKeyCount(keys) == 0 {
 		return errors.New("root has no SSH key in /root/.ssh/authorized_keys; turning passwords off would lock you out")
 	}
 	changed, err := env.WriteFile(SSHDropIn, sshdBedrock, 0o644)

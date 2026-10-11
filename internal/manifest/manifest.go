@@ -6,14 +6,18 @@ package manifest
 import (
 	"errors"
 	"fmt"
+	"io"
 	"maps"
+	"math"
 	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +47,8 @@ type Manifest struct {
 	// Backup says when the data is backed up and drilled. An app with data
 	// is backed up nightly and drilled weekly unless this says otherwise.
 	Backup *Backup `yaml:"backup,omitempty" json:"backup,omitempty"`
+	// Release states whether older code may use data changed by release jobs.
+	Release *ReleasePolicy `yaml:"release,omitempty" json:"release,omitempty"`
 	// Secrets are the ones bedrock makes for the app, so nobody has to type
 	// them in: generated once and kept, or derived from others at every
 	// deploy.
@@ -53,10 +59,31 @@ type Manifest struct {
 	Preview *Preview `yaml:"preview,omitempty" json:"preview,omitempty"`
 }
 
+// ReleasePolicy declares a data contract, not an automatic SQL rollback.
+type ReleasePolicy struct {
+	DataCompatibility string `yaml:"data_compatibility" json:"data_compatibility"`
+}
+
+const (
+	DataBackwardCompatible   = "backward-compatible"
+	DataRestoreRequired      = "restore-required"
+	DataCompatibilityUnknown = "unknown"
+)
+
+// ReleaseCompatibility is conservative when an app has not declared a policy.
+func (m *Manifest) ReleaseCompatibility() string {
+	if m.Release == nil {
+		return DataCompatibilityUnknown
+	}
+	return m.Release.DataCompatibility
+}
+
 // Preview says which app, and which branch of it, an app previews.
 type Preview struct {
 	Of     string `yaml:"of" json:"of"`
 	Branch string `yaml:"branch" json:"branch"`
+	// Pinned previews are retained by preview prune until explicitly unpinned.
+	Pinned bool `yaml:"pinned,omitempty" json:"pinned,omitempty"`
 }
 
 // Secrets bedrock makes for an app.
@@ -412,12 +439,44 @@ type Resources struct {
 // Check is a URL that must answer a certain way after a deploy.
 type Check struct {
 	URL string `yaml:"url" json:"url"`
+	// Context limits this check to the application before activation or the
+	// public edge afterwards. Empty checks both; guarded routes check the
+	// application directly and verify anonymous denial separately.
+	Context CheckContext `yaml:"context,omitempty" json:"context,omitempty"`
+	// HeadersFromSecrets maps request headers to app secret names. Values
+	// are resolved only when an explicit edge check runs, never recorded.
+	HeadersFromSecrets map[string]string `yaml:"headers_from_secrets,omitempty" json:"headers_from_secrets,omitempty"`
 	// Status is the expected code. Default 200.
 	Status int `yaml:"status,omitempty" json:"status,omitempty"`
 	// Contains is text the body must include.
 	Contains string `yaml:"contains,omitempty" json:"contains,omitempty"`
 	// Within is the longest acceptable response time, as a Go duration.
 	Within string `yaml:"within,omitempty" json:"within,omitempty"`
+}
+
+// CheckContext is where a verification assertion runs.
+type CheckContext string
+
+const (
+	CheckApplication CheckContext = "application"
+	CheckEdge        CheckContext = "edge"
+)
+
+// ValidCheckHeader excludes HTTP routing and proxy-control headers.
+func ValidCheckHeader(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, ch := range name {
+		if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || strings.ContainsRune("!#$%&'*+-.^_`|~", ch)) {
+			return false
+		}
+	}
+	switch strings.ToLower(name) {
+	case "host", "content-length", "connection", "transfer-encoding", "proxy-authorization", "proxy-authenticate", "keep-alive", "te", "trailer", "upgrade", "forwarded", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-for", "x-forwarded-uri", "x-forwarded-method", "x-real-ip":
+		return false
+	}
+	return true
 }
 
 var (
@@ -437,6 +496,10 @@ func Parse(data []byte) (*Manifest, error) {
 	dec.KnownFields(true)
 	if err := dec.Decode(&m); err != nil {
 		return nil, fmt.Errorf("%s: %w", FileName, err)
+	}
+	var extra yaml.Node
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("%s must contain exactly one YAML document", FileName)
 	}
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -508,6 +571,16 @@ func (m *Manifest) Validate() error {
 	m.validateData(fail)
 	m.validateSecrets(fail)
 	m.validateBackup(fail)
+	if m.Release != nil {
+		switch m.Release.DataCompatibility {
+		case DataBackwardCompatible, DataRestoreRequired:
+		default:
+			fail("release.data_compatibility: use backward-compatible or restore-required")
+		}
+		if len(m.ReleaseWorkloads()) == 0 {
+			fail("release: requires at least one release workload")
+		}
+	}
 	m.validatePreview(fail)
 	m.validateChecks(fail)
 	if len(errs) > 0 {
@@ -764,10 +837,10 @@ func validateIsolation(at string, w Workload, fail func(format string, args ...a
 			fail("%s: %s is both a secret and a plain env value", at, s)
 		}
 	}
-	if w.Resources.Memory != "" && !sizePattern.MatchString(w.Resources.Memory) {
-		fail("%s.resources.memory: %q must look like 512m or 2g", at, w.Resources.Memory)
+	if _, err := ParseMemory(w.Resources.Memory); err != nil {
+		fail("%s.resources.memory: %v", at, err)
 	}
-	if w.Resources.CPUs < 0 || w.Resources.CPUs > 64 {
+	if math.IsNaN(w.Resources.CPUs) || math.IsInf(w.Resources.CPUs, 0) || w.Resources.CPUs < 0 || w.Resources.CPUs > 64 {
 		fail("%s.resources.cpus: must be 0 to 64", at)
 	}
 	if w.Health != nil && w.Health.Path != "" && !strings.HasPrefix(w.Health.Path, "/") {
@@ -775,6 +848,9 @@ func validateIsolation(at string, w Workload, fail func(format string, args ...a
 	}
 	if w.Build != nil && (strings.HasPrefix(w.Build.Context, "/") || strings.Contains(w.Build.Context, "..")) {
 		fail("%s.build.context: must be inside the source", at)
+	}
+	if w.Build != nil && w.Build.Dockerfile != "" && (!filepath.IsLocal(w.Build.Dockerfile) || strings.ContainsRune(w.Build.Dockerfile, '\x00')) {
+		fail("%s.build.dockerfile: must be relative to its build context and stay inside it", at)
 	}
 	if w.Dir != "" && (strings.HasPrefix(w.Dir, "/") || strings.Contains(w.Dir, "..")) {
 		fail("%s.dir: must be inside the source", at)
@@ -930,6 +1006,38 @@ func (m *Manifest) validatePreview(fail func(format string, args ...any)) {
 // validateChecks checks the checks run after a deploy.
 func (m *Manifest) validateChecks(fail func(format string, args ...any)) {
 	for i, c := range m.Checks {
+		switch c.Context {
+		case "", CheckApplication, CheckEdge:
+		default:
+			fail("checks[%d].context: %q isn't application or edge", i, c.Context)
+		}
+		u, err := url.Parse(c.URL)
+		if err != nil || u.Hostname() == "" {
+			fail("checks[%d]: url must name a host", i)
+		} else if u.User != nil {
+			fail("checks[%d]: credentials belong in headers_from_secrets, not the url", i)
+		}
+		if len(c.HeadersFromSecrets) > 0 {
+			if c.Context != CheckEdge {
+				fail("checks[%d].headers_from_secrets: credentials require context: edge", i)
+			}
+			if u == nil || u.Scheme != "https" {
+				fail("checks[%d].headers_from_secrets: credentials require an https url", i)
+			}
+			seen := map[string]bool{}
+			for _, header := range sortedKeys(c.HeadersFromSecrets) {
+				if !ValidCheckHeader(header) {
+					fail("checks[%d].headers_from_secrets: %q isn't an allowed request header", i, header)
+				}
+				if seen[strings.ToLower(header)] {
+					fail("checks[%d].headers_from_secrets: %q repeats a header with different case", i, header)
+				}
+				seen[strings.ToLower(header)] = true
+				if name := c.HeadersFromSecrets[header]; !envPattern.MatchString(name) {
+					fail("checks[%d].headers_from_secrets.%s: %q must be an UPPER_CASE secret name", i, header, name)
+				}
+			}
+		}
 		if !strings.HasPrefix(c.URL, "https://") && !strings.HasPrefix(c.URL, "http://") {
 			fail("checks[%d]: url must start with https:// or http://", i)
 		}
@@ -1222,4 +1330,22 @@ func (w Workload) CapabilityNames() []string {
 		out = append(out, strings.TrimPrefix(strings.ToUpper(c), "CAP_"))
 	}
 	return out
+}
+
+// ParseMemory reads a container memory ceiling in binary k, m or g units.
+// Empty leaves the default to the caller; explicit limits must be positive
+// and fit the signed byte count Docker accepts.
+func ParseMemory(size string) (int64, error) {
+	if size == "" {
+		return 0, nil
+	}
+	if !sizePattern.MatchString(size) {
+		return 0, fmt.Errorf("%q must look like 512m or 2g", size)
+	}
+	shift := map[byte]uint{'k': 10, 'm': 20, 'g': 30}[size[len(size)-1]]
+	n, err := strconv.ParseUint(size[:len(size)-1], 10, 64)
+	if err != nil || n == 0 || n > uint64(math.MaxInt64)>>shift {
+		return 0, fmt.Errorf("%q must be a positive memory limit within 9223372036854775807 bytes", size)
+	}
+	return int64(n << shift), nil
 }

@@ -26,6 +26,13 @@ import (
 // a move requires both machines to be pointed at the same storage rather
 // than one machine handing the other a key.
 type Handoff struct {
+	// Migration fields identify the staged protocol. Empty Phase is a legacy
+	// copy whose source may have accepted writes after its snapshot.
+	Phase          string `json:"phase,omitempty"`
+	Migration      string `json:"migration,omitempty"`
+	To             string `json:"to,omitempty"`
+	ManifestDigest string `json:"manifest_digest,omitempty"`
+	SourceCommit   string `json:"source_commit,omitempty"`
 	// App is the app being moved.
 	App string `json:"app"`
 	// From is the machine it is moving off, for the record.
@@ -141,6 +148,12 @@ func ReadHandoff(r io.Reader) (*Handoff, error) {
 	}
 	if strings.TrimSpace(h.App) == "" {
 		return nil, errors.New("this isn't a handoff: it names no app")
+	}
+	if !manifest.ValidApp(h.App) {
+		return nil, errors.New("this isn't a handoff: it names an invalid app")
+	}
+	if err := dec.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return nil, errors.New("this isn't a handoff: expected one complete JSON document")
 	}
 	return &h, nil
 }

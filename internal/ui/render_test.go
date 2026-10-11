@@ -104,3 +104,32 @@ func TestDuration(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderedWorkloadOutputCannotControlTheTerminal(t *testing.T) {
+	for _, tty := range []bool{false, true} {
+		var out bytes.Buffer
+		r := New(&out, tty, false)
+		r.Event(kernel.Event{Type: kernel.EventStepOutput, Step: &kernel.StepView{Name: "build"}, Line: "hello\x1b]52;c;clipboard\x07\rforged"})
+		wantEscapes := 0
+		if tty {
+			wantEscapes = 1 // The renderer's own clear-line sequence.
+		}
+		if strings.Count(out.String(), "\x1b") != wantEscapes || strings.Contains(out.String(), "\x07") || !strings.Contains(out.String(), `hello\x1b]52;c;clipboard\x07\x0dforged`) {
+			t.Fatalf("untrusted terminal controls were rendered: %q", out.String())
+		}
+	}
+}
+
+func TestHumanOutputEscapesUnicodeControlsButJSONKeepsOriginal(t *testing.T) {
+	ev := kernel.Event{Type: kernel.EventError, Message: "hello\u009b31m\nnext\tcolumn"}
+	var human, machine bytes.Buffer
+	New(&human, false, false).Event(ev)
+	if got := human.String(); got != "error: hello\\x9b31m\nnext\tcolumn\n" {
+		t.Fatalf("human output: %q", got)
+	}
+	New(&machine, false, true).Event(ev)
+	var decoded kernel.Event
+	if err := json.Unmarshal(machine.Bytes(), &decoded); err != nil || decoded.Message != ev.Message {
+		t.Fatalf("JSON changed untrusted value: %+v, %v", decoded, err)
+	}
+}

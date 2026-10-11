@@ -224,7 +224,7 @@ func diagnoseFirewall(f Facts) Result {
 		return result(Warn, "ufw leaves IPv6 alone (IPV6=no), so the web ports are not filtered there", "set IPV6=yes in "+ufwDefaults+", then "+reconcile)
 	case f.CloudflareOnly():
 		return result(Pass, fmt.Sprintf("active: ssh; 80 and 443 only from Cloudflare (%d ranges)", len(f.CloudflareSources())), "")
-	case f.Firewall.WebGuard.Drops:
+	case f.Firewall.WebGuard.Present():
 		return result(Warn, "the edge takes the web only from Cloudflare, though this machine is set up to take it from anyone", reconcile)
 	case !f.Allows("80/tcp") || !f.Allows("443/tcp"):
 		return result(Warn, "active, web ports closed", runSetup+" opens 80 and 443")

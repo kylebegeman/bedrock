@@ -115,7 +115,11 @@ func newIntegration(a *app) *cobra.Command {
 			return nil
 		},
 	}
+	for _, mutation := range []*cobra.Command{set, remove} {
+		a.guardSecretMutation(mutation, func([]string) string { return integration.App })
+	}
 	cmd.AddCommand(set, list, remove)
+	addIntegrationTransfer(cmd, a)
 	return cmd
 }
 
@@ -151,14 +155,16 @@ func readIntegrationValues(a *app, def integration.Definition, current map[strin
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
 		sc := bufio.NewScanner(os.Stdin)
+		lineNumber := 0
 		for sc.Scan() {
+			lineNumber++
 			line := strings.TrimSpace(sc.Text())
 			if line == "" || strings.HasPrefix(line, "#") {
 				continue
 			}
 			k, v, ok := strings.Cut(line, "=")
 			if !ok {
-				return nil, fmt.Errorf("expected field=value, got %q", line)
+				return nil, fmt.Errorf("line %d: expected field=value", lineNumber)
 			}
 			values[strings.TrimSpace(k)] = strings.TrimSpace(v)
 		}

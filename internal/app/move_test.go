@@ -123,3 +123,18 @@ func TestErrNoSnapshotIsRecognisable(t *testing.T) {
 		t.Fatal("sanity")
 	}
 }
+
+func TestReadHandoffRequiresOneCompleteJSONDocument(t *testing.T) {
+	for _, input := range []string{
+		`{"app":"site"}{"app":"other"}`,
+		`{"app":"site"} unexpected output`,
+		`{"app":"../outside"}`,
+	} {
+		if _, err := ReadHandoff(strings.NewReader(input)); err == nil {
+			t.Fatalf("ambiguous or invalid handoff accepted: %q", input)
+		}
+	}
+	if _, err := ReadHandoff(strings.NewReader("{\"app\":\"site\"}\n\t ")); err != nil {
+		t.Fatalf("trailing whitespace rejected: %v", err)
+	}
+}

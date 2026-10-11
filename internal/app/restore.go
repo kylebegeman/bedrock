@@ -61,7 +61,13 @@ func (r RestoreDef) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 		return nil, errors.New("which app?")
 	}
 	if in.App == manifest.ReservedApp {
-		return nil, errors.New("the machine's own backup is restored by hand: fetch the snapshot with restic and open the secrets with the recovery identity")
+		return nil, errors.New("recover the machine with bedrock recover <source-machine> --snapshot <machine-snapshot> --identity-file <protected-file>; use --rehearsal to test privately")
+	}
+	if err := checkReleaseStoreAccess(ctx, r.Store, in.App); err != nil {
+		return nil, err
+	}
+	if err := CheckMigrationAccess(r.Store.Path(), in.App); err != nil {
+		return nil, err
 	}
 	if in.Snapshot == "" {
 		in.Snapshot = "latest"
@@ -76,12 +82,13 @@ func (r RestoreDef) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 	// Recovery must use the same snapshot as fetch, even if a newer backup
 	// appeared while the daemon was down, so every step after it reads the
 	// one fetch pinned, and adopts the backup run again.
-	return &kernel.Plan{Target: in.App, Recovery: kernel.Resume, Steps: []kernel.Step{
+	plan := &kernel.Plan{Target: in.App, Recovery: kernel.Resume, Steps: []kernel.Step{
 		x.fetchStep(),
 		x.pinned(x.volumesStep()),
 		x.pinned(x.databaseStep()),
 		x.pinned(x.doneStep()),
-	}}, nil
+	}}
+	return guardReleaseRestoreSteps(plan, r.Store), nil
 }
 
 // id is the snapshot the restore reads: the one fetch found, or the one

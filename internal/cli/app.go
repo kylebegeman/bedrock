@@ -103,7 +103,7 @@ command's own exit code.`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dash := cmd.ArgsLenAtDash()
-			if dash < 1 || dash >= len(args) {
+			if dash < 1 || dash > 2 || dash >= len(args) {
 				return fmt.Errorf("give the app, optionally the workload, then -- and the command")
 			}
 			in := apps.RunInput{App: args[0], Workload: optional(args[:dash], 1), Command: args[dash:], Secrets: secretNames}
@@ -249,18 +249,20 @@ func newPsql(a *app) *cobra.Command {
 
 func newRollback(a *app) *cobra.Command {
 	var (
-		planOnly bool
-		to       string
+		planOnly    bool
+		to          string
+		restoreData string
 	)
 	cmd := &cobra.Command{
 		Use:   "rollback <app>",
 		Short: "Make the previous revision active again.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.operate(cmd.Context(), apps.RollbackKind, apps.RollbackInput{App: args[0], Revision: to}, planOnly)
+			return a.operate(cmd.Context(), apps.RollbackKind, apps.RollbackInput{App: args[0], Revision: to, RestoreData: restoreData}, planOnly)
 		},
 	}
 	cmd.Flags().StringVar(&to, "to", "", "a specific revision instead of the previous one")
+	cmd.Flags().StringVar(&restoreData, "restore-data", "", "replace live data with this exact retained checkpoint; discard writes since it was captured")
 	a.mutatingFlags(cmd, &planOnly)
 	return cmd
 }

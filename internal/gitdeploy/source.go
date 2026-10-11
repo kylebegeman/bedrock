@@ -24,21 +24,27 @@ const MaxSource int64 = 2 << 30
 // BuildDir names the directory one deploy's source is written to, under
 // the app's own, so PruneBuilds can keep the newest few.
 func BuildDir(root, app, label string) string {
-	return filepath.Join(root, app, fmt.Sprintf("%s-%d", label, time.Now().UnixMilli()))
+	return filepath.Join(root, app, fmt.Sprintf("%s-%d", label, time.Now().UnixNano()))
 }
 
 // NewBuildDir makes the directory one deploy's source is written to.
 func NewBuildDir(root, app, label string) (string, error) {
-	dir := BuildDir(root, app, label)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if !ValidApp(app) || label == "" || filepath.Base(label) != label || strings.ContainsAny(label, "\\\x00\r\n") {
+		return "", errors.New("invalid source tree app or label")
+	}
+	parent := filepath.Join(root, app)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return "", err
 	}
-	return dir, nil
+	return os.MkdirTemp(parent, fmt.Sprintf("%s-%d-", label, time.Now().UnixNano()))
 }
 
 // PruneBuilds keeps an app's newest few source trees: the images are in
 // the registry, so older trees are only disk.
 func PruneBuilds(root, app string, keep int) {
+	if !ValidApp(app) || keep < 0 {
+		return
+	}
 	entries, err := os.ReadDir(filepath.Join(root, app))
 	if err != nil {
 		return
@@ -74,7 +80,19 @@ func ExportCommit(ctx context.Context, repoDir, commit, dest string) error {
 		return err
 	}
 	extractErr := Extract(stdout, dest)
+	// An extractor may reject the first header while git is still writing.
+	// Closing its pipe releases the producer instead of waiting on a full pipe.
+	if extractErr != nil {
+		_ = stdout.Close()
+	} else {
+		// tar EOF can precede git's archive padding. Drain it so a valid
+		// producer finishes without a broken pipe or a blocked final write.
+		_, extractErr = io.Copy(io.Discard, stdout)
+	}
 	waitErr := cmd.Wait()
+	if extractErr != nil {
+		return extractErr
+	}
 	if waitErr != nil {
 		return fmt.Errorf("git archive %s: %s", commit, strings.TrimSpace(stderr.String()))
 	}
@@ -99,6 +117,11 @@ func Extract(r io.Reader, dest string) error {
 	if err != nil {
 		return err
 	}
+	bounded, err := os.OpenRoot(root)
+	if err != nil {
+		return err
+	}
+	defer bounded.Close()
 	tr := tar.NewReader(in)
 	var total int64
 	for {
@@ -119,7 +142,7 @@ func Extract(r io.Reader, dest string) error {
 		target := filepath.Join(root, name)
 		switch h.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
+			if err := bounded.MkdirAll(name, 0o755); err != nil {
 				return err
 			}
 		case tar.TypeReg:
@@ -127,14 +150,14 @@ func Extract(r io.Reader, dest string) error {
 			if total > MaxSource {
 				return fmt.Errorf("the source is larger than %d GiB", MaxSource>>30)
 			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			if err := bounded.MkdirAll(filepath.Dir(name), 0o755); err != nil {
 				return err
 			}
 			mode := os.FileMode(0o644)
 			if h.Mode&0o111 != 0 {
 				mode = 0o755
 			}
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+			f, err := bounded.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 			if err != nil {
 				return err
 			}
@@ -156,11 +179,11 @@ func Extract(r io.Reader, dest string) error {
 				// machine; it is left out.
 				continue
 			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			if err := bounded.MkdirAll(filepath.Dir(name), 0o755); err != nil {
 				return err
 			}
-			_ = os.Remove(target)
-			if err := os.Symlink(link, target); err != nil {
+			_ = bounded.Remove(name)
+			if err := bounded.Symlink(link, name); err != nil {
 				return err
 			}
 		}

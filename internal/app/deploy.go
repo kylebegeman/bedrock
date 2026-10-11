@@ -99,9 +99,33 @@ func (d Deploy) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 	if name == "" {
 		name = manifest.FileName
 	}
-	m, err := manifest.LoadFile(in.Source, name)
+	stateDir := d.StateDir
+	if stateDir == "" {
+		stateDir = defaultStateDir
+	}
+	if err := refuseRecursiveDeployCapture(in.Source, stateDir); err != nil {
+		return nil, err
+	}
+	cached, err := readDeploySourceReservation(stateDir, in)
 	if err != nil {
 		return nil, err
+	}
+	var m *manifest.Manifest
+	if cached != nil {
+		m = &cached.Manifest
+	} else {
+		m, err = manifest.LoadFile(in.Source, name)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if d.Store != nil {
+		if err := CheckMigrationAccess(d.Store.Path(), m.App); err != nil {
+			return nil, err
+		}
+		if err := checkReleaseStoreAccess(ctx, d.Store, m.App); err != nil {
+			return nil, err
+		}
 	}
 	if len(m.ManagedHosts()) > 0 {
 		if _, err := integration.LoadCloudflare(d.Secrets); err != nil {
@@ -124,11 +148,37 @@ func (d Deploy) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 	if in.SecretsFrom == m.App {
 		return nil, fmt.Errorf("%s would copy its secrets onto itself", m.App)
 	}
-	commit := in.Commit
-	if commit == "" {
-		commit = sourceCommit(ctx, in.Source)
+	if err := CheckDeploySecretsFrom(m, d.Secrets, in.SecretsFrom); err != nil {
+		return nil, err
 	}
-	return d.rollout(ctx, m, in.Revision, &buildFrom{source: in.Source, commit: commit, restore: in.Restore, secretsFrom: in.SecretsFrom})
+	commit := in.Commit
+	var sourceHash string
+	if cached != nil {
+		commit, sourceHash = cached.Commit, cached.Hash
+		if !cached.Discarded {
+			captured := filepath.Join(deploySourceDir(stateDir, m.App, in.Revision), "source")
+			if _, err := os.Lstat(captured); err == nil {
+				got, err := deploySourceHash(ctx, captured)
+				if err != nil {
+					return nil, err
+				}
+				if got != sourceHash {
+					return nil, errors.New("captured deploy source changed; refusing operation recovery")
+				}
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return nil, err
+			}
+		}
+	} else {
+		if commit == "" {
+			commit = sourceCommit(ctx, in.Source)
+		}
+		sourceHash, err = deploySourceHash(ctx, in.Source)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return deployCapturePlan(ctx, d, in, m, commit, sourceHash)
 }
 
 // buildFrom says images come from a source directory; nil means they are
@@ -380,19 +430,7 @@ func parseSize(s string) (int64, error) {
 	if s == "" {
 		return 0, fmt.Errorf("size %q", s)
 	}
-	n, err := strconv.ParseInt(s[:len(s)-1], 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("size %q", s)
-	}
-	switch s[len(s)-1] {
-	case 'k':
-		return n << 10, nil
-	case 'm':
-		return n << 20, nil
-	case 'g':
-		return n << 30, nil
-	}
-	return 0, fmt.Errorf("size %q", s)
+	return manifest.ParseMemory(s)
 }
 
 // waitReady waits until a workload's container is ready: its health
@@ -405,8 +443,16 @@ func waitReady(ctx context.Context, e *docker.Engine, container string, w manife
 			timeout = d
 		}
 	}
-	deadline := time.Now().Add(timeout)
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	var last string
+	expired := func() error {
+		if err := parent.Err(); err != nil {
+			return err
+		}
+		return fmt.Errorf("not ready after %s: %s", timeout, last)
+	}
 	for {
 		info, err := e.Inspect(ctx, container)
 		switch {
@@ -424,12 +470,12 @@ func waitReady(ctx context.Context, e *docker.Engine, container string, w manife
 			}
 			last = why
 		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("not ready after %s: %s", timeout, last)
+		if ctx.Err() != nil {
+			return expired()
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return expired()
 		case <-time.After(2 * time.Second):
 		}
 	}
@@ -453,7 +499,11 @@ func probeReady(ctx context.Context, e *docker.Engine, container string, info *d
 		return false, "no network address yet"
 	}
 	if w.Health != nil && w.Health.Path != "" {
-		resp, err := (&http.Client{Timeout: 5 * time.Second}).Get(fmt.Sprintf("http://%s:%d%s", ip, port, w.Health.Path))
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+net.JoinHostPort(ip, strconv.Itoa(port))+w.Health.Path, nil)
+		if err != nil {
+			return false, err.Error()
+		}
+		resp, err := (&http.Client{Timeout: 5 * time.Second, CheckRedirect: directCheckRedirect}).Do(req)
 		if err != nil {
 			return false, err.Error()
 		}
@@ -463,7 +513,7 @@ func probeReady(ctx context.Context, e *docker.Engine, container string, info *d
 		}
 		return false, fmt.Sprintf("%s answered %s", w.Health.Path, resp.Status)
 	}
-	conn, err := (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", fmt.Sprintf("%s:%d", ip, port))
+	conn, err := (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
 	if err != nil {
 		return false, err.Error()
 	}
@@ -698,12 +748,14 @@ func runCheck(ctx context.Context, c manifest.Check) error {
 	if err != nil {
 		return err
 	}
-	return evaluateCheck(c, &http.Client{Timeout: within, Transport: publicTransport()}, req, within)
+	transport := publicTransport()
+	defer transport.CloseIdleConnections()
+	return evaluateCheck(c, &http.Client{Timeout: within, Transport: transport}, req, within)
 }
 
 // runCheckDirect performs a check against the new container that would
 // serve the URL, before the edge routes anything to it.
-func runCheckDirect(ctx context.Context, e *docker.Engine, m *manifest.Manifest, containers map[string]string, c manifest.Check) error {
+func runCheckDirect(ctx context.Context, e checkInspector, m *manifest.Manifest, containers map[string]string, c manifest.Check) error {
 	u, err := url.Parse(c.URL)
 	if err != nil {
 		return fmt.Errorf("check %s: %w", c.URL, err)
@@ -721,12 +773,22 @@ func runCheckDirect(ctx context.Context, e *docker.Engine, m *manifest.Manifest,
 		return fmt.Errorf("check %s: %s has no address", c.URL, containers[name])
 	}
 	within := checkTimeout(c)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://%s:%d%s", ip, servePort(w, &route), u.RequestURI()), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+net.JoinHostPort(ip, strconv.Itoa(servePort(w, &route)))+u.RequestURI(), nil)
 	if err != nil {
 		return err
 	}
 	req.Host = u.Host
-	return evaluateCheck(c, &http.Client{Timeout: within}, req, within)
+	return evaluateCheck(c, &http.Client{Timeout: within, CheckRedirect: directCheckRedirect}, req, within)
+}
+
+func directCheckRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("direct check stopped after 10 redirects")
+	}
+	if len(via) == 0 || req.URL.Scheme != via[0].URL.Scheme || req.URL.Host != via[0].URL.Host {
+		return errors.New("direct check refused a redirect outside the checked container")
+	}
+	return nil
 }
 
 func evaluateCheck(c manifest.Check, client *http.Client, req *http.Request, within time.Duration) error {
@@ -736,7 +798,10 @@ func evaluateCheck(c manifest.Check, client *http.Client, req *http.Request, wit
 		return fmt.Errorf("check %s: %w", c.URL, err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return fmt.Errorf("check %s: read response: %w", c.URL, err)
+	}
 	took := time.Since(started)
 	want := c.Status
 	if want == 0 {
@@ -837,6 +902,8 @@ type RollbackInput struct {
 	App string `json:"app"`
 	// Revision is the one to return to; empty means the previous one.
 	Revision string `json:"revision,omitempty"`
+	// RestoreData is an exact retained release checkpoint. It explicitly replaces data.
+	RestoreData string `json:"restore_data,omitempty"`
 }
 
 // Kind implements kernel.Definition.
@@ -849,8 +916,36 @@ func (r Rollback) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, 
 		return nil, fmt.Errorf("rollback input: %w", err)
 	}
 	store := r.Deploy.Store
+	if in.App == "" {
+		return nil, errors.New("which app?")
+	}
+	if store != nil {
+		if err := CheckMigrationAccess(store.Path(), in.App); err != nil {
+			return nil, err
+		}
+	}
 	var rev *state.Revision
 	var err error
+	// The checkpoint pins the target even when "previous" changes after an
+	// interrupted activation. A retry must restore and start the same revision.
+	if in.RestoreData != "" {
+		if !fullSnapshotID.MatchString(in.RestoreData) {
+			return nil, errors.New("--restore-data requires the full 64-character checkpoint identity")
+		}
+		boundaries, err := store.ReleaseBoundaries(ctx, in.App)
+		if err != nil {
+			return nil, err
+		}
+		for _, b := range boundaries {
+			if b.Snapshot == in.RestoreData && b.PreviousRevision != "" {
+				if in.Revision != "" && in.Revision != b.PreviousRevision {
+					return nil, errors.New("checkpoint belongs to a different rollback revision")
+				}
+				in.Revision = b.PreviousRevision
+				break
+			}
+		}
+	}
 	if in.Revision == "" {
 		rev, err = store.RevisionWithStatus(ctx, in.App, state.RevisionPrevious)
 		if err != nil {
@@ -865,14 +960,69 @@ func (r Rollback) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, 
 			return nil, fmt.Errorf("revision %s of %s: %w", in.Revision, in.App, err)
 		}
 	}
-	if rev.Status == state.RevisionActive {
+	if rev.Status == state.RevisionActive && in.RestoreData == "" {
 		return nil, fmt.Errorf("%s is already the active revision of %s", rev.ID, in.App)
 	}
 	var m manifest.Manifest
 	if err := json.Unmarshal(rev.Manifest, &m); err != nil {
 		return nil, err
 	}
-	return r.Deploy.rollout(ctx, &m, rev.ID, nil)
+	unsafe, err := unsafeReleaseBoundaries(ctx, store, rev)
+	if err != nil {
+		return nil, err
+	}
+	var checkpoint *state.ReleaseBoundary
+	if in.RestoreData != "" {
+		if !fullSnapshotID.MatchString(in.RestoreData) {
+			return nil, errors.New("--restore-data requires the full 64-character checkpoint identity")
+		}
+		boundaries, err := store.ReleaseBoundaries(ctx, in.App)
+		if err != nil {
+			return nil, err
+		}
+		for i := range boundaries {
+			b := &boundaries[i]
+			if b.Snapshot == in.RestoreData && b.PreviousRevision == rev.ID {
+				checkpoint = b
+				break
+			}
+		}
+		if checkpoint == nil {
+			return nil, errors.New("checkpoint is not the retained pre-release data for the requested revision")
+		}
+		if checkpoint.Status == state.ReleaseRestored && len(unsafe) > 0 {
+			later := unsafe[0]
+			for _, boundary := range unsafe[1:] {
+				if boundary.StartedAt.Before(later.StartedAt) {
+					later = boundary
+				}
+			}
+			if later.Snapshot != "" {
+				return nil, fmt.Errorf("checkpoint %s was already restored; release %s changed data again; review the newer matching checkpoint %s before retrying --restore-data", checkpoint.Snapshot, later.Revision, later.Snapshot)
+			}
+			return nil, fmt.Errorf("checkpoint %s was already restored; release %s changed data again without a retained checkpoint; recover through a separately verified backup", checkpoint.Snapshot, later.Revision)
+		}
+		for _, boundary := range unsafe {
+			if boundary.StartedAt.Before(checkpoint.StartedAt) {
+				return nil, fmt.Errorf("checkpoint %s was captured after unsafe data release %s; choose the checkpoint before the first incompatible transition", checkpoint.Snapshot, boundary.Revision)
+			}
+		}
+	} else {
+		if err := checkReleaseStoreAccess(ctx, store, in.App); err != nil {
+			return nil, err
+		}
+		if len(unsafe) > 0 {
+			return nil, unsafeRollbackError(in.App, unsafe)
+		}
+	}
+	plan, err := r.Deploy.rollout(ctx, &m, rev.ID, nil)
+	if err != nil {
+		return nil, err
+	}
+	if checkpoint != nil {
+		plan.Steps = append([]kernel.Step{rollbackCheckpointStep(r.Deploy, rev, *checkpoint)}, plan.Steps...)
+	}
+	return plan, nil
 }
 
 // publicTransport resolves names the way the world does, through a public

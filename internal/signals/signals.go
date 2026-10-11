@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -62,9 +63,17 @@ func parseLine(line string) (Series, bool) {
 		for _, pair := range splitLabels(line[i+1 : end]) {
 			k, v, ok := strings.Cut(pair, "=")
 			if !ok {
-				continue
+				return s, false
 			}
-			s.Labels[k] = strings.Trim(v, `"`)
+			k = strings.TrimSpace(k)
+			decoded, err := strconv.Unquote(strings.TrimSpace(v))
+			if err != nil || k == "" {
+				return s, false
+			}
+			if _, duplicate := s.Labels[k]; duplicate {
+				return s, false
+			}
+			s.Labels[k] = decoded
 		}
 		rest = line[end+1:]
 	} else {
@@ -80,7 +89,7 @@ func parseLine(line string) (Series, bool) {
 		return s, false
 	}
 	v, err := strconv.ParseFloat(fields[0], 64)
-	if err != nil {
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
 		return s, false
 	}
 	s.Value = v
@@ -91,9 +100,15 @@ func parseLine(line string) (Series, bool) {
 func splitLabels(s string) []string {
 	var out []string
 	var cur strings.Builder
-	quoted := false
+	quoted, escaped := false, false
 	for _, r := range s {
 		switch {
+		case escaped:
+			escaped = false
+			cur.WriteRune(r)
+		case quoted && r == '\\':
+			escaped = true
+			cur.WriteRune(r)
 		case r == '"':
 			quoted = !quoted
 			cur.WriteRune(r)
@@ -111,17 +126,8 @@ func splitLabels(s string) []string {
 }
 
 func (s Series) key() string {
-	keys := make([]string, 0, len(s.Labels))
-	for k := range s.Labels {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	var b strings.Builder
-	b.WriteString(s.Name)
-	for _, k := range keys {
-		b.WriteString("," + k + "=" + s.Labels[k])
-	}
-	return b.String()
+	labels, _ := json.Marshal(s.Labels) // String maps always marshal and sort keys.
+	return s.Name + string(labels)
 }
 
 // Sampler takes one sample per call and rolls it up.
@@ -136,11 +142,12 @@ type Sampler struct {
 	// DiskUsage measures a directory in bytes; nil skips disk.
 	DiskUsage func(ctx context.Context, path string) (int64, error)
 
-	mu       sync.Mutex
-	counters map[string]float64
-	primed   bool
-	lastDisk time.Time
-	lastGC   time.Time
+	mu          sync.Mutex
+	counters    map[string]float64
+	primed      bool
+	lastDisk    time.Time
+	lastGC      time.Time
+	sharedHosts string
 }
 
 // NewSampler returns a sampler for this machine.
@@ -170,6 +177,7 @@ func (s *Sampler) Sample(ctx context.Context) error {
 		return err
 	}
 	hostApp := map[string]string{}
+	shared := map[string]bool{}
 	type workload struct {
 		app, name, container string
 	}
@@ -181,6 +189,9 @@ func (s *Sampler) Sample(ctx context.Context) error {
 			continue
 		}
 		for _, h := range m.Hosts() {
+			if owner, exists := hostApp[h]; exists && owner != rev.App {
+				shared[h] = true
+			}
 			hostApp[h] = rev.App
 		}
 		for _, name := range m.WorkloadNames() {
@@ -198,13 +209,28 @@ func (s *Sampler) Sample(ctx context.Context) error {
 		}
 	}
 
+	sharedNames := make([]string, 0, len(shared))
+	for host := range shared {
+		delete(hostApp, host)
+		sharedNames = append(sharedNames, host)
+	}
+	sort.Strings(sharedNames)
+	sharedKey := strings.Join(sharedNames, ",")
+	if sharedKey != s.sharedHosts {
+		s.sharedHosts = sharedKey
+		if len(sharedNames) > 0 {
+			s.Log("signals: per-host counters cannot attribute traffic for %d shared hosts to individual apps; first host: %s", len(sharedNames), sharedNames[0])
+		}
+	}
+
 	if text, err := s.scrape(ctx); err != nil {
 		s.Log("signals: edge metrics: %v", err)
 	} else if err := s.traffic(ctx, now, ParseMetrics(text), hostApp); err != nil {
 		s.Log("signals: traffic: %v", err)
 	}
 
-	if s.Connect != nil && len(containers) > 0 {
+	diskDue := s.DiskUsage != nil && len(volumes) > 0 && now.Sub(s.lastDisk) >= time.Hour
+	if s.Connect != nil && (len(containers) > 0 || diskDue) {
 		e, err := s.Connect(ctx)
 		if err != nil {
 			s.Log("signals: %v", err)
@@ -234,22 +260,29 @@ func (s *Sampler) Sample(ctx context.Context) error {
 				_ = s.Store.AddSignal(ctx, state.Signal{Hour: now, App: r.app, Key: r.name, Metric: state.SignalMemoryBytes, Value: float64(r.MemoryBytes), Samples: 1})
 				_ = s.Store.MaxSignal(ctx, state.Signal{Hour: now, App: r.app, Key: r.name, Metric: state.SignalMemoryMax, Value: float64(r.MemoryBytes)})
 			}
-			if s.DiskUsage != nil && now.Sub(s.lastDisk) >= time.Hour {
+			if diskDue {
 				s.lastDisk = now
 				for app, vols := range volumes {
 					var total int64
+					complete := true
 					for _, v := range vols {
 						mp, err := e.VolumeMountpoint(ctx, v)
 						if err != nil {
+							s.Log("signals: disk for %s volume %s: %v", app, v, err)
+							complete = false
 							continue
 						}
 						n, err := s.DiskUsage(ctx, mp)
-						if err != nil {
+						if err != nil || n < 0 {
+							s.Log("signals: disk for %s volume %s could not be measured", app, v)
+							complete = false
 							continue
 						}
 						total += n
 					}
-					_ = s.Store.MaxSignal(ctx, state.Signal{Hour: now, App: app, Key: "", Metric: state.SignalDiskBytes, Value: float64(total)})
+					if complete {
+						_ = s.Store.MaxSignal(ctx, state.Signal{Hour: now, App: app, Key: "", Metric: state.SignalDiskBytes, Value: float64(total)})
+					}
 				}
 			}
 		}
@@ -285,7 +318,7 @@ func (s *Sampler) traffic(ctx context.Context, now time.Time, series []Series, h
 	}
 	deltas := map[string]map[string]float64{} // app -> host -> metric -> delta, flattened as host|metric
 	add := func(app, host, metric string, v float64) {
-		if v <= 0 {
+		if v <= 0 || math.IsNaN(v) || math.IsInf(v, 0) {
 			return
 		}
 		if deltas[app] == nil {
@@ -295,7 +328,7 @@ func (s *Sampler) traffic(ctx context.Context, now time.Time, series []Series, h
 	}
 	seen := map[string]bool{}
 	for _, sr := range series {
-		if !strings.HasPrefix(sr.Name, "caddy_http_") {
+		if !strings.HasPrefix(sr.Name, "caddy_http_") || sr.Value < 0 || math.IsNaN(sr.Value) || math.IsInf(sr.Value, 0) {
 			continue
 		}
 		host := sr.Labels["host"]
@@ -328,8 +361,11 @@ func (s *Sampler) traffic(ctx context.Context, now time.Time, series []Series, h
 		case "caddy_http_request_duration_seconds_sum":
 			add(app, host, state.SignalDurationMS, delta*1000)
 		case "caddy_http_request_duration_seconds_bucket":
-			if le := sr.Labels["le"]; le != "" && le != "+Inf" {
-				add(app, host, state.SignalBucketPrefix+le, delta)
+			if le := sr.Labels["le"]; le != "" {
+				bound, err := strconv.ParseFloat(le, 64)
+				if err == nil && bound >= 0 && !math.IsNaN(bound) && !math.IsInf(bound, 0) {
+					add(app, host, state.SignalBucketPrefix+le, delta)
+				}
 			}
 		case "caddy_http_response_size_bytes_sum":
 			add(app, host, state.SignalBytes, delta)
@@ -395,6 +431,9 @@ func Summarize(rows []state.Signal) Summary {
 	hours := map[int64]bool{}
 	var latestDisk time.Time
 	for _, r := range rows {
+		if math.IsNaN(r.Value) || math.IsInf(r.Value, 0) {
+			continue
+		}
 		hours[r.Hour.Unix()] = true
 		switch {
 		case r.Metric == state.SignalRequests:
@@ -408,7 +447,7 @@ func Summarize(rows []state.Signal) Summary {
 		case r.Metric == state.SignalBytes:
 			sum.Bytes += int64(r.Value)
 		case strings.HasPrefix(r.Metric, state.SignalBucketPrefix):
-			if le, err := strconv.ParseFloat(strings.TrimPrefix(r.Metric, state.SignalBucketPrefix), 64); err == nil {
+			if le, err := strconv.ParseFloat(strings.TrimPrefix(r.Metric, state.SignalBucketPrefix), 64); err == nil && le >= 0 && !math.IsNaN(le) && !math.IsInf(le, 0) {
 				buckets[le] += r.Value
 			}
 		case r.Metric == state.SignalCPUPercent || r.Metric == state.SignalMemoryBytes:

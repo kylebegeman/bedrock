@@ -2,11 +2,17 @@ package signals
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/kylebegeman/bedrock/internal/docker"
 	"github.com/kylebegeman/bedrock/internal/state"
 )
 
@@ -105,5 +111,119 @@ func TestSummarizeAveragesResourcesPerWorkload(t *testing.T) {
 	sum := Summarize(rows)
 	if sum.CPUPercent != 15 || sum.MemoryBytes != 100 || sum.MemoryMax != 150 || sum.DiskBytes != 7000 || sum.Hours != 2 {
 		t.Fatalf("%+v", sum)
+	}
+}
+
+func TestMetricsRejectNonFiniteSamplesAndDecodeEscapedLabels(t *testing.T) {
+	for _, value := range []string{"NaN", "+Inf", "-Inf", "Inf"} {
+		if got := ParseMetrics("metric " + value); len(got) != 0 {
+			t.Fatalf("nonfinite sample accepted: %+v", got)
+		}
+	}
+	got := ParseMetrics(`metric{label="one\",two\\three\nfour",other="value"} 2`)
+	if len(got) != 1 || got[0].Labels["label"] != "one\",two\\three\nfour" || got[0].Labels["other"] != "value" {
+		t.Fatalf("escaped labels changed series identity: %+v", got)
+	}
+	for _, input := range []string{`metric{a="unterminated} 1`, `metric{a="one",a="two"} 1`} {
+		if got := ParseMetrics(input); len(got) != 0 {
+			t.Fatalf("malformed label set accepted: %+v", got)
+		}
+	}
+}
+
+func TestMetricSeriesKeysCannotCollideOnLabelDelimiters(t *testing.T) {
+	a := Series{Name: "metric", Labels: map[string]string{"a": "b,c=d"}}
+	b := Series{Name: "metric", Labels: map[string]string{"a": "b", "c": "d"}}
+	if a.key() == b.key() {
+		t.Fatal("different label sets share a counter identity")
+	}
+}
+
+func TestSampleMeasuresDataWithoutWorkloadContainers(t *testing.T) {
+	ctx := context.Background()
+	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	manifest := json.RawMessage(`{"app":"data","data":{"volumes":{"uploads":{}},"postgres":{"version":"17"},"objects":{}},"workloads":{"cron":{"kind":"cron","image":"x","schedule":"0 * * * *"}}}`)
+	if err := store.SaveRevision(ctx, state.Revision{App: "data", ID: "r1", Status: state.RevisionActive, Manifest: manifest, CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		path := strings.TrimPrefix(request.URL.Path, "/v1.44")
+		if path == "/_ping" {
+			w.Header().Set("API-Version", "1.44")
+			_, _ = w.Write([]byte("OK"))
+			return
+		}
+		if name, found := strings.CutPrefix(path, "/volumes/"); found {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{"Name": name, "Mountpoint": "/data/" + name})
+			return
+		}
+		http.NotFound(w, request)
+	}))
+	defer server.Close()
+	t.Setenv("DOCKER_HOST", "tcp"+strings.TrimPrefix(server.URL, "http"))
+	t.Setenv("DOCKER_API_VERSION", "1.44")
+	t.Setenv("DOCKER_TLS_VERIFY", "")
+	paths := map[string]bool{}
+	failObjects := false
+	now := time.Now().UTC()
+	s := &Sampler{Store: store, Now: func() time.Time { return now }, Log: func(string, ...any) {}, Connect: docker.Connect,
+		DiskUsage: func(_ context.Context, path string) (int64, error) {
+			paths[path] = true
+			if failObjects && strings.HasSuffix(path, "bedrock-data-objects") {
+				return 0, errors.New("object volume unavailable")
+			}
+			return 100, nil
+		}}
+	if err := s.Sample(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := store.Signals(ctx, "data", now.Add(-time.Hour))
+	if err != nil || len(rows) != 1 || rows[0].Metric != state.SignalDiskBytes || rows[0].Value != 300 || len(paths) != 3 {
+		t.Fatalf("data-only app did not measure database, objects and volume: rows=%+v, paths=%v, err=%v", rows, paths, err)
+	}
+	// A failed volume measurement cannot be reported as the whole app's
+	// disk total. Keep the previous honest sample until a complete scan.
+	failObjects = true
+	now = now.Add(time.Hour)
+	if err := s.Sample(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, err = store.Signals(ctx, "data", now.Truncate(time.Hour))
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("partial volume sizes became a misleading app total: %+v, %v", rows, err)
+	}
+}
+
+func TestSampleDoesNotAttributeSharedHostTrafficToOneApp(t *testing.T) {
+	ctx := context.Background()
+	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for _, name := range []string{"first", "second"} {
+		body := json.RawMessage(`{"app":"` + name + `","workloads":{"web":{"kind":"web","image":"x","routes":[{"host":"shared.example","path":"/` + name + `"}]}}}`)
+		if err := store.SaveRevision(ctx, state.Revision{App: name, ID: "r1", Status: state.RevisionActive, Manifest: body, CreatedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().UTC()
+	metrics := `caddy_http_requests_total{handler="subroute",host="shared.example"} 10`
+	s := &Sampler{Store: store, Now: func() time.Time { return now }, Log: func(string, ...any) {}, Metrics: func(context.Context) ([]byte, error) { return []byte(metrics), nil }}
+	if err := s.Sample(ctx); err != nil {
+		t.Fatal(err)
+	}
+	metrics = strings.Replace(metrics, "10", "20", 1)
+	if err := s.Sample(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := store.Signals(ctx, "", now.Add(-time.Hour))
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("shared traffic was assigned to one app: %+v, %v", rows, err)
 	}
 }

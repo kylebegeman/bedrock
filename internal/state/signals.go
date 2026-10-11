@@ -2,6 +2,8 @@ package state
 
 import (
 	"context"
+	"errors"
+	"math"
 	"time"
 )
 
@@ -41,7 +43,7 @@ type Signal struct {
 	Samples int       `json:"samples"`
 }
 
-func (s *Store) migrateSignals(ctx context.Context) error {
+func (s *Store) migrateSignals(ctx context.Context, q migrationDB) error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS signals (
   hour    INTEGER NOT NULL,
@@ -58,21 +60,37 @@ CREATE TABLE IF NOT EXISTS integration_uses (
   purpose TEXT NOT NULL,
   used_at INTEGER NOT NULL
 );`
-	_, err := s.db.ExecContext(ctx, schema)
+	_, err := q.ExecContext(ctx, schema)
 	return err
 }
 
 // AddSignal adds a sample to an hour's rollup: the value is summed and the
 // sample count grows, so averages come out as value/samples.
 func (s *Store) AddSignal(ctx context.Context, sig Signal) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO signals (hour, app, key, metric, value, samples) VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(hour, app, key, metric) DO UPDATE SET value = value + excluded.value, samples = samples + excluded.samples`,
-		unix(sig.Hour.Truncate(time.Hour)), sig.App, sig.Key, sig.Metric, sig.Value, sig.Samples)
-	return err
+	if math.IsNaN(sig.Value) || math.IsInf(sig.Value, 0) {
+		return errors.New("signal value must be finite")
+	}
+	result, err := s.db.ExecContext(ctx, `INSERT INTO signals (hour, app, key, metric, value, samples) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(hour, app, key, metric) DO UPDATE SET value = value + excluded.value, samples = samples + excluded.samples WHERE ABS(value + excluded.value) <= ?`,
+		unix(sig.Hour.Truncate(time.Hour)), sig.App, sig.Key, sig.Metric, sig.Value, sig.Samples, math.MaxFloat64)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return errors.New("signal rollup value must stay finite")
+	}
+	return nil
 }
 
 // MaxSignal keeps the largest value seen in an hour.
 func (s *Store) MaxSignal(ctx context.Context, sig Signal) error {
+	if math.IsNaN(sig.Value) || math.IsInf(sig.Value, 0) {
+		return errors.New("signal value must be finite")
+	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO signals (hour, app, key, metric, value, samples) VALUES (?, ?, ?, ?, ?, 1)
 		ON CONFLICT(hour, app, key, metric) DO UPDATE SET value = MAX(value, excluded.value)`,
 		unix(sig.Hour.Truncate(time.Hour)), sig.App, sig.Key, sig.Metric, sig.Value)

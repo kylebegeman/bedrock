@@ -1,4 +1,4 @@
-.PHONY: build test check linux lane-reset lane-status
+.PHONY: build test check linux lane-check lane-up lane-down lane-proof lane-reset lane-status
 
 build:
 	CGO_ENABLED=0 go build -trimpath -o bin/bedrock ./cmd/bedrock
@@ -9,12 +9,24 @@ linux:
 test:
 	go test ./...
 
-check:
+check: lane-check
 	test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
 	go vet ./...
 	go test ./...
 
-# The test bed: wipe the Hostinger machine and wait for SSH. See lane/README.md.
+# Disposable Linux proofs. Provisioning is separate from proof execution.
+lane-check:
+	lane/check.sh
+
+lane-up:
+	lane/vm.sh up
+
+lane-down:
+	lane/vm.sh down
+
+lane-proof:
+	lane/prove.sh m1
+
 lane-reset:
 	lane/reset.sh
 

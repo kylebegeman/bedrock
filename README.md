@@ -46,7 +46,10 @@ flowchart LR
   RET -.->|"bedrock rollback"| START
 ```
 
-The old revision is kept, not deleted, so `bedrock rollback` brings it back. Every container is told its `BEDROCK_APP`, `BEDROCK_WORKLOAD` and `BEDROCK_REVISION`.
+The old revision is retained. `bedrock rollback` brings it back when the data
+compatibility contract permits it; unsafe data transitions require an explicit
+checkpoint restore. Every container receives `BEDROCK_APP`, `BEDROCK_WORKLOAD`
+and `BEDROCK_REVISION`.
 
 ## Quick start
 
@@ -349,14 +352,21 @@ runs a branch as its own app beside the one it is a branch of: a derived
 name, its own containers and an empty database, at hostnames under the
 preview domain, with every route behind a sign-in (`auth: loom`, below).
 Pushing the same branch again updates it; `bedrock preview ls` lists them,
-and `bedrock remove <preview> --data` throws one away, the secrets it was
-given included.
+`bedrock preview down <preview> --data` removes one and its data.
+Use `bedrock preview pin <preview>` to retain a branch, then review
+`bedrock preview prune --older-than 7d --plan` to clean up unpinned previews.
+Pins survive updates and rollbacks. Preview checks retain application and
+routed assertions; external checks that cannot be rewritten are reported.
 
-`bedrock move out <app> --yes > handoff.json` on one machine and
-`bedrock move in <app> --handoff handoff.json` on another move an app's data
-through the backup bucket both machines read, and `bedrock move secrets`
-seals its secrets for the target. The source keeps serving until DNS is
-pointed at the target and the source is removed.
+A staged move starts with `bedrock move rehearse <app> --to <target-hostname>`
+and `bedrock move test <source> --handoff rehearsal.json`. The final capture,
+`bedrock move final`, persistently fences source writers. `move stage` restores
+that exact capture privately, then `move cutover` deliberately admits target
+writers and traffic. The source stays stopped across restarts. Both machines
+read the same backup repository, and `move secrets` preserves app credentials.
+See [safe moves](docs/features/safe-moves.md) for planning downtime, retrying
+cutover and deliberately resuming or retiring the source. The older `move out`
+and `move in` commands remain available for manual copies.
 
 `bedrock remove <app>` takes an app off the machine and keeps its volumes,
 database and sealed secrets, so it can come back with what it had. `--data`
@@ -366,6 +376,27 @@ app that is no longer on the machine finds what it left behind (its sealed
 secrets, volumes, database and networks), names each one in the plan and
 removes them. Its backups in the storage bucket are never touched, and are
 the only way back.
+
+## Named machines and portable setup
+
+Save and verify an SSH target, then select it explicitly for inspection or
+operations. Plans bind the connection, machine identity and uploaded source.
+
+```sh
+bedrock target set staging --ssh bedrock-staging --sudo
+bedrock target verify staging
+bedrock --target staging check . --host
+bedrock --target staging deploy . --plan
+```
+
+Portable profiles pin the host configuration, binary version/checksum and
+integration names. `bedrock --target staging host bootstrap --profile
+staging.json` installs and verifies that profile with resumable client receipts.
+Selected integrations are transferred as recipient-bound age ciphertext while
+the destination keeps its own identity. See
+[named targets and bootstrap](docs/features/targets-and-bootstrap.md) for the
+complete workflow, and [compatibility](docs/features/compatibility.md) for
+upgrade preflight and state checkpoint guarantees.
 
 ## A sign-in in front of a route
 
@@ -410,7 +441,7 @@ inconsistent snapshot.
 | Command | What it does |
 |---|---|
 | `bedrock backup <app>` | run one now |
-| `bedrock backup bedrock` | snapshot the machine's own state and sealed secrets |
+| `bedrock backup bedrock` | preserve state, sealed secrets, images and pinned app recovery data |
 | `bedrock drill <app>` | restore the latest snapshot beside the app, start it, verify, clean up |
 | `bedrock restore <app>` | bring data onto a machine that doesn't run the app yet |
 | `bedrock backups` | list what happened |
@@ -443,6 +474,28 @@ for restored data, which could make encrypted records unreadable.
 > paused object store as its backup destination. Offsite storage remains the
 > recovery target.
 
+## Machine recovery and release rehearsal
+
+A new machine backup contains a self-contained catalog, immutable workload
+images and embedded app data from each app's last successful backup. Keep the
+source recovery identity, storage password and snapshot inventory separately.
+`bedrock recover <source-host> --snapshot <id> --identity-file <protected-file>`
+restores onto a clean target with its own identity and validates workloads
+privately. `--rehearsal` proves the restore in scratch isolation. Live traffic
+requires a separate `recover cutover`. See
+[whole-machine recovery](docs/features/machine-recovery.md) for preparation,
+reports, retries and abandonment.
+
+`bedrock rehearse ./candidate --snapshot <id>` runs candidate release jobs and
+checks on isolated restored data, retaining a proof of the exact source,
+manifest, images and snapshot. A manifest can declare
+`release.data_compatibility: backward-compatible` or `restore-required`.
+Unknown and restore-required releases retain a quiesced checkpoint before
+changing existing data and block unsafe code-only rollback.
+`rollback --restore-data <exact-checkpoint>` deliberately replaces live data
+and discards writes since that checkpoint. See
+[release safety](docs/features/release-safety.md) for the full contract.
+
 ## Secrets
 
 The credentials Bedrock itself uses are integrations, kept sealed like any
@@ -467,18 +520,44 @@ process; automation never prints its private recovery key.
 ciphertext. Pipe that to `bedrock secret import runner TOKEN` on the receiving
 machine through pinned SSH connections. Transfers expire after ten minutes, are
 bound to the receiving app and name, and are idempotent. Integration credentials
-cannot be exported. `bedrock move secrets <app> --to <age1...>` does the same
+use explicit `integration export` and `integration import` transfers.
+`bedrock move secrets <app> --to <age1...>` does the same
 for every secret an app holds at once, which is what a move needs.
 
 </details>
+
+## Validation and saved diagnostics
+
+`bedrock check .` validates a manifest and its source paths offline, with
+field locations in errors. `--json` returns one structured report.
+`bedrock check . --host` adds deploy-plan preconditions for integrations,
+secret names, and route and port ownership. Deployment verifies builds,
+runtime readiness, DNS and certificates. Use `doctor` to inspect current host
+capacity; aggregate workload capacity is not predicted by the source check. The generated
+[editor schema](schema/README.md) keeps authoring aligned with the Go parser.
+
+Checks can declare `context: application` or `context: edge`. Guarded routes
+check application content directly and independently verify anonymous denial
+at the edge. An explicit edge check can use `headers_from_secrets`, mapping
+HTTP header names to app secret names, for an authenticated assertion.
+Credentials are loaded from the deployed revision and stay off logs and
+receipts; credentialed checks require HTTPS and refuse redirects to another origin.
+
+`bedrock alerts --limit N` always includes every open incident plus N resolved
+incidents. Use `--limit 0` for open incidents only.
+`bedrock history --app api --kind app.deploy --failed --since 24h` filters
+operations before applying the limit. `bedrock history ID --output` retrieves
+saved diagnostic tails, optionally with `--step NAME` or a one-based step
+position. Saved tails contain up to 40 lines per execution, rather than a
+complete log, and become available when an execution finishes.
 
 ## Commands
 
 | | |
 |---|---|
-| **Machine** | `host` · `daemon` · `doctor` · `upgrade` · `version` · `status` · `alerts` · `watch` |
-| **Apps** | `init` · `launch` · `deploy` · `preview` · `rollback` · `remove` · `move` · `ls` · `ps` · `logs` · `history` · `gc` |
-| **Data** | `backup` · `backups` · `restore` · `drill` · `psql` |
+| **Machine** | `target` · `capabilities` · `host` · `daemon` · `doctor` · `upgrade` · `version` · `status` · `alerts` · `watch` |
+| **Apps** | `init` · `check` · `launch` · `deploy` · `preview` · `rollback` · `remove` · `move` · `ls` · `ps` · `logs` · `history` · `gc` |
+| **Data** | `backup` · `backups` · `restore` · `recover` · `rehearse` · `drill` · `psql` |
 | **Access** | `secret` · `integration` · `git` · `exec` · `run` · `jobs` |
 | **Network** | `dns` · `exposure` |
 
@@ -498,6 +577,18 @@ bedrock deploy ./app --digest <hex>
 
 A plan that has changed runs nothing and records nothing. `--digest` implies
 `--yes`, because naming the plan is the approval.
+
+Deploy approvals also bind the source bytes, file modes and safe relative links.
+Bedrock captures that source privately before initialization or builds begin,
+so edits to the original checkout cannot change an operation already in progress.
+See [deployment sources](docs/features/deployment-sources.md) for recovery,
+cleanup and disk-space behavior.
+
+Traffic from a hostname shared by several apps is omitted from per-app summaries:
+the edge counters identify the hostname, not which app handled each request.
+Dedicated-host traffic, workload resource usage and volume usage remain measured.
+During Docker or state outages, existing incidents remain open until a fresh
+observation can confirm recovery.
 
 ## Build
 
@@ -542,8 +633,9 @@ against the checksums published beside it:
 bedrock upgrade --version 0.7.5
 ```
 
-`scripts/install-release.sh 0.7.5 <host>...` is the bootstrap, for a machine
-that has no bedrock on it yet.
+`bedrock --target <name> host bootstrap --profile <file>` provisions a machine
+from a reviewed portable profile. `scripts/install-release.sh 0.7.5 <host>...`
+remains available for initial binary installation.
 
 | Document | What it covers |
 |---|---|
@@ -551,10 +643,22 @@ that has no bedrock on it yet.
 | [docs/ideas.html](docs/ideas.html) | the 37 ideas, and which are tabled |
 | [docs/plan.html](docs/plan.html) | the 0.7 plan, delivered and closed |
 | [docs/blueprint.html](docs/blueprint.html) | why the rewrite happened, written under an older name |
+| [docs/features/targets-and-bootstrap.md](docs/features/targets-and-bootstrap.md) | named machines, portable profiles and integration transfer |
+| [docs/features/compatibility.md](docs/features/compatibility.md) | API/state contracts and upgrade checkpoints |
+| [docs/features/machine-recovery.md](docs/features/machine-recovery.md) | self-contained recovery and rehearsals |
+| [docs/features/safe-moves.md](docs/features/safe-moves.md) | source fencing and deliberate target cutover |
+| [docs/features/release-safety.md](docs/features/release-safety.md) | release rehearsal and data-aware rollback |
+| [docs/features/deployment-sources.md](docs/features/deployment-sources.md) | approved source captures, safe retries and cleanup |
+| [docs/technical/minio-image-availability.md](docs/technical/minio-image-availability.md) | open object-service image distribution issue |
 | [lane/README.md](lane/README.md) | the proving ground |
 
-Every feature is proven on a real machine that is wiped and rebuilt for the
-purpose.
+The disposable lane reports which operational workflows ran and which need
+public DNS, external storage or other explicit prerequisites. Unit checks and
+operational proofs are recorded separately.
+
+Fresh pulls of the pinned MinIO object-service image currently return HTTP 401.
+The [dependency issue](docs/technical/minio-image-availability.md) records the
+evidence and required compatibility checks for a replacement.
 
 ## License
 

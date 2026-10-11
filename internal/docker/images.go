@@ -14,10 +14,11 @@ import (
 
 // Image is an image bedrock built.
 type Image struct {
-	ID     string
-	Tags   []string
-	Labels map[string]string
-	Size   int64
+	ID      string
+	Tags    []string
+	Digests []string
+	Labels  map[string]string
+	Size    int64
 }
 
 // Describe names an image the way a person reads it.
@@ -25,7 +26,8 @@ func (i Image) Describe() string {
 	if len(i.Tags) > 0 {
 		return i.Tags[0]
 	}
-	return strings.TrimPrefix(i.ID, "sha256:")[:12]
+	id := strings.TrimPrefix(i.ID, "sha256:")
+	return id[:min(12, len(id))]
 }
 
 // OwnedImages lists the images bedrock built.
@@ -45,7 +47,7 @@ func (e *Engine) OwnedImages(ctx context.Context) ([]Image, error) {
 				tags = append(tags, t)
 			}
 		}
-		out = append(out, Image{ID: img.ID, Tags: tags, Labels: img.Labels, Size: img.Size})
+		out = append(out, Image{ID: img.ID, Tags: tags, Digests: img.RepoDigests, Labels: img.Labels, Size: img.Size})
 	}
 	return out, nil
 }

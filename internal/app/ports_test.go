@@ -136,6 +136,9 @@ func TestADeployIsRefusedAPortAnotherAppHolds(t *testing.T) {
 	// Another app on the same port and protocol is.
 	other := headscale(t)
 	other.App = "stun"
+	otherWorkload := other.Workloads["server"]
+	otherWorkload.Routes[0].Host = "stun.example.com"
+	other.Workloads["server"] = otherWorkload
 	_, err = d.rollout(ctx, other, "20260921-120000", &buildFrom{source: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "3478/udp (for server) is already published by headscale's server") {
 		t.Fatalf("a clash on 3478/udp: %v", err)

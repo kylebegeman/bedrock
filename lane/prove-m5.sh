@@ -10,16 +10,13 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=/dev/null
-. "$here/hostinger.env"
-: "${LANE_DOMAIN:?set LANE_DOMAIN in lane/hostinger.env; see hostinger.env.example}"
-: "${LANE_DW_CHAPTERS:?set LANE_DW_CHAPTERS in lane/hostinger.env; see hostinger.env.example}"
+# shellcheck source=lane/common.sh
+. "$here/common.sh"
+: "${LANE_DOMAIN:?set LANE_DOMAIN in the lane configuration; see ssh.env.example}"
+: "${LANE_DW_CHAPTERS:?set LANE_DW_CHAPTERS in the lane configuration; see ssh.env.example}"
 export LANE_DOMAIN LANE_DW_CHAPTERS
-ssh_opts=(-i "$KEY" -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes
-  -o UserKnownHostsFile="$here/known_hosts" -o StrictHostKeyChecking=yes -o ConnectTimeout=10)
-box="root@$HOST"
 run() { ssh "${ssh_opts[@]}" "$box" "$@"; }
-put() { scp -q "${ssh_opts[@]}" "$1" "$box:$2"; }
+put() { scp -q "${scp_opts[@]}" "$1" "$box:$2"; }
 fetch() { curl -sS --max-time 30 "$@"; }
 quiet() { grep -v '^  \.\.\.  ' ; }
 mask() { sed -E 's/^  [0-9a-f]{48}$/  (48-character password shown once; masked in this transcript)/'; }
@@ -40,8 +37,8 @@ MAILPIT="axllent/mailpit:v1.31.2@sha256:74d609a42ec279aa63c6b4622a6fa9b5408d1ad5
 MINIO="quay.io/minio/minio:latest"
 
 echo "== build and install"
-(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/bedrock-linux-amd64 ./cmd/bedrock)
-put "$here/../bin/bedrock-linux-amd64" /usr/local/bin/bedrock.new
+(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -o bin/bedrock-linux-$LANE_ARCH ./cmd/bedrock)
+put "$here/../bin/bedrock-linux-$LANE_ARCH" /usr/local/bin/bedrock.new
 run 'chmod 755 /usr/local/bin/bedrock.new && mv -f /usr/local/bin/bedrock.new /usr/local/bin/bedrock && bedrock daemon install >/dev/null && bedrock version'
 run 'bedrock ps' | grep -q dragon-writer || fail "run prove-m4.sh first; Dragon Writer isn't deployed"
 

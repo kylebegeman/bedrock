@@ -22,6 +22,9 @@ import (
 // take the exclusive lock before stopping writers. A file lock also covers CLI
 // jobs with stdin, which run outside the daemon process and its operation lock.
 func lockAppData(ctx context.Context, stateFile, app string, exclusive bool) (func(), error) {
+	if app != manifest.ReservedApp && !manifest.ValidApp(app) {
+		return nil, fmt.Errorf("%q is not a valid app name", app)
+	}
 	dir := filepath.Join(filepath.Dir(stateFile), "locks")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -62,6 +65,18 @@ func AcquireDataAccess(ctx context.Context, stateFile, app string) (func(), erro
 	if err != nil {
 		return nil, err
 	}
+	if err := CheckMachineRecoveryWriteAccess(stateFile); err != nil {
+		unlock()
+		return nil, err
+	}
+	if err := CheckMigrationAccess(stateFile, app); err != nil {
+		unlock()
+		return nil, err
+	}
+	if err := CheckReleaseDataAccess(ctx, stateFile, app); err != nil {
+		unlock()
+		return nil, err
+	}
 	if _, err := os.Stat(quiesceFile(stateFile, app)); !errors.Is(err, os.ErrNotExist) {
 		unlock()
 		return nil, fmt.Errorf("%s has an unfinished backup pause; recover the backup before running commands", app)
@@ -83,6 +98,19 @@ func RecoverBackupPauses(ctx context.Context, stateFile string) error {
 	defer e.Close()
 	for _, file := range files {
 		app := strings.TrimSuffix(filepath.Base(file), ".quiesce.json")
+		fenced, err := MigrationSourceFenced(stateFile, app)
+		if err != nil {
+			return err
+		}
+		if fenced {
+			continue
+		}
+		if err := CheckReleaseDataAccess(ctx, stateFile, app); err != nil {
+			if errors.Is(err, ErrReleaseRestorePending) {
+				continue
+			}
+			return err
+		}
 		unlock, err := lockAppData(ctx, stateFile, app, true)
 		if err != nil {
 			return err

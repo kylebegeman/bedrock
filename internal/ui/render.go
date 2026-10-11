@@ -10,6 +10,7 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode"
 
 	"golang.org/x/term"
 
@@ -46,8 +47,7 @@ func New(out io.Writer, tty, jsonMode bool) *Renderer {
 
 // IsTerminal reports whether f is a terminal.
 func IsTerminal(f *os.File) bool {
-	info, err := f.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(f.Fd()))
 }
 
 // Event renders one event.
@@ -138,6 +138,7 @@ func times(n int) string {
 // running shows the current step's line. In a terminal it replaces the
 // line already on screen.
 func (r *Renderer) running(line string) {
+	line = terminalText(line)
 	if !r.tty {
 		r.println(line)
 		return
@@ -159,7 +160,22 @@ func (r *Renderer) endLine() {
 
 func (r *Renderer) println(s string) {
 	r.endLine()
-	fmt.Fprintln(r.out, s)
+	fmt.Fprintln(r.out, terminalText(s))
+}
+
+// Workload logs and remote errors can contain terminal commands, including
+// clipboard writes. Human output shows those bytes as text; JSON keeps the
+// original values for programs that explicitly request them.
+func terminalText(s string) string {
+	var b strings.Builder
+	for _, ch := range s {
+		if unicode.IsControl(ch) && ch != '\n' && ch != '\t' {
+			fmt.Fprintf(&b, "\\x%02x", ch)
+		} else {
+			b.WriteRune(ch)
+		}
+	}
+	return b.String()
 }
 
 // Plan prints a plan the way --plan shows it.
@@ -228,6 +244,39 @@ func (r *Renderer) Receipt(rc *kernel.Receipt) {
 			s += ": " + st.Error
 		}
 		r.println(s)
+	}
+}
+
+// Output prints explicitly requested diagnostic tails. The label stays clear
+// that journal tails cannot reconstruct the complete log or live output.
+func (r *Renderer) Output(saved *kernel.OperationOutput) {
+	if r.json {
+		_ = r.enc.Encode(saved)
+		return
+	}
+	r.println(fmt.Sprintf("%s: saved output tails (up to %d lines per execution; not a complete log)", saved.ID, saved.TailLinesPerExecution))
+	for _, st := range saved.Steps {
+		r.println(fmt.Sprintf("  %d. %s (%s)", st.Index+1, st.Name, st.Status))
+		if st.Error != "" {
+			r.println("     error: " + st.Error)
+		}
+		if st.Output == "" {
+			note := "no output was saved"
+			switch st.Status {
+			case state.StepPending:
+				note = "this step has not run"
+			case state.StepRunning:
+				note = "output is saved when this execution finishes; none available yet"
+			}
+			r.println("     " + note)
+			continue
+		}
+		for _, line := range strings.Split(strings.TrimSuffix(st.Output, "\n"), "\n") {
+			r.println("     | " + line)
+		}
+		if st.Status == state.StepRunning {
+			r.println("     this execution is running; its output is saved when it finishes")
+		}
 	}
 }
 

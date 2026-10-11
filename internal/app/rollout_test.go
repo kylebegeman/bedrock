@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kylebegeman/bedrock/internal/docker/dockertest"
 	"github.com/kylebegeman/bedrock/internal/kernel"
 	"github.com/kylebegeman/bedrock/internal/manifest"
 	"github.com/kylebegeman/bedrock/internal/restic"
@@ -137,7 +138,7 @@ func TestTheDeployPlanMakesSecretsBeforeDataAndReleasesBeforeStart(t *testing.T)
 	for _, s := range plan.Steps {
 		names = append(names, s.Name)
 	}
-	want := []string{"record", "edge", "dns", "secrets", "data", "build-core-api", "pull-objects-setup", "build-runner", "release", "start", "ready", "switch", "certificates", "retire"}
+	want := []string{"record", "edge", "dns", "secrets", "data", "build-core-api", "pull-objects-setup", "build-runner", "release-checkpoint", "release", "start", "ready", "switch", "certificates", "retire"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("steps\n %v\nwant\n %v", names, want)
 	}
@@ -657,5 +658,62 @@ func TestAPreviewPlanInheritsItsParentsSecretsBeforeMakingItsOwn(t *testing.T) {
 	}
 	if _, again, _ := sec.LoadCurrent("loom"); again != version || !strings.Contains(out.String(), "already holds") {
 		t.Fatalf("a second inherit wrote a version: %d then %d, %q", version, again, out.String())
+	}
+}
+
+func TestPulledImagesStayPinnedWhenTheTagChanges(t *testing.T) {
+	ctx := context.Background()
+	store := releaseTestStore(t)
+	fake := dockertest.New(t)
+	digest := "example/app@sha256:" + strings.Repeat("a", 64)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		path := strings.TrimPrefix(req.URL.Path, "/v"+dockertest.APIVersion)
+		if strings.HasPrefix(path, "/images/") && strings.HasSuffix(path, "/json") {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"Id": "sha256:" + strings.Repeat("a", 64), "RepoDigests": []string{digest}, "Config": map[string]any{"User": "1000"}})
+			return
+		}
+		fake.ServeHTTP(w, req)
+	}))
+	defer proxy.Close()
+	t.Setenv("DOCKER_HOST", "tcp"+strings.TrimPrefix(proxy.URL, "http"))
+	m, err := manifest.Parse([]byte(`app: site
+workloads:
+  web: {kind: worker, image: example/app:latest}
+  release: {kind: release, image: example/app:latest, command: [migrate]}
+  cron: {kind: cron, image: example/app:latest, schedule: "0 0 * * *", command: [tidy]}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(m)
+	if err := store.SaveRevision(ctx, state.Revision{App: m.App, ID: "candidate", Status: state.RevisionFailed, Manifest: raw, CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	r := &rollout{m: m, revision: "candidate", store: store, images: map[string]string{}}
+	defer func() {
+		if r.engine != nil {
+			r.engine.Close()
+		}
+	}()
+	if err := r.imageStep(buildGroups(m)[0]).Apply(ctx, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	// A registry tag moves independently of revision history. All three roles
+	// must still start the code that was selected during the build/pull step.
+	pinned := digest
+	digest = "example/app@sha256:" + strings.Repeat("b", 64)
+	rev, err := store.GetRevision(ctx, m.App, "candidate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range m.WorkloadNames() {
+		spec, err := containerSpec(m, name, m.Workloads[name], rev.ID, rev.Images[name], nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if spec.Image != pinned {
+			t.Fatalf("%s would run %q after the tag moved; want pinned %q", name, spec.Image, pinned)
+		}
 	}
 }

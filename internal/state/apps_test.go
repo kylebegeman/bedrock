@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -145,5 +146,28 @@ func TestRemovingAnAppForgetsItsRunsSignalsIncidentAndHookButNotItsBackups(t *te
 	}
 	if h, _ := s.GitHookFor(ctx, "other"); h == nil {
 		t.Fatal("another app's webhook went")
+	}
+}
+
+func TestActivateMissingRevisionPreservesExistingActive(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+	now := time.Now().UTC()
+	if err := s.SaveRevision(ctx, Revision{App: "hello", ID: "one", Status: RevisionActive, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Activate(ctx, "hello", "one", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Activate(ctx, "hello", "missing", now.Add(time.Minute)); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("activation of missing revision: %v", err)
+	}
+	rev, err := s.RevisionWithStatus(ctx, "hello", RevisionActive)
+	if err != nil || rev == nil || rev.ID != "one" {
+		t.Fatalf("active revision changed: %+v %v", rev, err)
+	}
+	apps, err := s.Apps(ctx)
+	if err != nil || len(apps) != 1 || apps[0].ActiveRevision != "one" {
+		t.Fatalf("registry changed: %+v %v", apps, err)
 	}
 }

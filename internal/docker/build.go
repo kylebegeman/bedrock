@@ -33,10 +33,31 @@ type BuildSpec struct {
 // Build runs docker buildx at low priority, pushes the image to the local
 // registry and returns its digest reference. Output streams to out.
 func Build(ctx context.Context, spec BuildSpec, out io.Writer) error {
-	args := []string{"-n", "19", "ionice", "-c", "3", "docker", "buildx", "build", "--load", "--progress=plain", "-t", spec.Ref}
-	if spec.Dockerfile != "" {
-		args = append(args, "-f", filepath.Join(spec.Context, spec.Dockerfile))
+	dockerfile := spec.Dockerfile
+	if dockerfile == "" {
+		dockerfile = "Dockerfile"
 	}
+	if !filepath.IsLocal(dockerfile) || strings.ContainsRune(dockerfile, '\x00') {
+		return fmt.Errorf("Dockerfile must be relative to its build context and stay inside it")
+	}
+	buildContext, err := filepath.Abs(spec.Context)
+	if err != nil {
+		return fmt.Errorf("build context: %w", err)
+	}
+	root, err := os.OpenRoot(buildContext)
+	if err != nil {
+		return fmt.Errorf("build context: %w", err)
+	}
+	defer root.Close()
+	info, err := root.Stat(dockerfile)
+	if err != nil {
+		return fmt.Errorf("Dockerfile inside build context: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("Dockerfile inside build context must be a regular file")
+	}
+	args := []string{"-n", "19", "ionice", "-c", "3", "docker", "buildx", "build", "--load", "--progress=plain", "-t", spec.Ref}
+	args = append(args, "-f", filepath.Join(buildContext, dockerfile))
 	if spec.Target != "" {
 		args = append(args, "--target", spec.Target)
 	}
@@ -56,7 +77,7 @@ func Build(ctx context.Context, spec BuildSpec, out io.Writer) error {
 	for _, k := range labelKeys {
 		args = append(args, "--label", k+"="+spec.Labels[k])
 	}
-	args = append(args, spec.Context)
+	args = append(args, buildContext)
 	if err := run(ctx, out, "nice", args...); err != nil {
 		return fmt.Errorf("build %s: %w", spec.Ref, err)
 	}
@@ -111,6 +132,10 @@ const (
 )
 
 func copyTree(from, to string) error {
+	from, err := filepath.EvalSymlinks(from)
+	if err != nil {
+		return err
+	}
 	info, err := os.Stat(from)
 	if err != nil {
 		return err
@@ -130,11 +155,21 @@ func copyTree(from, to string) error {
 		if !d.Type().IsRegular() {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		src, err := os.Open(path)
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(target, data, 0o644)
+		defer src.Close()
+		dst, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(dst, src)
+		closeErr := dst.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		return closeErr
 	})
 }
 
