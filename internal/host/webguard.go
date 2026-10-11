@@ -22,6 +22,7 @@ const (
 	webGuardScriptPath = "/etc/bedrock/web-guard.sh"
 	webGuardUnitName   = "bedrock-web-guard.service"
 	webGuardUnitPath   = "/etc/systemd/system/" + webGuardUnitName
+	webGuardDockerPath = "/etc/systemd/system/docker.service.d/bedrock-web-guard.conf"
 )
 
 // guardPort is one published port of the edge's.
@@ -55,6 +56,13 @@ ExecStart=/bin/sh ` + webGuardScriptPath + `
 
 [Install]
 WantedBy=multi-user.target
+`
+
+// Requiring the guard from Docker's own unit makes a failed restore prevent
+// Docker startup. This drop-in exists only while the Cloudflare guard is kept.
+const webGuardDockerDependency = `[Unit]
+Requires=` + webGuardUnitName + `
+After=` + webGuardUnitName + `
 `
 
 // webGuardScript writes the guard as a shell script: run, it puts the
@@ -103,20 +111,33 @@ func webGuardScript(ranges []string, ports []guardPort) string {
 			w("if command -v ip6tables >/dev/null 2>&1 && ip6tables -S >/dev/null 2>&1; then")
 			indent = "  "
 		}
-		// The chain is filled before anything jumps to it, so the edge is
-		// never closed to Cloudflare on the way.
-		w("%s%s -N %s 2>/dev/null || %s -F %s", indent, fam.ipt, webGuardChain, fam.ipt, webGuardChain)
-		for _, s := range fam.sources {
-			w("%s%s -A %s -s %s -j RETURN", indent, fam.ipt, webGuardChain, s)
-		}
-		w("%s%s -A %s -j DROP", indent, fam.ipt, webGuardChain)
-		// Docker adopts a DOCKER-USER that is already there, and jumps to it
-		// from FORWARD when it starts.
+		// Preserve the existing guard until one restore transaction commits the
+		// replacement chain and hooks. --noflush retains all other filter rules;
+		// only the declared BEDROCK-WEB chain is replaced.
 		w("%s%s -N DOCKER-USER 2>/dev/null || true", indent, fam.ipt)
-		for _, p := range ports {
-			w("%swhile %s -D DOCKER-USER %s 2>/dev/null; do :; done", indent, fam.ipt, hookSpec(p))
-			w("%s%s -I DOCKER-USER %s", indent, fam.ipt, hookSpec(p))
+		w("%sbedrock_web_hooks=$(%s -S DOCKER-USER)", indent, fam.ipt)
+		w("%s{", indent)
+		w("%s  cat <<'BEDROCK_WEB_CHAIN'", indent)
+		w("*filter")
+		w(":%s - [0:0]", webGuardChain)
+		for _, source := range fam.sources {
+			w("-A %s -s %s -j RETURN", webGuardChain, source)
 		}
+		w("-A %s -j DROP", webGuardChain)
+		w("BEDROCK_WEB_CHAIN")
+		for _, port := range ports {
+			spec := hookSpec(port)
+			// Delete every matching old hook from the snapshot in the same
+			// transaction, then insert one before other DOCKER-USER rules.
+			w("%s  printf '%%s\\n' \"$bedrock_web_hooks\" | while IFS= read -r bedrock_web_rule; do", indent)
+			w("%s    if [ \"$bedrock_web_rule\" = '-A DOCKER-USER %s' ]; then", indent, spec)
+			w("%s      printf '%%s\\n' '-D DOCKER-USER %s'", indent, spec)
+			w("%s    fi", indent)
+			w("%s  done", indent)
+			w("%s  printf '%%s\\n' '-I DOCKER-USER %s'", indent, spec)
+		}
+		w("%s  printf '%%s\\n' COMMIT", indent)
+		w("%s} | %s-restore --wait --noflush", indent, fam.ipt)
 		if indent != "" {
 			w("fi")
 		}
@@ -133,60 +154,103 @@ func hookSpec(p guardPort) string {
 
 // WebGuard is what the facts say of the guard.
 type WebGuard struct {
-	// Sources are the ranges the guard lets through, IPv4.
+	// Sources are the allowed ranges in this address family, in rule order.
 	Sources []string `json:"sources,omitempty"`
 	// Drops is whether the guard drops what it does not let through.
 	Drops bool `json:"drops"`
-	// Hooks is how many of the edge's ports DOCKER-USER sends to it.
+	// Malformed means the owned guard contains unexpected rules or duplicate hooks.
+	Malformed bool `json:"malformed,omitempty"`
+	// Hooks counts the jumps for the edge's published ports.
 	Hooks int `json:"hooks"`
+	// IPv6 is the corresponding guard when IPv6 filtering is available.
+	IPv6 *WebGuard `json:"ipv6,omitempty"`
 }
 
 // InPlace reports whether the guard exists, drops the rest and is hooked
 // in for every port the edge publishes.
-func (g WebGuard) InPlace() bool { return g.Drops && g.Hooks >= len(edgePorts) }
+func (g WebGuard) InPlace() bool {
+	return !g.Malformed && g.Drops && g.Hooks == len(edgePorts) && (g.IPv6 == nil || g.IPv6.InPlace())
+}
 
-// gatherWebGuard reads the guard out of iptables.
+// Present reports whether either family still has guard rules or hooks.
+func (g WebGuard) Present() bool {
+	return g.Drops || g.Hooks > 0 || len(g.Sources) > 0 || (g.IPv6 != nil && g.IPv6.Present())
+}
+
+// gatherWebGuard reads both available netfilter families.
 func gatherWebGuard(ctx context.Context, env Env) WebGuard {
+	g := gatherWebGuardFamily(ctx, env, "iptables")
+	if _, err := env.Run(ctx, "ip6tables", "-S"); err == nil {
+		v6 := gatherWebGuardFamily(ctx, env, "ip6tables")
+		g.IPv6 = &v6
+	}
+	return g
+}
+
+func gatherWebGuardFamily(ctx context.Context, env Env, ipt string) WebGuard {
 	var g WebGuard
-	chain, err := env.Run(ctx, "iptables", "-S", webGuardChain)
+	chain, err := env.Run(ctx, ipt, "-S", webGuardChain)
 	if err != nil {
 		return g
 	}
 	for _, line := range strings.Split(chain, "\n") {
 		f := strings.Fields(line)
 		switch {
-		case len(f) == 6 && f[0] == "-A" && f[2] == "-s" && f[4] == "-j" && f[5] == "RETURN":
+		case len(f) == 0:
+		case len(f) == 2 && f[0] == "-N" && f[1] == webGuardChain:
+		case len(f) == 6 && f[0] == "-A" && f[1] == webGuardChain && f[2] == "-s" && f[4] == "-j" && f[5] == "RETURN":
+			if g.Drops {
+				g.Malformed = true
+			}
 			g.Sources = append(g.Sources, f[3])
-		case len(f) == 4 && f[0] == "-A" && f[2] == "-j" && f[3] == "DROP":
+		case len(f) == 4 && f[0] == "-A" && f[1] == webGuardChain && f[2] == "-j" && f[3] == "DROP":
+			if g.Drops {
+				g.Malformed = true
+			}
 			g.Drops = true
+		default:
+			// Bedrock owns this chain completely. An ignored ACCEPT or RETURN
+			// could bypass the final DROP while all expected sources remain.
+			g.Malformed = true
 		}
 	}
-	if hooks, err := env.Run(ctx, "iptables", "-S", "DOCKER-USER"); err == nil {
+	if hooks, err := env.Run(ctx, ipt, "-S", "DOCKER-USER"); err == nil {
 		for _, p := range edgePorts {
-			if strings.Contains(hooks, fmt.Sprintf("-p %s -m conntrack --ctorigdstport %d --ctdir ORIGINAL -j %s", p.Proto, p.Port, webGuardChain)) {
-				g.Hooks++
+			matches := 0
+			for _, line := range strings.Split(hooks, "\n") {
+				if strings.TrimSpace(line) == "-A DOCKER-USER "+hookSpec(p) {
+					matches++
+				}
+			}
+			g.Hooks += matches
+			if matches > 1 {
+				g.Malformed = true
 			}
 		}
 	}
 	return g
 }
 
-// guardCurrent reports whether the guard lets exactly the private
-// networks and Cloudflare's IPv4 ranges through.
+// guardCurrent reports whether every available guard lets exactly the
+// private networks and Cloudflare's corresponding ranges through.
 func guardCurrent(g WebGuard, ranges []string) bool {
+	return guardFamilyCurrent(g, ranges, false) && (g.IPv6 == nil || guardFamilyCurrent(*g.IPv6, ranges, true))
+}
+
+func guardFamilyCurrent(g WebGuard, ranges []string, ipv6 bool) bool {
 	if !g.InPlace() {
 		return false
 	}
 	want := slices.Clone(privateV4)
+	if ipv6 {
+		want = slices.Clone(privateV6)
+	}
 	for _, r := range ranges {
-		if !strings.Contains(r, ":") {
+		if strings.Contains(r, ":") == ipv6 {
 			want = append(want, r)
 		}
 	}
-	have := slices.Clone(g.Sources)
-	slices.Sort(want)
-	slices.Sort(have)
-	return slices.Equal(want, have)
+	return slices.Equal(want, g.Sources)
 }
 
 // ensureWebGuard puts the guard in place now and at every boot.
@@ -198,7 +262,11 @@ func ensureWebGuard(ctx context.Context, env Env, out io.Writer, ranges []string
 	if err != nil {
 		return err
 	}
-	if changed {
+	dependencyChanged, err := env.WriteFile(webGuardDockerPath, webGuardDockerDependency, 0o644)
+	if err != nil {
+		return err
+	}
+	if changed || dependencyChanged {
 		if _, err := env.Run(ctx, "systemctl", "daemon-reload"); err != nil {
 			return err
 		}
@@ -215,7 +283,7 @@ func ensureWebGuard(ctx context.Context, env Env, out io.Writer, ranges []string
 
 // removeWebGuard takes the guard away, when the web is open to anyone.
 func removeWebGuard(ctx context.Context, env Env, out io.Writer) error {
-	if !env.Exists(webGuardScriptPath) && !env.Exists(webGuardUnitPath) {
+	if !env.Exists(webGuardScriptPath) && !env.Exists(webGuardUnitPath) && !env.Exists(webGuardDockerPath) {
 		return nil
 	}
 	if env.Exists(webGuardScriptPath) {
@@ -228,7 +296,7 @@ func removeWebGuard(ctx context.Context, env Env, out io.Writer) error {
 			return err
 		}
 	}
-	for _, p := range []string{webGuardUnitPath, webGuardScriptPath} {
+	for _, p := range []string{webGuardUnitPath, webGuardScriptPath, webGuardDockerPath} {
 		if err := os.Remove(env.Path(p)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}

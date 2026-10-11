@@ -2,6 +2,8 @@ package state
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 )
 
@@ -72,6 +74,22 @@ func (s *Store) FinishBackupRun(ctx context.Context, id int64, r BackupRun) erro
 }
 
 const backupRunColumns = `id, app, kind, started_at, finished_at, ok, snapshot, snapshot_at, files, bytes, detail, error`
+
+// BackupRun returns the recorded run identified by id.
+func (s *Store) BackupRun(ctx context.Context, id int64) (BackupRun, error) {
+	var r BackupRun
+	var started, finished, snapshotAt int64
+	err := s.db.QueryRowContext(ctx, `SELECT `+backupRunColumns+` FROM backup_runs WHERE id = ?`, id).Scan(
+		&r.ID, &r.App, &r.Kind, &started, &finished, &r.OK, &r.Snapshot, &snapshotAt, &r.Files, &r.Bytes, &r.Detail, &r.Error)
+	if errors.Is(err, sql.ErrNoRows) {
+		return BackupRun{}, ErrNotFound
+	}
+	if err != nil {
+		return BackupRun{}, err
+	}
+	r.StartedAt, r.FinishedAt, r.SnapshotAt = fromUnix(started), fromUnix(finished), fromUnix(snapshotAt)
+	return r, nil
+}
 
 // BackupRuns lists runs newest first. An empty app means every app; an
 // empty kind means every kind.

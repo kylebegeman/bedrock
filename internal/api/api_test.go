@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -139,4 +140,181 @@ func TestOnlyOneLocalOperationRunsAtATime(t *testing.T) {
 		t.Fatalf("the lock was not let go: %v", err)
 	}
 	again()
+}
+
+type lifecycleDefinition struct {
+	started chan struct{}
+	stopped chan struct{}
+	release chan struct{}
+}
+
+func (l lifecycleDefinition) Kind() string { return "test.lifecycle" }
+func (l lifecycleDefinition) Plan(context.Context, json.RawMessage) (*kernel.Plan, error) {
+	return &kernel.Plan{Steps: []kernel.Step{{Name: "wait", Apply: func(ctx context.Context, _ io.Writer) error {
+		close(l.started)
+		select {
+		case <-ctx.Done():
+			close(l.stopped)
+			return ctx.Err()
+		case <-l.release:
+			return nil
+		}
+	}}}}, nil
+}
+func TestDaemonLifetimeCancelsDetachedClientOperations(t *testing.T) {
+	l := lifecycleDefinition{started: make(chan struct{}), stopped: make(chan struct{})}
+	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	reg := kernel.Registry{}
+	reg.Add(l)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv := &Server{Engine: kernel.New(store, reg, "test"), Store: store}
+	// A server lifetime is independent of the requesting client's lifetime.
+	// The daemon supplies it during startup.
+	srv.Lifetime = ctx
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	client := NewClient(ts.Client(), ts.URL)
+	done := make(chan error, 1)
+	go func() { _, err := client.Run(context.Background(), l.Kind(), nil, func(kernel.Event) {}); done <- err }()
+	select {
+	case <-l.started:
+	case <-time.After(time.Second):
+		t.Fatal("operation did not start")
+	}
+	cancel()
+	select {
+	case <-l.stopped:
+	case <-time.After(time.Second):
+		t.Fatal("daemon shutdown left operation running")
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("operation stream did not close")
+	}
+}
+
+func TestRunRequestRejectsTrailingJSON(t *testing.T) {
+	client, _ := server(t)
+	body := `{"kind":"kernel.exercise","input":{"dir":"/unused","steps":1},"plan_only":true} {"unexpected":true}`
+	resp, err := client.http.Post(client.base+"/v1/operations", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 400 {
+		t.Fatalf("trailing request accepted: %d", resp.StatusCode)
+	}
+}
+func TestClientDisconnectDoesNotCancelDaemonOperation(t *testing.T) {
+	l := lifecycleDefinition{started: make(chan struct{}), stopped: make(chan struct{}), release: make(chan struct{})}
+	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	reg := kernel.Registry{}
+	reg.Add(l)
+	daemonCtx, stopDaemon := context.WithCancel(context.Background())
+	defer stopDaemon()
+	srv := &Server{Engine: kernel.New(store, reg, "test"), Store: store, Lifetime: daemonCtx}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	client := NewClient(ts.Client(), ts.URL)
+	clientCtx, stopClient := context.WithCancel(context.Background())
+	defer stopClient()
+	done := make(chan error, 1)
+	go func() { _, err := client.Run(clientCtx, l.Kind(), nil, func(kernel.Event) {}); done <- err }()
+	select {
+	case <-l.started:
+	case <-time.After(time.Second):
+		t.Fatal("operation did not start")
+	}
+	stopClient()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("client did not disconnect")
+	}
+	select {
+	case <-l.stopped:
+		t.Fatal("client disconnect canceled daemon operation")
+	default:
+	}
+	close(l.release)
+	deadline := time.Now().Add(time.Second)
+	for {
+		ops, err := store.List(context.Background(), 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ops) == 1 && ops[0].Status == state.Succeeded {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("operation did not finish: %+v", ops)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := srv.Drain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.RunLocked(context.Background(), l.Kind(), nil, func(kernel.Event) {}); err == nil {
+		t.Fatal("drained server accepted new work")
+	}
+}
+
+type lifecyclePlan struct{ started, stopped chan struct{} }
+
+func (l lifecyclePlan) Kind() string { return "test.lifecycle-plan" }
+func (l lifecyclePlan) Plan(ctx context.Context, _ json.RawMessage) (*kernel.Plan, error) {
+	close(l.started)
+	<-ctx.Done()
+	close(l.stopped)
+	return nil, ctx.Err()
+}
+func TestDaemonLifetimeTracksAndCancelsPlanRequests(t *testing.T) {
+	l := lifecyclePlan{started: make(chan struct{}), stopped: make(chan struct{})}
+	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	reg := kernel.Registry{}
+	reg.Add(l)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv := &Server{Engine: kernel.New(store, reg, "test"), Store: store, Lifetime: ctx}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	client := NewClient(ts.Client(), ts.URL)
+	done := make(chan error, 1)
+	go func() { _, err := client.Plan(context.Background(), l.Kind(), nil); done <- err }()
+	select {
+	case <-l.started:
+	case <-time.After(time.Second):
+		t.Fatal("plan did not start")
+	}
+	cancel()
+	select {
+	case <-l.stopped:
+	case <-time.After(time.Second):
+		t.Fatal("daemon shutdown left planning active")
+	}
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("canceled plan reported success")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("plan stream did not close")
+	}
+	if err := srv.Drain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 }

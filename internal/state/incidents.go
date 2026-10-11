@@ -81,6 +81,12 @@ func (s *Store) OpenIncidents(ctx context.Context) ([]Incident, error) {
 	return s.queryIncidents(ctx, `SELECT `+incidentColumns+` FROM incidents WHERE resolved_at = 0 ORDER BY opened_at, id`)
 }
 
+// PendingResolvedIncidentNotices retains failed recovery notices until the
+// watcher successfully delivers them and clears notify_error.
+func (s *Store) PendingResolvedIncidentNotices(ctx context.Context) ([]Incident, error) {
+	return s.queryIncidents(ctx, `SELECT `+incidentColumns+` FROM incidents WHERE resolved_at != 0 AND notify_error != '' ORDER BY resolved_at, id`)
+}
+
 // OpenIncidentByKey returns the open incident for a key, or nil.
 func (s *Store) OpenIncidentByKey(ctx context.Context, key string) (*Incident, error) {
 	rows, err := s.queryIncidents(ctx, `SELECT `+incidentColumns+` FROM incidents WHERE resolved_at = 0 AND key = ? ORDER BY id DESC LIMIT 1`, key)

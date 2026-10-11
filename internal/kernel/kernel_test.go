@@ -337,3 +337,70 @@ func TestAJournalThatNoLongerFitsItsPlanEndsTheOperation(t *testing.T) {
 		t.Fatal("a step ran against a journal that doesn't fit")
 	}
 }
+
+// Recovery must retain ownership while rebuilding and undoing a plan, even
+// when either phase lasts longer than the lease originally claimed.
+type leaseRecoveryPlan struct {
+	planWait func(context.Context) error
+	undoWait func(context.Context) error
+}
+
+func (leaseRecoveryPlan) Kind() string { return "test.lease-recovery" }
+func (d leaseRecoveryPlan) Plan(ctx context.Context, _ json.RawMessage) (*Plan, error) {
+	if d.planWait != nil {
+		if err := d.planWait(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return &Plan{Target: "here", Recovery: Compensate, Steps: []Step{{Name: "only", Apply: func(context.Context, io.Writer) error { return nil }, Undo: func(ctx context.Context, _ io.Writer) error {
+		if d.undoWait != nil {
+			return d.undoWait(ctx)
+		}
+		return nil
+	}}}}, nil
+}
+func TestRecoveryRenewsLeaseWhilePlanningAndCompensating(t *testing.T) {
+	for _, phase := range []string{"plan", "undo"} {
+		t.Run(phase, func(t *testing.T) {
+			store := newStore(t)
+			reg := Registry{}
+			reg.Add(leaseRecoveryPlan{})
+			first := New(store, reg, "first", WithClock(func() time.Time { return time.Now().Add(-time.Hour) }))
+			first.crashAfterStep = func(int) bool { return true }
+			if _, err := first.Run(context.Background(), "test.lease-recovery", nil, func(Event) {}); !errors.Is(err, errCrashed) {
+				t.Fatal(err)
+			}
+			ops, err := store.List(context.Background(), 1)
+			if err != nil || len(ops) != 1 {
+				t.Fatalf("operations: %v %v", ops, err)
+			}
+			id := ops[0].ID
+			var claimErr error
+			wait := func(ctx context.Context) error {
+				timer := time.NewTimer(150 * time.Millisecond)
+				defer timer.Stop()
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-timer.C:
+				}
+				_, claimErr = store.Claim(ctx, id, "competitor", time.Now(), time.Now().Add(time.Hour))
+				return nil
+			}
+			d := leaseRecoveryPlan{}
+			if phase == "plan" {
+				d.planWait = wait
+			} else {
+				d.undoWait = wait
+			}
+			reg.Add(d)
+			later := New(store, reg, "later", WithLeaseTTL(60*time.Millisecond))
+			if n, err := later.Recover(context.Background(), func(Event) {}); err != nil || n != 1 {
+				t.Fatalf("recover: %d %v", n, err)
+			}
+			if !errors.Is(claimErr, state.ErrLeased) {
+				t.Fatalf("recovery lost its lease during %s: %v", phase, claimErr)
+			}
+		})
+	}
+}

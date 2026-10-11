@@ -42,3 +42,33 @@ func TestDaemonAndFallbackShareMachineOperationLock(t *testing.T) {
 		t.Fatalf("lock not released: %+v %v", receipt, err)
 	}
 }
+
+func TestQueuedDaemonWorkHonorsCancellation(t *testing.T) {
+	for _, kind := range []string{"run", "recover"} {
+		t.Run(kind, func(t *testing.T) {
+			server := &Server{}
+			server.mu.Lock()
+			defer server.mu.Unlock()
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				if kind == "recover" {
+					_, err := server.Recover(ctx, func(kernel.Event) {})
+					done <- err
+				} else {
+					_, err := server.RunLocked(ctx, "test", nil, func(kernel.Event) {})
+					done <- err
+				}
+			}()
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("cancellation: %v", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("queued work ignored cancellation")
+			}
+		})
+	}
+}

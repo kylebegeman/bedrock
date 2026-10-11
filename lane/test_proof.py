@@ -37,6 +37,17 @@ class ProofReports(unittest.TestCase):
             self.assertNotIn(secret, text)
         self.assertIn("redacted", text)
 
+    def test_structured_credentials_and_url_passwords_are_masked(self):
+        values = '\n'.join([
+            '{"password": "json secret with spaces", "api_token":"json-token"}',
+            'DATABASE_URL=postgres://bedrock:url-password@postgres:5432/app',
+            'API_SECRET="quoted secret with spaces"',
+        ])
+        text = PROOF.redact(values)
+        for secret in ("json secret with spaces", "json-token", "url-password", "quoted secret with spaces"):
+            self.assertNotIn(secret, text)
+        self.assertIn("redacted", text)
+
     def test_source_fingerprint_tracks_untracked_source_and_excludes_python_cache(self):
         with tempfile.TemporaryDirectory(prefix="bedrock-fingerprint-test-") as directory:
             root = Path(directory)

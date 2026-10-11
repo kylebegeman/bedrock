@@ -136,6 +136,7 @@ def up(prepared: tuple[str | None, dict] | None = None) -> None:
             raise RuntimeError("An existing VM keeps its recorded resources; RAM cannot be changed by up. "
                                "Use a fresh LANE_VM_STATE directory with a current provider image.")
         print(f"Existing managed VM: {data['container']}", flush=True)
+        command("docker", "start", data["container"])
         wait_ready(data)
         return
     provider_image, resources = prepared if prepared is not None else prepare_provider(memory_mib)
@@ -181,11 +182,13 @@ runcmd:
     if resources["guest_memory_mib"] is not None:
         create_args += ["--env", f"LANE_VM_MEMORY_MIB={resources['guest_memory_mib']}"]
     command(*create_args, provider_image)
-    # Record ownership immediately so a failed boot can be inspected/removed.
+    # Record ownership before any further Docker probe can fail. This receipt
+    # is sufficient to identify and clean up the exact never-booted container.
+    data = {"id": identity, "container": name, "ready": False, **resources}
+    (STATE / "machine.json").write_text(json.dumps(data) + "\n")
     image_id = command("docker", "inspect", "--format", "{{.Image}}", name, capture=True)
     image_sha = command("docker", "run", "--rm", "--entrypoint", "/bin/cat", image_id, "/opt/ubuntu.sha256", capture=True).split()[0]
-    data = {"id": identity, "container": name, "provider_image": image_id, "guest_image_sha256": image_sha,
-            "ready": False, **resources}
+    data.update(provider_image=image_id, guest_image_sha256=image_sha)
     (STATE / "machine.json").write_text(json.dumps(data) + "\n")
     command("docker", "cp", str(STATE / "user-data"), f"{name}:/work/user-data")
     command("docker", "cp", str(STATE / "meta-data"), f"{name}:/work/meta-data")

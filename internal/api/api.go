@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -69,7 +70,67 @@ type RunRequest struct {
 type Server struct {
 	Engine *kernel.Engine
 	Store  *state.Store
-	mu     sync.Mutex
+	// Lifetime bounds work to the daemon rather than an individual client.
+	// Nil retains the standalone server's caller-controlled lifetime.
+	Lifetime context.Context
+	mu       sync.Mutex
+	workMu   sync.Mutex
+	work     sync.WaitGroup
+	stopping bool
+}
+
+// begin binds accepted work to the daemon's lifetime and tracks it for drain.
+func (s *Server) begin(ctx context.Context) (context.Context, func(), error) {
+	s.workMu.Lock()
+	defer s.workMu.Unlock()
+	if s.stopping {
+		return nil, nil, context.Canceled
+	}
+	if s.Lifetime != nil {
+		if err := s.Lifetime.Err(); err != nil {
+			return nil, nil, err
+		}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	stop := func() bool { return false }
+	if s.Lifetime != nil {
+		stop = context.AfterFunc(s.Lifetime, cancel)
+	}
+	s.work.Add(1)
+	return ctx, func() { stop(); cancel(); s.work.Done() }, nil
+}
+
+// Drain stops accepting operations and waits for accepted work to leave the
+// engine. The daemon cancels Lifetime before draining, so leases and subprocesses
+// stop before the state store closes.
+func (s *Server) Drain(ctx context.Context) error {
+	s.workMu.Lock()
+	s.stopping = true
+	s.workMu.Unlock()
+	done := make(chan struct{})
+	go func() { s.work.Wait(); close(done) }()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *Server) lock(ctx context.Context) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if s.mu.TryLock() {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }
 
 // Recover finishes operations left behind by a daemon that died, one at a
@@ -77,7 +138,14 @@ type Server struct {
 // and then keeps sweeping, because a dead daemon's lease can outlive its
 // restart.
 func (s *Server) Recover(ctx context.Context, emit func(kernel.Event)) (int, error) {
-	s.mu.Lock()
+	ctx, done, err := s.begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer done()
+	if err := s.lock(ctx); err != nil {
+		return 0, err
+	}
 	defer s.mu.Unlock()
 	unlock, err := s.lockMachine(ctx)
 	if err != nil {
@@ -90,7 +158,14 @@ func (s *Server) Recover(ctx context.Context, emit func(kernel.Event)) (int, err
 // RunLocked runs an operation the daemon starts on its own clock, such as
 // a scheduled backup, one at a time with everything else the server runs.
 func (s *Server) RunLocked(ctx context.Context, kind string, input json.RawMessage, emit func(kernel.Event)) (*kernel.Receipt, error) {
-	s.mu.Lock()
+	ctx, done, err := s.begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	if err := s.lock(ctx); err != nil {
+		return nil, err
+	}
 	defer s.mu.Unlock()
 	unlock, err := s.lockMachine(ctx)
 	if err != nil {
@@ -193,14 +268,27 @@ func (s *Server) listOperations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rows)
 }
 
+const operationStreamWriteTimeout = 5 * time.Second
+
 func (s *Server) runOperation(w http.ResponseWriter, r *http.Request) {
 	var req RunRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err := decoder.Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("bad request: %w", err))
 		return
 	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, errors.New("bad request: expected one JSON object"))
+		return
+	}
 	if req.PlanOnly {
-		view, err := s.Engine.PlanOnly(r.Context(), req.Kind, req.Input)
+		ctx, done, err := s.begin(r.Context())
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, err)
+			return
+		}
+		defer done()
+		view, err := s.Engine.PlanOnly(ctx, req.Kind, req.Input)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
@@ -211,19 +299,43 @@ func (s *Server) runOperation(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.WriteHeader(http.StatusOK)
-	flusher, _ := w.(http.Flusher)
 	enc := json.NewEncoder(w)
-	emit := func(ev kernel.Event) {
-		_ = enc.Encode(ev)
-		if flusher != nil {
-			flusher.Flush()
+	controller := http.NewResponseController(w)
+	var outputMu sync.Mutex
+	disconnected := false
+	send := func(value any) {
+		outputMu.Lock()
+		defer outputMu.Unlock()
+		if disconnected {
+			return
 		}
+		// A slow event reader cannot hold the machine's mutation queue.
+		// Stop streaming on failure while the journaled operation continues.
+		_ = controller.SetWriteDeadline(time.Now().Add(operationStreamWriteTimeout))
+		if err := enc.Encode(value); err != nil {
+			disconnected = true
+			return
+		}
+		if err := controller.Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			disconnected = true
+			return
+		}
+		_ = controller.SetWriteDeadline(time.Time{})
 	}
+	emit := func(ev kernel.Event) { send(ev) }
 	// The client going away must not stop the operation: it is journaled
 	// and finishes on the daemon's own clock.
-	s.mu.Lock()
+	ctx, done, err := s.begin(context.WithoutCancel(r.Context()))
+	if err != nil {
+		emit(kernel.Event{Type: kernel.EventError, At: time.Now().UTC(), Message: err.Error()})
+		return
+	}
+	defer done()
+	if err := s.lock(ctx); err != nil {
+		emit(kernel.Event{Type: kernel.EventError, At: time.Now().UTC(), Message: err.Error()})
+		return
+	}
 	defer s.mu.Unlock()
-	ctx := context.WithoutCancel(r.Context())
 	unlock, err := s.lockMachine(ctx)
 	if err != nil {
 		emit(kernel.Event{Type: kernel.EventError, At: time.Now().UTC(), Message: err.Error()})
@@ -233,15 +345,12 @@ func (s *Server) runOperation(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.Engine.RunExpecting(ctx, req.Kind, req.Input, req.Expect, emit); err != nil {
 		problem := problemFor(http.StatusBadRequest, err)
 		// Preserve the event shape used by older clients, adding problem fields.
-		_ = enc.Encode(struct {
+		send(struct {
 			kernel.Event
 			Code       string `json:"code"`
 			Retryable  bool   `json:"retryable"`
 			APIVersion int    `json:"api_version"`
 		}{kernel.Event{Type: kernel.EventError, At: time.Now().UTC(), Message: err.Error()}, problem.Code, problem.Retryable, compat.APIVersion})
-		if flusher != nil {
-			flusher.Flush()
-		}
 	}
 }
 

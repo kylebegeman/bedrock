@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -201,5 +202,31 @@ func TestSetupRefusesUnsupportedMachines(t *testing.T) {
 	}
 	if _, err := engine.PlanOnly(context.Background(), SetupKind, profileJSON(t, Profile{Hostname: "Not Valid"})); err == nil {
 		t.Fatal("want a hostname error")
+	}
+}
+
+func TestSwapReconcilePersistsAnAlreadyActiveManagedFile(t *testing.T) {
+	m := setUpBox(t)
+	m.write("/swapfile", "owned swap fixture")
+	m.write("/etc/fstab", "# /swapfile needs to be kept after reboot\n")
+	if err := ensureSwap(context.Background(), m.env(), 4, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(m.read("/etc/fstab"), "\n/swapfile none swap sw 0 0\n") {
+		t.Fatalf("active swap was not persisted: %q", m.read("/etc/fstab"))
+	}
+	if m.ranCommand("mkswap") || m.ranCommand("swapon /swapfile") {
+		t.Fatalf("reconcile reformatted running swap: %v", m.commands())
+	}
+}
+func TestSSHRefusesCommentOnlyAuthorizedKeys(t *testing.T) {
+	m := freshUbuntu(t)
+	allowEverything(m)
+	m.write("/root/.ssh/authorized_keys", "# add an SSH key here\n   # no keys yet\n")
+	if err := ensureSSHKeysOnly(context.Background(), m.env(), io.Discard); err == nil || !strings.Contains(err.Error(), "lock you out") {
+		t.Fatalf("comment-only keys: %v", err)
+	}
+	if m.read(SSHDropIn) != "" {
+		t.Fatal("SSH was changed without a usable key entry")
 	}
 }

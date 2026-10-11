@@ -135,7 +135,15 @@ def guest_memory_bytes(config: str) -> int:
 
 def redact(text: str) -> str:
     text = re.sub(r"AGE-SECRET-KEY-1[A-Z0-9]+", "[redacted private key]", text)
-    text = re.sub(r"(?im)(password|token|key|secret)\s*[=:]\s*[^\s]+", r"\1=[redacted]", text)
+    # JSON diagnostics and quoted assignments may contain spaces and escaped
+    # quotes; replace the whole value before processing legacy plain fields.
+    text = re.sub(r'(?i)("[^"\n]*(?:password|token|key|secret)[^"\n]*"\s*:\s*)"(?:\\.|[^"\\])*"',
+                  r'\1"[redacted]"', text)
+    text = re.sub(r"(?im)((?:password|token|key|secret)\s*[=:]\s*)(?:\"(?:\\.|[^\"\\])*\"|'[^']*'|[^\s]+)",
+                  r"\1[redacted]", text)
+    # A database URL is an ordinary environment field but its userinfo can
+    # carry credentials. Retain the host/path that explain connection failures.
+    text = re.sub(r"(?i)([a-z][a-z0-9+.-]*://)[^\s/@]+@", r"\1[redacted]@", text)
     # Legacy integrations print generated passwords on their own line.
     return re.sub(r"(?m)^\s*[0-9a-f]{48}\s*$", "[redacted generated password]", text)
 

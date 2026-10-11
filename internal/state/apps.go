@@ -133,6 +133,24 @@ func (s *Store) SaveRevision(ctx context.Context, r Revision) error {
 	return err
 }
 
+// CreateRevision records a new revision without replacing existing authority.
+func (s *Store) CreateRevision(ctx context.Context, r Revision) error {
+	images, err := json.Marshal(r.Images)
+	if err != nil {
+		return err
+	}
+	containers, err := json.Marshal(r.Containers)
+	if err != nil {
+		return err
+	}
+	if r.Manifest == nil {
+		r.Manifest = json.RawMessage(`{}`)
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO revisions (app, id, status, manifest, images, containers, source, secrets_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.App, r.ID, string(r.Status), string(r.Manifest), string(images), string(containers), r.Source, r.SecretsVersion, unix(r.CreatedAt))
+	return err
+}
+
 // SetRevisionStatus changes one revision's status.
 func (s *Store) SetRevisionStatus(ctx context.Context, app, id string, status RevisionStatus) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE revisions SET status = ? WHERE app = ? AND id = ?`, string(status), app, id)
@@ -147,6 +165,13 @@ func (s *Store) Activate(ctx context.Context, app, id string, now time.Time) err
 		return err
 	}
 	defer tx.Rollback()
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM revisions WHERE app = ? AND id = ?`, app, id).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE revisions SET status = ? WHERE app = ? AND status = ? AND id <> ?`, string(RevisionRetired), app, string(RevisionPrevious), id); err != nil {
 		return err
 	}

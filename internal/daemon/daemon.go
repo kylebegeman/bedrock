@@ -16,6 +16,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/kylebegeman/bedrock/internal/api"
@@ -161,12 +162,20 @@ func hostname() string {
 // Run serves until ctx ends. Log lines go to logw.
 func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	cfg = cfg.withDefaults()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	logf := lineLogger(logw)
 	// A build whose version says "-broken" is the lane's fixture for a bad
 	// upgrade: it must fail to start so systemd rolls the binary back.
 	if strings.Contains(version.Current().Version, "-broken") {
 		return errors.New("this build is deliberately broken (a lane fixture) and refuses to start")
 	}
+
+	unlockDaemon, err := lockDaemon(cfg.StateDir)
+	if err != nil {
+		return err
+	}
+	defer unlockDaemon()
 
 	store, err := state.Open(filepath.Join(cfg.StateDir, "state.db"))
 	if err != nil {
@@ -184,14 +193,24 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	}
 	// Job runs the last daemon left open are taken up again or closed;
 	// Docker being down only means they wait for the next start.
-	if err := app.ReconcileJobRuns(ctx, store, logf); err != nil {
+	waitAdoptedJobs, err := app.StartJobReconciliation(ctx, store, logf)
+	if err != nil {
 		logf("job runs: %v", err)
 	}
+	defer func() { cancel(); waitAdoptedJobs() }()
 	clearStaleUpgrade(logf)
 	sec := secrets.DefaultStore(cfg.StateDir)
 	engine := kernel.New(store, Registry(store, sec, cfg.Socket, cfg.StateDir), cfg.Owner)
 	logf("bedrock daemon %s, state %s, owner %s", version.Current().Version, store.Path(), cfg.Owner)
-	d := &daemon{cfg: cfg, logf: logf, store: store, sec: sec, api: &api.Server{Engine: engine, Store: store}, machine: hostname()}
+	d := &daemon{cfg: cfg, logf: logf, store: store, sec: sec, api: &api.Server{Engine: engine, Store: store, Lifetime: ctx}, machine: hostname(), cancel: cancel}
+	defer func() {
+		cancel()
+		d.loops.Wait()
+		if d.jobs != nil {
+			d.jobs.Wait()
+		}
+		_ = d.api.Drain(context.Background())
+	}()
 
 	if err := d.recoverOperations(ctx); err != nil {
 		return err
@@ -203,8 +222,9 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 		logf("edge: %v", err)
 	}
 	d.startLoops(ctx)
-	receiver, stopHooks := d.serveHooks()
+	receiver, stopHooks := d.serveHooks(ctx)
 	defer stopHooks()
+	defer func() { cancel(); receiver.Wait(context.Background()) }()
 	return d.serveAPI(ctx, receiver)
 }
 
@@ -244,6 +264,9 @@ type daemon struct {
 	sec     *secrets.Store
 	api     *api.Server
 	machine string
+	loops   sync.WaitGroup
+	jobs    *app.Jobs
+	cancel  context.CancelFunc
 }
 
 // recoverOperations finishes what a previous daemon left mid-way with an
@@ -266,7 +289,7 @@ func (d *daemon) recoverOperations(ctx context.Context) error {
 	} else if recovered > 0 {
 		logf("recovered %d interrupted operation(s)", recovered)
 	}
-	go every(ctx, d.cfg.SweepInterval, false, func(time.Time) {
+	d.every(ctx, d.cfg.SweepInterval, false, func(time.Time) {
 		guarded(logf, "recovery sweep", func() {
 			if n, err := d.api.Recover(ctx, recoveryLog); err != nil && ctx.Err() == nil {
 				logf("recovery sweep: %v", err)
@@ -284,13 +307,14 @@ func (d *daemon) recoverOperations(ctx context.Context) error {
 func (d *daemon) startLoops(ctx context.Context) {
 	logf := d.logf
 	jobs := app.NewJobs(d.store, d.sec)
-	go every(ctx, 30*time.Second, false, func(now time.Time) {
+	d.jobs = jobs
+	d.every(ctx, 30*time.Second, false, func(now time.Time) {
 		guarded(logf, "cron", func() { jobs.Tick(ctx, now, logf) })
 	})
 	watcher := &watch.Watcher{Store: d.store, Notifier: watch.EmailNotifier{Secrets: d.sec, Store: d.store}, Hostname: d.machine, Log: logf}
 	prober := watch.NewProber(d.store)
 	prober.CheckSecrets = d.sec.Load
-	go every(ctx, time.Minute, true, func(time.Time) {
+	d.every(ctx, time.Minute, true, func(time.Time) {
 		guarded(logf, "watch", func() {
 			if err := watcher.Round(ctx, prober.Observe(ctx)); err != nil && ctx.Err() == nil {
 				logf("watch: %v", err)
@@ -299,7 +323,7 @@ func (d *daemon) startLoops(ctx context.Context) {
 	})
 	sampler := signals.NewSampler(d.store)
 	sampler.Log = logf
-	go every(ctx, time.Minute, true, func(time.Time) {
+	d.every(ctx, time.Minute, true, func(time.Time) {
 		guarded(logf, "signals", func() {
 			if err := sampler.Sample(ctx); err != nil && ctx.Err() == nil {
 				logf("signals: %v", err)
@@ -307,7 +331,7 @@ func (d *daemon) startLoops(ctx context.Context) {
 		})
 	})
 	scheduler := &Scheduler{Store: d.store, Secrets: d.sec, Server: d.api, Log: logf, Started: time.Now().UTC()}
-	go every(ctx, 30*time.Second, false, func(now time.Time) {
+	d.every(ctx, 30*time.Second, false, func(now time.Time) {
 		guarded(logf, "schedule", func() { scheduler.Tick(ctx, now) })
 	})
 }
@@ -316,9 +340,10 @@ func (d *daemon) startLoops(ctx context.Context) {
 // edge on a socket in the directory the two share. It returns the
 // receiver, to wait for its deploys at shutdown, and what closes the
 // server. A socket that can't be opened is logged, and webhooks wait.
-func (d *daemon) serveHooks() (*gitdeploy.Receiver, func()) {
+func (d *daemon) serveHooks(ctx context.Context) (*gitdeploy.Receiver, func()) {
 	receiver := &gitdeploy.Receiver{
-		Store: d.store, Secrets: d.sec,
+		Context: ctx,
+		Store:   d.store, Secrets: d.sec,
 		Deploy: gitdeploy.InProcess(d.api.RunLocked),
 		Notify: func(ctx context.Context, subject, body string) {
 			if err := (watch.EmailNotifier{Secrets: d.sec, Store: d.store}).Notify(ctx, watch.Notice{Subject: d.machine + ": " + subject, Body: body}); err != nil {
@@ -348,39 +373,52 @@ func (d *daemon) serveAPI(ctx context.Context, receiver *gitdeploy.Receiver) err
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Handler: d.api.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	server := &http.Server{Handler: d.api.Handler(), ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout: 30 * time.Second, IdleTimeout: time.Minute,
+		BaseContext: func(net.Listener) context.Context { return ctx }}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
 	d.logf("listening on %s", d.cfg.Socket)
 
 	notifier := notifierFromEnv()
 	notifier.ready()
-	watchdog := notifier.watchdog(ctx, func() bool {
+	watchdogCtx, stopWatchdog := context.WithCancel(ctx)
+	defer stopWatchdog()
+	watchdog := notifier.watchdog(watchdogCtx, func() bool {
 		// Feed the watchdog only while the store answers; a wedged daemon
 		// gets restarted by systemd instead of lingering.
 		_, err := d.store.List(ctx, 1)
 		return err == nil
 	})
 
+	var result error
 	select {
 	case <-ctx.Done():
 	case err := <-serveErr:
 		if !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("serve: %w", err)
+			result = fmt.Errorf("serve: %w", err)
 		}
 	}
+	if d.cancel != nil {
+		d.cancel()
+	}
 	notifier.stopping()
+	stopWatchdog()
 	<-watchdog
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = server.Shutdown(shutdownCtx)
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		// Closing active connections releases event writes blocked by a client
+		// that stopped reading, so the canceled engine can finish draining.
+		_ = server.Close()
+	}
 	// A deploy a webhook started is journaled and would be resumed, but
 	// finishing it here is better than resuming it there.
 	waitCtx, cancelWait := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelWait()
 	receiver.Wait(waitCtx)
 	d.logf("stopped")
-	return nil
+	return result
 }
 
 // guarded runs fn and turns a panic in it into a log line with its stack,
@@ -392,6 +430,13 @@ func guarded(logf func(string, ...any), name string, fn func()) {
 		}
 	}()
 	fn()
+}
+
+// every tracks a background loop so startup errors and shutdown cannot close
+// state while a watcher, recovery sweep or schedule still uses it.
+func (d *daemon) every(ctx context.Context, period time.Duration, now bool, fn func(time.Time)) {
+	d.loops.Add(1)
+	go func() { defer d.loops.Done(); every(ctx, period, now, fn) }()
 }
 
 // every calls fn on a period until ctx ends, first right away when asked.
@@ -449,4 +494,25 @@ func clearStaleUpgrade(logf func(string, ...any)) {
 			logf("cleared a stale upgrade marker from %s", info.ModTime().UTC().Format(time.RFC3339))
 		}
 	}
+}
+
+// lockDaemon reserves this state directory for one daemon before any startup
+// reconciliation can touch containers, host configuration or the database.
+func lockDaemon(stateDir string) (func(), error) {
+	dir := filepath.Join(stateDir, "locks")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "daemon.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return nil, fmt.Errorf("another daemon owns state in %s", stateDir)
+		}
+		return nil, err
+	}
+	return func() { _ = f.Close() }, nil
 }

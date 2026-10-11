@@ -196,6 +196,26 @@ class OwnedVM(unittest.TestCase):
         self.assertEqual(data["tcg_cache_mib"], 128)
         self.assertEqual(self.config_values()["LANE_VM_MEMORY_MIB"], "1024")
 
+    def test_existing_stopped_vm_starts_only_after_ownership_validation(self):
+        info = [{"Config": {"Labels": {VM.LABEL: IDENTITY}}, "State": {"Status": "exited"}}]
+        events = []
+
+        def fake_command(*args, **kwargs):
+            events.append(args)
+            return json.dumps(info)
+
+        with (
+            patch.dict(VM.os.environ, {}, clear=True),
+            patch.object(VM, "command", side_effect=fake_command),
+            patch.object(VM, "wait_ready", side_effect=lambda data: events.append(("ready", data["container"]))),
+        ):
+            VM.up()
+        self.assertEqual(events, [
+            ("docker", "inspect", self.data["container"]),
+            ("docker", "start", self.data["container"]),
+            ("ready", self.data["container"]),
+        ])
+
     def test_existing_vm_ignores_new_defaults_and_preserves_recorded_resources(self):
         self.data.update(guest_memory_mib=1536, tcg_cache_mib=128)
         self.save()
@@ -207,7 +227,10 @@ class OwnedVM(unittest.TestCase):
             patch.object(VM, "wait_ready") as ready,
         ):
             VM.up()
-            command.assert_called_once_with("docker", "inspect", self.data["container"], capture=True)
+            self.assertEqual([call.args for call in command.call_args_list], [
+                ("docker", "inspect", self.data["container"]),
+                ("docker", "start", self.data["container"]),
+            ])
             ready.assert_called_once_with(self.data)
             self.assertEqual((self.work / "machine.json").read_bytes(), before)
 
@@ -221,7 +244,7 @@ class OwnedVM(unittest.TestCase):
             patch.object(VM, "wait_ready") as ready,
         ):
             VM.up()
-            self.assertEqual(command.call_count, 1)
+            self.assertEqual(command.call_count, 2)
             ready.assert_called_once_with(self.data)
 
     def test_existing_vm_refuses_different_or_unrecorded_memory(self):
@@ -267,8 +290,36 @@ class OwnedVM(unittest.TestCase):
             patch.object(VM, "wait_ready") as ready,
         ):
             VM.up()
-            command.assert_called_once_with("docker", "inspect", self.data["container"], capture=True)
+            self.assertEqual([call.args for call in command.call_args_list], [
+                ("docker", "inspect", self.data["container"]),
+                ("docker", "start", self.data["container"]),
+            ])
             ready.assert_called_once_with(self.data)
+
+    def test_created_provider_keeps_ownership_if_image_probe_fails(self):
+        (self.work / "machine.json").unlink()
+
+        def fake_command(*args, **kwargs):
+            if args[0] == "ssh-keygen":
+                key = Path(args[-1])
+                key.write_text("test-only-key")
+                key.with_suffix(".pub").write_text("ssh-ed25519 test-only-public")
+            elif args[:2] == ("docker", "inspect"):
+                raise VM.subprocess.CalledProcessError(1, args)
+            return ""
+
+        with (
+            patch.dict(VM.os.environ, {}, clear=True),
+            patch.object(VM.secrets, "token_hex", return_value=IDENTITY),
+            patch.object(VM, "command", side_effect=fake_command),
+        ):
+            with self.assertRaises(VM.subprocess.CalledProcessError):
+                VM.up(prepared=(VM.IMAGE, {"guest_memory_mib": 3072, "tcg_cache_mib": 128}))
+        self.assertTrue((self.work / "machine.json").is_file(), "created provider lost its cleanup ownership receipt")
+        data = json.loads((self.work / "machine.json").read_text())
+        self.assertEqual(data["id"], IDENTITY)
+        self.assertEqual(data["container"], "bedrock-lane-" + IDENTITY)
+        self.assertFalse(data["ready"])
 
     def config_values(self):
         return {line.split("=", 1)[0]: shlex.split(line.split("=", 1)[1])[0]

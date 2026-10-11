@@ -72,3 +72,18 @@ func TestSavedOutputKeepsBoundedTailsAndDoesNotChangeReceipts(t *testing.T) {
 		t.Fatalf("missing operation: %v", err)
 	}
 }
+
+func TestDiagnosticOutputBoundsUnbrokenLines(t *testing.T) {
+	var emitted []string
+	w := newLineWriter(func(line string) { emitted = append(emitted, line) })
+	if _, err := w.Write([]byte(strings.Repeat("x", 5<<20))); err != nil {
+		t.Fatal(err)
+	}
+	w.Flush()
+	if len(emitted) != 1 || len(emitted[0]) > 65<<10 {
+		t.Fatalf("unbounded diagnostic event: %d event(s), %d bytes", len(emitted), len(emitted[0]))
+	}
+	if len(w.Tail()) > 65<<10 || !strings.Contains(w.Tail(), "truncated") {
+		t.Fatalf("unbounded or silently shortened saved diagnostic: %d bytes", len(w.Tail()))
+	}
+}
