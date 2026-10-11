@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -116,7 +117,7 @@ func (r Runner) run(ctx context.Context, mounts []string, args ...string) ([]str
 	}
 	defer os.RemoveAll(secrets)
 	spec := docker.Spec{
-		Name:        fmt.Sprintf("bedrock-%s-restic-%d", r.Owner, time.Now().UnixMilli()),
+		Name:        "bedrock-" + r.Owner + "-restic-" + strings.TrimPrefix(filepath.Base(secrets), "bedrock-restic-"),
 		Image:       Image,
 		Entrypoint:  []string{"/bin/sh", "-c", `set -a && . ` + secretsInside + `/env && set +a && exec /usr/bin/restic "$@"`, "restic"},
 		Cmd:         args,
@@ -132,15 +133,16 @@ func (r Runner) run(ctx context.Context, mounts []string, args ...string) ([]str
 		}
 	}
 	if err := e.Run(ctx, spec); err != nil {
-		return nil, err
+		lines, cleanupErr := finish(e, spec)
+		return lines, errors.Join(err, cleanupErr)
 	}
 	code, waitErr := e.WaitExit(ctx, spec.Name)
 	// The wait may have taken an hour, or ended with ctx. The container's
 	// last words and its removal get a context of their own, made now: one
 	// made before the wait would have been spent by it.
-	lines := finish(e, spec.Name)
+	lines, cleanupErr := finish(e, spec)
 	if waitErr != nil {
-		return lines, waitErr
+		return lines, errors.Join(waitErr, cleanupErr)
 	}
 	if r.Log != nil {
 		for _, l := range lines {
@@ -150,9 +152,13 @@ func (r Runner) run(ctx context.Context, mounts []string, args ...string) ([]str
 		}
 	}
 	if code != 0 {
-		return lines, fmt.Errorf("restic %s: %s", args[0], explain(lines))
+		failure := &commandError{action: args[0], reason: explain(lines)}
+		if cleanupErr != nil {
+			return lines, errors.Join(failure, cleanupErr)
+		}
+		return lines, failure
 	}
-	return lines, nil
+	return lines, cleanupErr
 }
 
 // secretsFile writes NAME=value pairs where only this machine's root reads
@@ -166,8 +172,9 @@ func secretsFile(pairs []string) (string, error) {
 	var b strings.Builder
 	for _, pair := range pairs {
 		name, value, ok := strings.Cut(pair, "=")
-		if !ok {
-			continue
+		if !ok || !shellName.MatchString(name) || strings.ContainsRune(value, 0) {
+			os.RemoveAll(dir)
+			return "", errors.New("restic credentials must be valid shell NAME=value assignments")
 		}
 		// Single quotes hold anything but a single quote, which is closed,
 		// escaped and reopened.
@@ -180,15 +187,46 @@ func secretsFile(pairs []string) (string, error) {
 	return dir, nil
 }
 
-// finish reads a stopped restic container's output and removes it, on a
-// fresh, bounded context of its own.
-func finish(e *docker.Engine, name string) []string {
+var shellName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+type commandError struct {
+	action, reason string
+}
+
+func (e *commandError) Error() string { return fmt.Sprintf("restic %s: %s", e.action, e.reason) }
+
+// finish reads the helper's output and removes only that helper. Logging
+// and cleanup have separate budgets, so a slow log endpoint cannot spend
+// the time needed to stop a writer and remove the container.
+func finish(e *docker.Engine, spec docker.Spec) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	info, err := e.Inspect(ctx, spec.Name)
+	if docker.IsNotFound(err) {
+		cancel()
+		return nil, nil
+	}
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("inspect restic helper before cleanup: %w", err)
+	}
+	if info.Labels[docker.LabelOwner] != docker.OwnerValue || info.Labels[docker.LabelApp] != spec.Labels[docker.LabelApp] || info.Labels[docker.LabelWorkload] != "backup" {
+		cancel()
+		return nil, fmt.Errorf("restic helper %s has another owner; refusing cleanup", spec.Name)
+	}
 	var buf bytes.Buffer
-	_ = e.Logs(ctx, name, false, "all", &buf)
-	_ = e.Remove(ctx, name, 5*time.Second)
-	return strings.Split(strings.TrimSpace(buf.String()), "\n")
+	logErr := e.Logs(ctx, spec.Name, false, "all", &buf)
+	cancel()
+	cleanup, stop := context.WithTimeout(context.Background(), 30*time.Second)
+	removeErr := e.Remove(cleanup, info.ID, 5*time.Second)
+	stop()
+	var errs []error
+	if logErr != nil {
+		errs = append(errs, fmt.Errorf("read restic output: %w", logErr))
+	}
+	if removeErr != nil {
+		errs = append(errs, fmt.Errorf("remove restic helper %s: %w", spec.Name, removeErr))
+	}
+	return strings.Split(strings.TrimSpace(buf.String()), "\n"), errors.Join(errs...)
 }
 
 type nopWriter struct{}
@@ -232,7 +270,9 @@ func (r Runner) Ensure(ctx context.Context) (bool, error) {
 		return true, nil
 	}
 	joined := strings.Join(lines, "\n")
-	if strings.Contains(joined, "already initialized") || strings.Contains(joined, "already exists") {
+	// Only the expected init exit can mean success. A joined cleanup or
+	// log failure must still reach the caller even if the repository exists.
+	if _, failedInit := err.(*commandError); failedInit && (strings.Contains(joined, "already initialized") || strings.Contains(joined, "already exists")) {
 		return false, nil
 	}
 	return false, err

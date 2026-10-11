@@ -77,6 +77,13 @@ func Leave(ctx context.Context, engine *docker.Engine, app string) error {
 // older bedrock is replaced that way, which takes a few seconds. Safe to
 // call any time.
 func Ensure(ctx context.Context, engine *docker.Engine, boot []byte, out io.Writer) error {
+	info, err := engine.Inspect(ctx, Container)
+	if err != nil && !docker.IsNotFound(err) {
+		return fmt.Errorf("inspect edge: %w", err)
+	}
+	if err == nil && info.Labels[docker.LabelOwner] != docker.OwnerValue {
+		return fmt.Errorf("container %s belongs to another owner", Container)
+	}
 	if err := engine.EnsureNetwork(ctx, docker.EdgeNetwork); err != nil {
 		return err
 	}
@@ -88,7 +95,6 @@ func Ensure(ctx context.Context, engine *docker.Engine, boot []byte, out io.Writ
 	if boot == nil {
 		boot = Initial()
 	}
-	info, err := engine.Inspect(ctx, Container)
 	switch {
 	case err == nil && info.Labels[LayoutLabel] != Layout:
 		// Made by an older bedrock, whose admin API listened on the network.
@@ -99,7 +105,7 @@ func Ensure(ctx context.Context, engine *docker.Engine, boot []byte, out io.Writ
 			return err
 		}
 		fmt.Fprintln(out, "the edge is replaced by one whose admin API only this machine reaches")
-	case err != nil:
+	case docker.IsNotFound(err):
 		if err := WriteBoot(BootFile, boot); err != nil {
 			return err
 		}

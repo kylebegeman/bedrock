@@ -8,6 +8,7 @@
 package dockertest
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -211,7 +212,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []any{})
 	case strings.HasPrefix(path, "/images/") && strings.HasSuffix(path, "/json"):
 		ref := strings.TrimSuffix(strings.TrimPrefix(path, "/images/"), "/json")
-		writeJSON(w, http.StatusOK, map[string]any{"Id": "sha256:" + strings.NewReplacer("/", "-", ":", "-", "@", "-").Replace(ref), "Config": map[string]any{"User": ""}})
+		writeJSON(w, http.StatusOK, map[string]any{"Id": fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(ref))), "Config": map[string]any{"User": ""}})
 	case path == "/images/create":
 		writeJSON(w, http.StatusOK, map[string]any{"status": "pulled"})
 	case path == "/containers/json":

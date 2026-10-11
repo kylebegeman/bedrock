@@ -6,6 +6,8 @@ package docker
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -82,12 +84,20 @@ func (e *Engine) EnsureInternalNetwork(ctx context.Context, name string) error {
 }
 
 func (e *Engine) ensureNetwork(ctx context.Context, name string, internal bool) error {
-	if n, err := e.cli.NetworkInspect(ctx, name, client.NetworkInspectOptions{}); err == nil {
-		if internal && !n.Network.Internal {
-			return fmt.Errorf("network %s must be internal for a recovery drill", name)
+	check := func() error {
+		n, err := e.cli.NetworkInspect(ctx, name, client.NetworkInspectOptions{})
+		if err != nil {
+			return err
+		}
+		if n.Network.Labels[LabelOwner] != OwnerValue {
+			return fmt.Errorf("network %s belongs to another owner", name)
+		}
+		if n.Network.Internal != internal {
+			return fmt.Errorf("network %s has internal=%t; expected internal=%t", name, n.Network.Internal, internal)
 		}
 		return nil
-	} else if !IsNotFound(err) {
+	}
+	if err := check(); !IsNotFound(err) {
 		return err
 	}
 	_, err := e.cli.NetworkCreate(ctx, name, client.NetworkCreateOptions{
@@ -95,7 +105,12 @@ func (e *Engine) ensureNetwork(ctx context.Context, name string, internal bool) 
 		Internal: internal,
 		Labels:   map[string]string{LabelOwner: OwnerValue},
 	})
-	if err != nil && !errdefs.IsConflict(err) {
+	if errdefs.IsConflict(err) {
+		// A concurrent creator may have claimed the name for a different
+		// owner or isolation mode. Verify it before joining any workload.
+		return check()
+	}
+	if err != nil {
 		return fmt.Errorf("create network %s: %w", name, err)
 	}
 	return nil
@@ -187,11 +202,31 @@ const DefaultPidsLimit int64 = 4096
 // Run creates and starts a container, or starts it if it already exists.
 func (e *Engine) Run(ctx context.Context, spec Spec) error {
 	if info, err := e.Inspect(ctx, spec.Name); err == nil {
+		if info.Labels[LabelOwner] != OwnerValue {
+			return fmt.Errorf("container %s belongs to another owner", spec.Name)
+		}
+		for name, expected := range spec.Labels {
+			if info.Labels[name] != expected {
+				return fmt.Errorf("container %s has another %s identity", spec.Name, name)
+			}
+		}
+		// Creation may have stopped after connecting only some networks.
+		// Complete the requested attachments before adopting or starting it.
+		for _, name := range spec.Networks {
+			if err := e.ConnectNetwork(ctx, info.ID, name); err != nil {
+				return err
+			}
+		}
 		if info.Running {
 			return nil
 		}
+		if spec.Stdin != nil {
+			return e.startAttached(ctx, info.ID, spec)
+		}
 		_, err := e.cli.ContainerStart(ctx, info.ID, client.ContainerStartOptions{})
 		return err
+	} else if !IsNotFound(err) {
+		return fmt.Errorf("inspect %s: %w", spec.Name, err)
 	}
 	hostConfig, exposed, err := hostConfigFor(spec)
 	if err != nil {
@@ -417,8 +452,13 @@ func (e *Engine) Inspect(ctx context.Context, name string) (*Info, error) {
 	}
 	if c.NetworkSettings != nil {
 		for net, ep := range c.NetworkSettings.Networks {
-			if ep != nil && ep.IPAddress.IsValid() {
+			if ep == nil {
+				continue
+			}
+			if ep.IPAddress.IsValid() {
 				info.IPs[net] = ep.IPAddress.String()
+			} else if ep.GlobalIPv6Address.IsValid() {
+				info.IPs[net] = ep.GlobalIPv6Address.String()
 			}
 		}
 	}
@@ -524,15 +564,34 @@ func (e *Engine) Pull(ctx context.Context, ref string, out io.Writer) error {
 		return fmt.Errorf("pull %s: %w", ref, err)
 	}
 	defer resp.Close()
-	_, err = io.Copy(io.Discard, resp)
-	if err != nil {
-		return fmt.Errorf("pull %s: %w", ref, err)
+	dec := json.NewDecoder(resp)
+	for {
+		var progress struct {
+			Error  string `json:"error"`
+			Detail struct {
+				Message string `json:"message"`
+			} `json:"errorDetail"`
+		}
+		if err := dec.Decode(&progress); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			return fmt.Errorf("pull %s: %w", ref, err)
+		}
+		if progress.Error != "" || progress.Detail.Message != "" {
+			message := progress.Error
+			if message == "" {
+				message = progress.Detail.Message
+			}
+			return fmt.Errorf("pull %s: %s", ref, message)
+		}
 	}
 	fmt.Fprintf(out, "pulled %s\n", ref)
 	return nil
 }
 
-// Digest returns an image's repository digest reference, when it has one.
+// Digest returns an immutable image reference. Repository digests survive
+// transfer to another machine; an imported or locally built image can instead
+// be pinned by its content ID.
 func (e *Engine) Digest(ctx context.Context, ref string) (string, error) {
 	res, err := e.cli.ImageInspect(ctx, ref)
 	if err != nil {
@@ -546,7 +605,12 @@ func (e *Engine) Digest(ctx context.Context, ref string) (string, error) {
 	if len(res.RepoDigests) > 0 {
 		return res.RepoDigests[0], nil
 	}
-	return "", fmt.Errorf("%s has no repository digest", ref)
+	if id, ok := strings.CutPrefix(res.ID, "sha256:"); ok && len(id) == 64 {
+		if _, err := hex.DecodeString(id); err == nil {
+			return res.ID, nil
+		}
+	}
+	return "", fmt.Errorf("%s has no immutable image reference", ref)
 }
 
 // repository strips the tag from an image reference.

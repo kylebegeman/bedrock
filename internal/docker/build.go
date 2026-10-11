@@ -111,6 +111,10 @@ const (
 )
 
 func copyTree(from, to string) error {
+	from, err := filepath.EvalSymlinks(from)
+	if err != nil {
+		return err
+	}
 	info, err := os.Stat(from)
 	if err != nil {
 		return err
@@ -130,11 +134,21 @@ func copyTree(from, to string) error {
 		if !d.Type().IsRegular() {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		src, err := os.Open(path)
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(target, data, 0o644)
+		defer src.Close()
+		dst, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(dst, src)
+		closeErr := dst.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		return closeErr
 	})
 }
 
