@@ -218,3 +218,43 @@ The frozen storage-fixture/documentation snapshot passed `make check`:
 formatting, vet, the complete Go suite and 28 lane safeguards. All 30 local
 README, lane, feature and technical-document links/anchors resolve. Only this
 verification note was added afterward; production source remains unchanged.
+
+## Provider OOM and restart-safe fixtures
+
+The first clean `a399d47` product run failed before app stages because the
+source QEMU provider was killed by a confirmed Docker backend OOM (exit 137).
+The proof's SSH child exited 255, and the runner preserved a failed report:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-product-final-a399d47/report.md`.
+Exact provider events/state and repair notes are in its `provider-diagnostics`
+directory. No product assertion failed in that run.
+
+Both owned providers reserve 3 GiB guest RAM against a Docker backend with
+about 7.75 GiB total memory. The idle destination was stopped after its guard
+and ownership label passed, preserving its disk and identity. Only the owned
+source provider was restarted; no global Docker setting or unrelated process
+was changed. After full guard recovery, interrupted upgrade receipt
+`op-20261011-000600-nimfh` resumed and succeeded with one interruption.
+Its receipt is preserved in `provider-diagnostics/after-restart-readiness.txt`.
+
+The restart exposed a fixture lifecycle defect: retained `lane-minio` had no
+restart policy, and create-only setup skipped it, leaving HTTP health unavailable.
+The exact storage setup reproduced that failure. Storage and email fixtures
+need to start retained containers when setup runs again. The next frozen
+milestone will include that correction and focused lifecycle regressions.
+
+For the later two-machine proof, a target-only boot-memory override to 2048
+MiB is authorized if measured headroom supports it. Preserve the exact target
+container/disk/identity and save original/override bytes and hashes in the
+report. This is disposable provider configuration, not a production change.
+
+The corrected storage setup starts the retained container, passes real guest
+HTTP health, and succeeds on repeat invocation without printing its password.
+Four lifecycle regressions cover retained storage/email startup and explicit
+start failures before health or integration registration. All 32 lane tests
+pass; isolated copies with the restart fix removed fail all four regressions.
+Shellcheck and whitespace checks pass. The target-memory override is prepared
+and hashed outside the checkout but has not yet been applied.
+
+The frozen restart-safe fixture snapshot passed `make check`: all 32 lane
+safeguards, formatting, vet and the complete Go suite. Only this evidence note
+was added afterward. Production Go source is unchanged by this milestone.

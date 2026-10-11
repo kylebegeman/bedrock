@@ -34,6 +34,8 @@ if ! docker inspect lane-minio >/dev/null 2>&1; then
  test "$(docker image inspect --format '{{index .Config.Labels "io.bedrock.lane.minio.binary-sha256"}}' "$image")" = "$expected" || { echo "MinIO fixture image differs from its pinned artifact." >&2; exit 1; }
  docker run -d --name lane-minio -p 127.0.0.1:9000:9000 -e MINIO_ROOT_USER=lane -e MINIO_ROOT_PASSWORD="$(cat /root/.lane-minio-key)" -v lane-minio:/data "$image" server /data --address 0.0.0.0:9000 >/dev/null
 fi
+# Retained fixture containers are stopped by a guest reboot.
+docker start lane-minio >/dev/null
 for attempt in $(seq 1 30); do curl -sf http://127.0.0.1:9000/minio/health/live >/dev/null && break; sleep 2; done
 curl -sf http://127.0.0.1:9000/minio/health/live >/dev/null
 # The recovery password is disposable fixture state; retain it only in the
@@ -49,6 +51,7 @@ STORAGE
 if ! docker inspect lane-mailpit >/dev/null 2>&1; then
  docker run -d --name lane-mailpit -p 127.0.0.1:1025:1025 -p 127.0.0.1:8025:8025 axllent/mailpit:v1.31.2@sha256:74d609a42ec279aa63c6b4622a6fa9b5408d1ad5b1d76a1c4be40a265ce0863d >/dev/null
 fi
+docker start lane-mailpit >/dev/null
 printf "smtp_host=127.0.0.1\nsmtp_port=1025\nfrom=bedrock@lane.invalid\nto=fixture@lane.invalid\n" | bedrock integration set email >/dev/null'
       ;;
     *) echo "Unknown fixture: $fixture. Choose storage or email." >&2; exit 2 ;;

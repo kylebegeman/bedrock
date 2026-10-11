@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise fail-closed target guards without connecting to any server."""
+"""Exercise lane guards and fixture lifecycle without connecting to any server."""
 import json
 import os
 from pathlib import Path
@@ -32,7 +32,9 @@ class TargetSafety(unittest.TestCase):
 import os,sys,subprocess
 if os.environ.get("LANE_TEST_UNREACHABLE"): raise SystemExit(255)
 if sys.argv[-2:] == ["uname", "-m"]: print("x86_64"); raise SystemExit(0)
-script=sys.stdin.read().replace("/etc/bedrock-production", os.environ["LANE_TEST_ROOT"] + "/bedrock-production").replace("/etc/bedrock-lane-id", os.environ["LANE_TEST_ROOT"] + "/bedrock-lane-id")
+script=sys.stdin.read() if sys.argv[-1].startswith("sh -s") else sys.argv[-1]
+for original, local in (("/etc/bedrock-production", "/bedrock-production"), ("/etc/bedrock-lane-id", "/bedrock-lane-id"), ("/root/.lane-minio-key", "/minio-key")):
+    script=script.replace(original, os.environ["LANE_TEST_ROOT"] + local)
 result=subprocess.run(["sh", "-s", "--", os.environ["LANE_TEST_ID"]], input=script, text=True)
 raise SystemExit(result.returncode)
 ''')
@@ -49,11 +51,101 @@ raise SystemExit(result.returncode)
                   "KEY": str(self.work / "key"), "KNOWN_HOSTS": str(self.work / "known_hosts")}
         self.config.write_text("\n".join(k + "=" + shlex.quote(v) for k, v in values.items()) + "\n")
 
+    def environment(self, **extra):
+        return {**os.environ, "PATH": str(self.bin) + os.pathsep + os.environ["PATH"], "LANE_CONFIG": str(self.config),
+                "LANE_TEST_ROOT": str(self.work), "LANE_TEST_ID": IDENTITY, **extra}
+
     def run_guard(self, **extra):
-        env = {**os.environ, "PATH": str(self.bin) + os.pathsep + os.environ["PATH"], "LANE_CONFIG": str(self.config),
-               "LANE_TEST_ROOT": str(self.work), "LANE_TEST_ID": IDENTITY, **extra}
         return subprocess.run(["bash", "-c", '. "$1/common.sh"; echo PROOF_CAN_START', "test", str(HERE)],
-                              env=env, capture_output=True, text=True)
+                              env=self.environment(**extra), capture_output=True, text=True)
+
+    def run_fixture(self, fixture: str, start_fails=False):
+        (self.work / "minio-key").write_text("disposable-fixture-key")
+        self.script("docker", '''#!/usr/bin/env python3
+import json,os,sys
+from pathlib import Path
+root=Path(os.environ["LANE_TEST_ROOT"])
+args=sys.argv[1:]
+with (root / "fixture-events").open("a") as events: events.write(json.dumps(["docker", *args]) + "\\n")
+container=os.environ["LANE_TEST_CONTAINER"]
+if args == ["inspect", container]:
+    print(json.dumps([{"State": {"Running": (root / "running").exists()}}]))
+elif args == ["start", container]:
+    if os.environ.get("LANE_TEST_START_FAIL"):
+        print("fixture container start failed", file=sys.stderr)
+        raise SystemExit(37)
+    (root / "running").touch()
+    print(container)
+else:
+    raise SystemExit("unexpected fixture Docker operation")
+''')
+        self.script("curl", '''#!/usr/bin/env python3
+import json,os,sys
+from pathlib import Path
+root=Path(os.environ["LANE_TEST_ROOT"])
+with (root / "fixture-events").open("a") as events: events.write(json.dumps(["health", *sys.argv[1:]]) + "\\n")
+if sys.argv[1:] != ["-sf", "http://127.0.0.1:9000/minio/health/live"]:
+    raise SystemExit("unexpected fixture health request")
+raise SystemExit(0 if (root / "running").exists() else 7)
+''')
+        self.script("sleep", "#!/bin/sh\nexit 0\n")
+        self.script("bedrock", '''#!/usr/bin/env python3
+import json,os,sys
+from pathlib import Path
+root=Path(os.environ["LANE_TEST_ROOT"])
+if sys.argv[1:] == ["ls", "--json"]:
+    print((root / "registry.json").read_text())
+elif sys.argv[1:] == ["integration", "set", os.environ["LANE_TEST_FIXTURE"]]:
+    with (root / "fixture-events").open("a") as events: events.write(json.dumps(["integration", sys.argv[-1]]) + "\\n")
+    if not (root / "running").exists(): raise SystemExit("fixture container is stopped")
+    (root / "integration-input").write_text(sys.stdin.read())
+else:
+    raise SystemExit("unexpected fixture Bedrock operation")
+''')
+        return subprocess.run(["bash", str(HERE / "setup-fixtures.sh"), fixture],
+                              env=self.environment(LANE_TEST_FIXTURE=fixture,
+                                                   LANE_TEST_CONTAINER="lane-minio" if fixture == "storage" else "lane-mailpit",
+                                                   LANE_TEST_START_FAIL="true" if start_fails else ""),
+                              capture_output=True, text=True)
+
+    def fixture_events(self):
+        return [json.loads(line) for line in (self.work / "fixture-events").read_text().splitlines()]
+
+    def assert_stopped_fixture_restarts(self, fixture: str):
+        result = self.run_fixture(fixture)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, f"Fixture ready: {fixture}\n")
+        self.assertNotIn("disposable-fixture-key", result.stdout + result.stderr)
+        self.assertTrue((self.work / "running").exists())
+        self.assertTrue((self.work / "integration-input").exists())
+        events = self.fixture_events()
+        container = "lane-minio" if fixture == "storage" else "lane-mailpit"
+        self.assertEqual(events[:2], [["docker", "inspect", container], ["docker", "start", container]])
+        self.assertEqual(events[-1], ["integration", fixture])
+        if fixture == "storage":
+            self.assertTrue(any(event[0] == "health" for event in events[2:-1]))
+
+    def assert_fixture_start_failure_stops_setup(self, fixture: str):
+        result = self.run_fixture(fixture, start_fails=True)
+        self.assertEqual(result.returncode, 37, result.stderr)
+        self.assertIn("fixture container start failed", result.stderr)
+        self.assertNotIn("Fixture ready:", result.stdout)
+        self.assertFalse((self.work / "running").exists())
+        self.assertFalse((self.work / "integration-input").exists())
+        container = "lane-minio" if fixture == "storage" else "lane-mailpit"
+        self.assertEqual(self.fixture_events(), [["docker", "inspect", container], ["docker", "start", container]])
+
+    def test_stopped_storage_fixture_is_restarted_before_health_and_sealing(self):
+        self.assert_stopped_fixture_restarts("storage")
+
+    def test_stopped_email_fixture_is_restarted_before_sealing(self):
+        self.assert_stopped_fixture_restarts("email")
+
+    def test_storage_fixture_start_failure_stops_before_health_and_sealing(self):
+        self.assert_fixture_start_failure_stops_setup("storage")
+
+    def test_email_fixture_start_failure_stops_before_sealing(self):
+        self.assert_fixture_start_failure_stops_setup("email")
 
     def refused(self, **extra):
         result = self.run_guard(**extra)
