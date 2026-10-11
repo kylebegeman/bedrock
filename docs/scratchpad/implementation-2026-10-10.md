@@ -461,3 +461,31 @@ projections, the failed verify receipt ID/transcript, exact binaries and all
 guest setup/upgrade receipts remain. This is a retention limitation, not evidence
 of client-journal resume. The next artifact collector will preserve applying
 public state promptly. Original failed 39e93a5 bootstrap state remains retained.
+
+
+## Guarded memory-probe timing correction
+
+The new preflight initially blocked both guests because its separate 30-second
+probe budget included the entire disposable-machine guard. Other guarded
+calls used 60 seconds. With no other change, identical guarded memory probes
+succeeded in 34.500 seconds on source and 30.037 seconds on destination. Their
+parsed `MemTotal` values were 1450.71 MiB and 950.23 MiB respectively. Evidence:
+`bedrock-transfer-final-d104afc/target-memory-preparation/preflight-probe-timing/report.json`
+under the retained external artifact root.
+
+The probe now reuses the established remote budget. A modeled 45-second guard
+failed before the fix and succeeds afterward; a 65-second probe still blocks
+before fixture setup or proof launch. The snapshot passed `make check`: all
+58 lane tests, shell syntax/shellcheck, Python AST, formatting, vet and the full
+Go suite. Only this evidence note was added after verification. Product runtime
+and the inner product/transfer proof scripts remain unchanged from `39e93a5`.
+
+A target-only 2304 MiB boot repair is approved after measured reservation and
+capacity analysis. It changes only the reviewed target boot RAM value, retaining
+its 0644 mode, disks, container, keys and identity; source remains 1536 MiB and
+both translation caches stay capped at 128 MiB. Current measured target
+reservation projects 2230.23 MiB usable RAM. Projected backend reserve is
+1610.06 MiB at the latest pre-change sample and 795.10 MiB at the earlier sampled
+minimum. These estimates require actual post-boot memory, doctor and resource
+verification before another full proof. Fresh guests should follow the documented
+3072 MiB defaults, rather than this retained-source fixture configuration.

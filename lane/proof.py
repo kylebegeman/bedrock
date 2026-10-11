@@ -116,7 +116,7 @@ def prerequisites(args, settings: dict) -> list[str]:
 def guest_memory_bytes(config: str) -> int:
     """Read usable guest memory through the same guarded path as proofs."""
     try:
-        result = remote(config, "cat /proc/meminfo", timeout=30)
+        result = remote(config, "cat /proc/meminfo")
     except (OSError, subprocess.SubprocessError):
         raise RuntimeError("Guest MemTotal probe failed; memory readiness is unknown.") from None
     if result.returncode:

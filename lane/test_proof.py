@@ -77,7 +77,7 @@ class ProofReports(unittest.TestCase):
 
 class MemoryPreflight(unittest.TestCase):
     def run_proof(self, proof, source_memory="MemTotal: 3145728 kB\n",
-                  destination_memory="MemTotal: 3145728 kB\n", check=False):
+                  destination_memory="MemTotal: 3145728 kB\n", check=False, memory_probe_seconds=0):
         with tempfile.TemporaryDirectory(prefix="bedrock-memory-preflight-") as directory:
             artifacts = Path(directory) / "report"
             source = "/source.env"
@@ -97,6 +97,8 @@ class MemoryPreflight(unittest.TestCase):
             def remote(config, script, timeout=60):
                 probes.append((config, script))
                 if script == "cat /proc/meminfo":
+                    if memory_probe_seconds > timeout:
+                        raise subprocess.TimeoutExpired("guarded memory probe", timeout)
                     result = source_memory if config == source else destination_memory
                     if isinstance(result, BaseException):
                         raise result
@@ -132,6 +134,23 @@ class MemoryPreflight(unittest.TestCase):
         self.assertTrue(report["problems"])
         popen.assert_not_called()
         setup.assert_not_called()
+
+    def test_guarded_memory_probe_can_use_existing_remote_budget(self):
+        # Model guard plus probe taking 45s without sleeping or connecting.
+        for proof in ("product", "transfer"):
+            with self.subTest(proof=proof):
+                result = self.run_proof(proof, check=True, memory_probe_seconds=45)
+                self.assertEqual(result[0], 0)
+                self.assertEqual(result[1]["status"], "ready")
+                self.assertEqual(result[1]["target"]["memory_total_bytes"], 3 * 1024**3)
+                result[3].assert_not_called()
+                result[4].assert_not_called()
+
+    def test_guarded_memory_probe_still_blocks_when_remote_budget_is_exhausted(self):
+        for proof in ("product", "transfer"):
+            with self.subTest(proof=proof):
+                result = self.run_proof(proof, memory_probe_seconds=65)
+                self.assert_blocked_before_mutation(result)
 
     def test_low_destination_blocks_transfer_before_setup_or_process_launch(self):
         result = self.run_proof("transfer", source_memory="MemTotal: 1572864 kB\n",
