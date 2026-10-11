@@ -578,6 +578,18 @@ bedrock deploy ./app --digest <hex>
 A plan that has changed runs nothing and records nothing. `--digest` implies
 `--yes`, because naming the plan is the approval.
 
+Deploy approvals also bind the source bytes, file modes and safe relative links.
+Bedrock captures that source privately before initialization or builds begin,
+so edits to the original checkout cannot change an operation already in progress.
+See [deployment sources](docs/features/deployment-sources.md) for recovery,
+cleanup and disk-space behavior.
+
+Traffic from a hostname shared by several apps is omitted from per-app summaries:
+the edge counters identify the hostname, not which app handled each request.
+Dedicated-host traffic, workload resource usage and volume usage remain measured.
+During Docker or state outages, existing incidents remain open until a fresh
+observation can confirm recovery.
+
 ## Build
 
 ```sh
@@ -636,6 +648,7 @@ remains available for initial binary installation.
 | [docs/features/machine-recovery.md](docs/features/machine-recovery.md) | self-contained recovery and rehearsals |
 | [docs/features/safe-moves.md](docs/features/safe-moves.md) | source fencing and deliberate target cutover |
 | [docs/features/release-safety.md](docs/features/release-safety.md) | release rehearsal and data-aware rollback |
+| [docs/features/deployment-sources.md](docs/features/deployment-sources.md) | approved source captures, safe retries and cleanup |
 | [docs/technical/minio-image-availability.md](docs/technical/minio-image-availability.md) | open object-service image distribution issue |
 | [lane/README.md](lane/README.md) | the proving ground |
 
