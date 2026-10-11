@@ -6,7 +6,9 @@ package manifest
 import (
 	"errors"
 	"fmt"
+	"io"
 	"maps"
+	"math"
 	"net"
 	"net/netip"
 	"net/url"
@@ -15,6 +17,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -494,6 +497,10 @@ func Parse(data []byte) (*Manifest, error) {
 	if err := dec.Decode(&m); err != nil {
 		return nil, fmt.Errorf("%s: %w", FileName, err)
 	}
+	var extra yaml.Node
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("%s must contain exactly one YAML document", FileName)
+	}
 	if err := m.Validate(); err != nil {
 		return nil, err
 	}
@@ -830,10 +837,10 @@ func validateIsolation(at string, w Workload, fail func(format string, args ...a
 			fail("%s: %s is both a secret and a plain env value", at, s)
 		}
 	}
-	if w.Resources.Memory != "" && !sizePattern.MatchString(w.Resources.Memory) {
-		fail("%s.resources.memory: %q must look like 512m or 2g", at, w.Resources.Memory)
+	if _, err := ParseMemory(w.Resources.Memory); err != nil {
+		fail("%s.resources.memory: %v", at, err)
 	}
-	if w.Resources.CPUs < 0 || w.Resources.CPUs > 64 {
+	if math.IsNaN(w.Resources.CPUs) || math.IsInf(w.Resources.CPUs, 0) || w.Resources.CPUs < 0 || w.Resources.CPUs > 64 {
 		fail("%s.resources.cpus: must be 0 to 64", at)
 	}
 	if w.Health != nil && w.Health.Path != "" && !strings.HasPrefix(w.Health.Path, "/") {
@@ -1320,4 +1327,22 @@ func (w Workload) CapabilityNames() []string {
 		out = append(out, strings.TrimPrefix(strings.ToUpper(c), "CAP_"))
 	}
 	return out
+}
+
+// ParseMemory reads a container memory ceiling in binary k, m or g units.
+// Empty leaves the default to the caller; explicit limits must be positive
+// and fit the signed byte count Docker accepts.
+func ParseMemory(size string) (int64, error) {
+	if size == "" {
+		return 0, nil
+	}
+	if !sizePattern.MatchString(size) {
+		return 0, fmt.Errorf("%q must look like 512m or 2g", size)
+	}
+	shift := map[byte]uint{'k': 10, 'm': 20, 'g': 30}[size[len(size)-1]]
+	n, err := strconv.ParseUint(size[:len(size)-1], 10, 64)
+	if err != nil || n == 0 || n > uint64(math.MaxInt64)>>shift {
+		return 0, fmt.Errorf("%q must be a positive memory limit within 9223372036854775807 bytes", size)
+	}
+	return int64(n << shift), nil
 }

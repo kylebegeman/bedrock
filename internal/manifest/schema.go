@@ -193,11 +193,11 @@ func (g *schemaGenerator) constrain() {
 	g.def("Health")["allOf"] = []any{condition(schemaObject{"required": []string{"command"}, "properties": schemaObject{"command": schemaObject{"minItems": 1}}}, properties(schemaObject{"path": schemaObject{"const": ""}}))}
 	g.describe("Health", "timeout", "Positive Go duration such as 90s. Default 60s.")
 	g.prop("Health", "command")["items"] = schemaObject{"type": []string{"string", "number", "boolean"}, "minLength": 1}
-	g.prop("Resources", "memory")["pattern"] = `^(?:[0-9]+[kmg]|)$`
+	g.prop("Resources", "memory")["pattern"] = `^(?:0*[1-9][0-9]*[kmg]|)$`
 	g.prop("Resources", "cpus")["minimum"] = 0
 	g.prop("Resources", "cpus")["maximum"] = 64
 	g.prop("Resources", "pids")["anyOf"] = []any{schemaObject{"const": 0}, schemaObject{"minimum": 16, "maximum": 1 << 20}}
-	g.describe("Resources", "memory", "Container memory ceiling, such as 512m or 2g. Default 2g.")
+	g.describe("Resources", "memory", "Positive container memory ceiling in binary k, m or g units, such as 512m or 2g, within signed 64-bit bytes. Default 2g.")
 	g.prop("Mount", "path")["pattern"] = `^/`
 	g.describe("Mount", "volume", "A volume declared under this app's data.volumes.")
 	g.prop("Data", "volumes")["propertyNames"] = schemaObject{"allOf": []any{stringsSchema(namePattern.String()), schemaObject{"not": schemaObject{"enum": []string{DatabaseVolume, ObjectsVolume}}}}}

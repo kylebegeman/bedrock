@@ -646,8 +646,8 @@
           "type": "number"
         },
         "memory": {
-          "description": "Container memory ceiling, such as 512m or 2g. Default 2g.",
-          "pattern": "^(?:[0-9]+[kmg]|)$",
+          "description": "Positive container memory ceiling in binary k, m or g units, such as 512m or 2g, within signed 64-bit bytes. Default 2g.",
+          "pattern": "^(?:0*[1-9][0-9]*[kmg]|)$",
           "type": "string"
         },
         "pids": {

@@ -52,19 +52,25 @@ func (m *Manager) IPv4() (string, error) {
 
 func (m *Manager) zone(ctx context.Context, host string) (cloudflare.Zone, error) {
 	if m.zones == nil {
-		m.zones = map[string]cloudflare.Zone{}
-	}
-	for name, z := range m.zones {
-		if host == name || strings.HasSuffix(host, "."+name) {
-			return z, nil
+		zones, err := m.CF.Zones(ctx)
+		if err != nil {
+			return cloudflare.Zone{}, err
+		}
+		m.zones = make(map[string]cloudflare.Zone, len(zones))
+		for _, z := range zones {
+			m.zones[z.Name] = z
 		}
 	}
-	z, err := m.CF.ZoneFor(ctx, host)
-	if err != nil {
-		return cloudflare.Zone{}, err
+	best := cloudflare.Zone{}
+	for name, z := range m.zones {
+		if (host == name || strings.HasSuffix(host, "."+name)) && len(name) > len(best.Name) {
+			best = z
+		}
 	}
-	m.zones[z.Name] = z
-	return z, nil
+	if best.ID == "" {
+		return best, fmt.Errorf("%w for %s among %d zone(s) the token can see", cloudflare.ErrNoZone, host, len(m.zones))
+	}
+	return best, nil
 }
 
 // Outcome says what Ensure did to a record.
@@ -126,21 +132,35 @@ func (m *Manager) Ensure(ctx context.Context, app, host string, mode manifest.DN
 	want := cloudflare.Record{Type: "A", Name: host, Content: ip, Proxied: proxied, Comment: Comment(app, m.Hostname)}
 	var a *cloudflare.Record
 	var removed []string
+	// Inspect the whole destination set before changing anything. One A
+	// record pointing here cannot make a second destination safe to ignore.
 	for i := range records {
-		switch records[i].Type {
-		case "A":
-			if a == nil {
-				a = &records[i]
-			}
-		case "CNAME", "AAAA":
-			if !take {
-				return Outcome{}, fmt.Errorf("%s has a %s record (%s) that would shadow the A record bedrock keeps; remove it, or run bedrock dns point %s", host, records[i].Type, records[i].Content, host)
-			}
-			if err := m.CF.Delete(ctx, z.ID, records[i].ID); err != nil {
-				return Outcome{}, err
-			}
-			removed = append(removed, records[i].Type+" "+records[i].Content)
+		r := &records[i]
+		if r.Type != "A" {
+			continue
 		}
+		if r.Content != ip && !take {
+			where := r.Content
+			if other, machine, ok := commentApp(r.Comment); ok {
+				where += fmt.Sprintf(" (%s on %s)", other, machine)
+			}
+			return Outcome{}, fmt.Errorf("%s %w: at %s, not this machine (%s); when it is time to move it, run bedrock dns point %s", host, ErrElsewhere, where, ip, host)
+		}
+		if a == nil || a.Content != ip && r.Content == ip {
+			a = r
+		}
+	}
+	for _, r := range records {
+		if r.Type != "CNAME" && r.Type != "AAAA" && (r.Type != "A" || a == nil || r.ID == a.ID) {
+			continue
+		}
+		if !take {
+			return Outcome{}, fmt.Errorf("%s has an additional %s record (%s) that would split or shadow the A record bedrock keeps; remove it, or run bedrock dns point %s", host, r.Type, r.Content, host)
+		}
+		if err := m.CF.Delete(ctx, z.ID, r.ID); err != nil {
+			return Outcome{}, err
+		}
+		removed = append(removed, r.Type+" "+r.Content)
 	}
 	if a == nil {
 		if _, err := m.CF.Create(ctx, z.ID, want); err != nil {
@@ -148,14 +168,7 @@ func (m *Manager) Ensure(ctx context.Context, app, host string, mode manifest.DN
 		}
 		return Outcome{Host: host, Action: "made", Content: ip, Proxied: proxied, Zone: z.Name, Removed: removed}, nil
 	}
-	if a.Content != ip && !take {
-		where := a.Content
-		if other, machine, ok := commentApp(a.Comment); ok {
-			where += fmt.Sprintf(" (%s on %s)", other, machine)
-		}
-		return Outcome{}, fmt.Errorf("%s %w: at %s, not this machine (%s); when it is time to move it, run bedrock dns point %s", host, ErrElsewhere, where, ip, host)
-	}
-	if a.Content == ip && a.Proxied == proxied && a.Comment == want.Comment {
+	if a.Content == ip && a.Proxied == proxied && a.Comment == want.Comment && len(removed) == 0 {
 		return Outcome{Host: host, Action: "kept", Content: ip, Proxied: proxied, Zone: z.Name, Removed: removed}, nil
 	}
 	want.ID = a.ID
