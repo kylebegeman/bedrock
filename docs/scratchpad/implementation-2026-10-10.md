@@ -1,5 +1,14 @@
 # Bedrock implementation handoff
 
+## Final status
+
+All 12 selected items are implemented in local milestone commits on `next`.
+Final executable source is `7f17df1`; its required full checks and both static
+Linux builds passed. The live product proof is bound to `39e93a5` and the
+live two-machine transfer/recovery proof to `b9c31bf`.
+Both exact disposable providers are stopped with disks and evidence preserved.
+Final verification, bounded corrections and limitations are recorded below.
+
 ## Session intent and authorization
 
 Kyle authorized end-to-end implementation with milestone commits of the union
@@ -554,3 +563,203 @@ new live CLI evidence and strict guard on both guests after the reviewed
 legacy transition. Repeating unrelated product fixtures is not required by
 this bounded inventory change. Only this evidence note was added after the
 checks; executable source remained frozen.
+
+
+## Final checksum-bound transitions and transfer preflight
+
+Both retained disposable guests completed separate journaled upgrades to
+clean commit `b9c31bf7e08ae58f448ba93df613ceb35c829ba5`. Source receipt
+`op-20261011-025630-q25dn` and destination receipt
+`op-20261011-025826-37r2z` each retain four successful steps and one
+interruption. Installed and canonical daemon bytes match the reviewed Linux
+ARM64 SHA-256
+`31c640d308f70dd6310f17bc86242deaecd569ef7dc190c4f9582a177488da67`.
+An independent read-only review verified the receipts, hashes, public
+identities and strict frozen inventory guards. Native input digests are
+24 hexadecimal characters; an external verifier's initial 64-character
+assumption was corrected by read-only review without replaying an upgrade.
+Transition artifacts:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-inventory-transition-b9c31bf`.
+
+The retained destination's actual `MemTotal` is 2,307,063,808 bytes, above
+doctor's 2 GiB minimum. Native doctor passed after the RAM repair and again
+after the binary transition. Source remains at 1536 MiB configured RAM and
+1,521,180,672 bytes actual `MemTotal`; it was already prepared before this
+transfer. Both executable translation caches remain capped at 128 MiB.
+These retained configurations do not replace the documented fresh-guest
+3072 MiB defaults.
+
+The final transfer preflight passed on the same clean commit, source tree
+SHA-256
+`f1dad22e795db684593ee9630acc2bfb17897ae73823186cb86f4f50278ba47f`.
+The final transfer's retained proof-built Linux and macOS binaries match the
+reviewed checksums.
+Preflight report:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-transfer-preflight-b9c31bf/report.json`.
+The checkout stayed unchanged throughout the final proof.
+
+## Full two-machine transfer and recovery success
+
+The final runner passed with exit code 0 on the exact clean `b9c31bf`
+commit and preflight tree digest above, finishing at
+`2026-10-11T03:30:52.279268Z`. The transfer script ran for 1582.597 seconds.
+Both installed guest binaries match the reviewed ARM64 checksum.
+Report:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-transfer-final-b9c31bf/report.md`.
+An independent read-only review verified the exact binaries, four public
+handoffs, native receipt digests, public readiness observations and final
+removal/resume ordering. It found no contradictory selected-flow result.
+
+The run proves distinct pinned host identities, recipient-bound shared storage,
+destination scratch rehearsal and cleanup, the final source fence surviving
+an explicit daemon restart, exact snapshot staging and explicit app cutover.
+Final notes move `move-5f0ea009f3f46903` staged under
+`op-20261011-031611-zssh5` (12 successful steps), then cut over under
+`op-20261011-031711-vkobq` (5 successful steps).
+The first destination removal finished before deliberate source resumption.
+
+Fresh notes snapshot
+`c77248b42096e8b3f2a518be5bb677cac80b04a36422dc78e02863e5558c49f1`
+was embedded in machine snapshot
+`1396e54a04fa568024bfab4433a032cb26faa508f276e3bd5c7515affc2d1a49`.
+Recovery `lane-transfer-1396e54a04fa5680` completed under
+`op-20261011-032216-exvw7` with all 8 steps successful.
+Later source fencing captures legitimately have different app snapshot IDs;
+they do not replace the earlier machine snapshot's embedded recovery point.
+
+Before cutover, both restored apps were privately ready, imported app history
+had no active revision, source container references were cleared, and restored
+workloads published no ports. The destination kept its original machine ID,
+encryption recipient and existing journal, including primer
+`op-20261011-031830-s7d4u` and four earlier anchors.
+Applying the source host profile changed its hostname as expected while
+preserving the destination machine identity.
+Explicit machine cutover `op-20261011-032737-ka2n3` succeeded in all 7 steps
+and produced a live recovery report.
+
+Final destination hello removal finished at `03:28:58.626Z` and notes removal
+at `03:29:11.487Z`, before source hello resume began at `03:29:21.589Z`
+and notes resume at `03:29:33.561Z`.
+Both final resume receipts succeeded, the original marker was verified,
+destination apps and workers were empty, and source writers were running
+with their normal restart policies and no migration fences.
+
+The retained client bootstrap receipt `op-20261011-030501-jmrpv` succeeded
+in all 6 steps with zero interruptions. Its terminal private SQLite journal,
+exact binaries, target/profile inputs, four public handoffs and refusal logs
+were copied before workdir cleanup. Final journal capture
+`state-00009-succeeded.db` and its public read-only projection were
+independently verified. Early worker projections include timeout gaps; later
+relevant captures completed. Sampled observations are non-atomic and do not
+provide continuous monitoring. The verdict combines script assertions,
+native receipts and independent observations.
+
+The preserver, observer and resource monitor each ended normally with exit 0
+after the terminal report. Resource coverage retained 57 samples and did not
+hit its 30-minute bound. Sampled provider OOM flags were false; this does not
+establish historical or guest OOM absence. Both translation-cache caps and
+the reviewed destination RAM boot configuration remained intact.
+
+## Bounded final corrections on `7f17df1`
+
+Independent review found a real recovery-history unit mismatch:
+`ImportMachineRecovery` synthesized seconds while the store writes and reads
+milliseconds. The regression reproduced January 1970 dates on seven
+synthesized fields: interrupted jobs and backups, both interrupted release
+states, unresolved incidents, fallback app timestamps and the import marker.
+The single assignment now uses the existing `unix()` helper.
+The persistent-state test verifies actual public dates, completed-record
+preservation, source immutability and unchanged timestamps on same-ID retry.
+
+The source-fence assertion before daemon restart also allowed the restart's
+success to mask a failed fence or writer check. The corrected POSIX command
+uses errexit and a separately checked Docker producer before inspecting its
+output or restarting. Three negative regressions failed on the old command:
+missing fence, active writer and failed Docker inventory. All now refuse
+before restart, while the accepted fenced/no-writer case succeeds.
+Independent observations positively corroborate this completed run's fence
+and stopped source writer, so the assertion weakness does not contradict its
+factual result.
+
+The four-file correction was independently reviewed without blockers and
+committed as `7f17df1ba1555d64387cda7918c79f9e109ec1a7`.
+Focused recovery state tests and all four POSIX shell regressions passed.
+Final `make check` passed: **75 lane tests**, shell syntax/shellcheck,
+Python AST, formatting, vet and the full Go suite.
+Static Linux AMD64 and ARM64 builds passed from the clean correction commit:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-final-build-7f17df1/report.json`.
+
+The full live product proof remains bound to `39e93a5`, and the full live
+two-machine proof to `b9c31bf`. The final timestamp/assertion correction was
+verified by its focused red/green regressions, the required full check suite
+and fresh cross-builds. Those bounded corrections did not require replaying
+the unrelated live workflows; they were not installed on the retained guests.
+
+## Separately classified disposable backup history
+
+A bounded read-only after-run probe classified inherited source notes backup
+row 15 as terminal unsuccessful at `03:00:20.812Z`, before final proof launch.
+Its unique nearby operation `op-20261011-030014-woebg` failed at snapshot
+initialization with matching catalog/step errors. Fixed error categories were
+restic initialization failure, connection refused and local storage endpoint.
+Four subsequent notes backups in the final proof succeeded.
+
+The destination's scheduled machine backup
+`op-20261011-033003-sx3jj` also failed at storage initialization after the
+proof script removed its temporary shared-storage tunnel. Its fixed error
+categories match the inherited source failure. This is separate from the
+completed transfer/recovery operations. The later source scheduled machine
+backup `op-20261011-033015-r6pi6` succeeded in all 3 steps at
+`03:31:34.229Z`, establishing its terminal boundary before provider cleanup.
+
+Classification artifacts:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-transfer-final-b9c31bf-after-run`.
+Catalog associations are supported by target, time and matching error
+metadata; there is no direct backup/operation foreign key.
+Empty snapshot fields alone do not prove that no snapshot was captured.
+Raw errors, operation inputs, step output and private identities stayed
+inside the guests; only reviewed metadata and fixed categories were retained.
+
+## Owned provider cleanup and final scope
+
+After independent proof review and confirmation that both guests had no
+applying operations, only the two exact owned providers were stopped with
+`docker stop`:
+
+- Source `bedrock-lane-c6b1271d5ffbf6fa366973497d676e9b` stopped at
+  `03:35:10.512Z`.
+- Target `bedrock-lane-94a23d6c5023e8917a2c70168b9cc88a` stopped at
+  `03:35:52.273Z`.
+
+Both retained provider postconditions show stopped, PID 0, exit code 0 and
+OOMKilled false. Container IDs, images, configurations and guest disk files
+were preserved. No down, reset, remove or broad process kill was used.
+All task-owned observation/preservation/resource sessions have ended; no
+live guest work remains.
+The external cleanup helper initially assumed Docker stdout would equal
+the full container ID. Its assertion failed after the source had stopped;
+a read-only postcondition confirmed completion, and source stop was not
+replayed. That capture limitation is preserved in the cleanup evidence.
+
+Cleanup evidence:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-transfer-final-b9c31bf-after-run/provider-stop-evidence.json`.
+Final independent retained-evidence audit verified 22 successful in-run
+receipts and 112 successful steps:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-transfer-final-b9c31bf-after-run/retained-evidence-review.md`.
+The separate later metadata classification establishes the source scheduled
+backup's terminal success, beyond that audit's earlier sampled observation.
+Final platform summary:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-transfer-final-b9c31bf-after-run/platform-proof-summary.json`.
+The external operational handoff is updated; provider disks and evidence
+remain available for deliberate reuse.
+
+All selected implementation work is complete. Public DNS/CA issuance, real
+Cloudflare lifecycle and historical private fixture proofs remain unverified.
+Fresh production MinIO object-image pulls still return HTTP 401; the exact
+pin is unchanged because replacement provenance and data compatibility are
+unestablished. Its owned follow-up is
+[the tracked availability issue](../technical/minio-image-availability.md).
+The disposable backup repository used separately checksum-pinned official
+binaries and does not establish production object-service equivalence.
+No production target was contacted, and no production deployment, publishing,
+paid provisioning or external messages occurred.
