@@ -183,7 +183,7 @@ func TestRehearsalRunsReleasesInOrderRecordsExactEvidenceAndCleansFailure(t *tes
 					return
 				}
 				if strings.HasPrefix(path, "/networks/") && r.Method == http.MethodGet {
-					json.NewEncoder(w).Encode(map[string]any{"Name": strings.TrimPrefix(path, "/networks/"), "Internal": true})
+					json.NewEncoder(w).Encode(map[string]any{"Name": strings.TrimPrefix(path, "/networks/"), "Internal": true, "Labels": map[string]string{docker.LabelOwner: docker.OwnerValue}})
 					return
 				}
 				fake.ServeHTTP(w, r)

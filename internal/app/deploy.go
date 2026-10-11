@@ -99,9 +99,25 @@ func (d Deploy) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 	if name == "" {
 		name = manifest.FileName
 	}
-	m, err := manifest.LoadFile(in.Source, name)
+	stateDir := d.StateDir
+	if stateDir == "" {
+		stateDir = defaultStateDir
+	}
+	if err := refuseRecursiveDeployCapture(in.Source, stateDir); err != nil {
+		return nil, err
+	}
+	cached, err := readDeploySourceReservation(stateDir, in)
 	if err != nil {
 		return nil, err
+	}
+	var m *manifest.Manifest
+	if cached != nil {
+		m = &cached.Manifest
+	} else {
+		m, err = manifest.LoadFile(in.Source, name)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if d.Store != nil {
 		if err := CheckMigrationAccess(d.Store.Path(), m.App); err != nil {
@@ -136,10 +152,33 @@ func (d Deploy) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 		return nil, err
 	}
 	commit := in.Commit
-	if commit == "" {
-		commit = sourceCommit(ctx, in.Source)
+	var sourceHash string
+	if cached != nil {
+		commit, sourceHash = cached.Commit, cached.Hash
+		if !cached.Discarded {
+			captured := filepath.Join(deploySourceDir(stateDir, m.App, in.Revision), "source")
+			if _, err := os.Lstat(captured); err == nil {
+				got, err := deploySourceHash(ctx, captured)
+				if err != nil {
+					return nil, err
+				}
+				if got != sourceHash {
+					return nil, errors.New("captured deploy source changed; refusing operation recovery")
+				}
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return nil, err
+			}
+		}
+	} else {
+		if commit == "" {
+			commit = sourceCommit(ctx, in.Source)
+		}
+		sourceHash, err = deploySourceHash(ctx, in.Source)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return d.rollout(ctx, m, in.Revision, &buildFrom{source: in.Source, commit: commit, restore: in.Restore, secretsFrom: in.SecretsFrom})
+	return deployCapturePlan(ctx, d, in, m, commit, sourceHash)
 }
 
 // buildFrom says images come from a source directory; nil means they are
@@ -391,19 +430,7 @@ func parseSize(s string) (int64, error) {
 	if s == "" {
 		return 0, fmt.Errorf("size %q", s)
 	}
-	n, err := strconv.ParseInt(s[:len(s)-1], 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("size %q", s)
-	}
-	switch s[len(s)-1] {
-	case 'k':
-		return n << 10, nil
-	case 'm':
-		return n << 20, nil
-	case 'g':
-		return n << 30, nil
-	}
-	return 0, fmt.Errorf("size %q", s)
+	return manifest.ParseMemory(s)
 }
 
 // waitReady waits until a workload's container is ready: its health
@@ -416,8 +443,16 @@ func waitReady(ctx context.Context, e *docker.Engine, container string, w manife
 			timeout = d
 		}
 	}
-	deadline := time.Now().Add(timeout)
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	var last string
+	expired := func() error {
+		if err := parent.Err(); err != nil {
+			return err
+		}
+		return fmt.Errorf("not ready after %s: %s", timeout, last)
+	}
 	for {
 		info, err := e.Inspect(ctx, container)
 		switch {
@@ -435,12 +470,12 @@ func waitReady(ctx context.Context, e *docker.Engine, container string, w manife
 			}
 			last = why
 		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("not ready after %s: %s", timeout, last)
+		if ctx.Err() != nil {
+			return expired()
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return expired()
 		case <-time.After(2 * time.Second):
 		}
 	}
@@ -464,7 +499,11 @@ func probeReady(ctx context.Context, e *docker.Engine, container string, info *d
 		return false, "no network address yet"
 	}
 	if w.Health != nil && w.Health.Path != "" {
-		resp, err := (&http.Client{Timeout: 5 * time.Second, CheckRedirect: directCheckRedirect}).Get(fmt.Sprintf("http://%s:%d%s", ip, port, w.Health.Path))
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+net.JoinHostPort(ip, strconv.Itoa(port))+w.Health.Path, nil)
+		if err != nil {
+			return false, err.Error()
+		}
+		resp, err := (&http.Client{Timeout: 5 * time.Second, CheckRedirect: directCheckRedirect}).Do(req)
 		if err != nil {
 			return false, err.Error()
 		}
@@ -474,7 +513,7 @@ func probeReady(ctx context.Context, e *docker.Engine, container string, info *d
 		}
 		return false, fmt.Sprintf("%s answered %s", w.Health.Path, resp.Status)
 	}
-	conn, err := (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", fmt.Sprintf("%s:%d", ip, port))
+	conn, err := (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
 	if err != nil {
 		return false, err.Error()
 	}
@@ -709,7 +748,9 @@ func runCheck(ctx context.Context, c manifest.Check) error {
 	if err != nil {
 		return err
 	}
-	return evaluateCheck(c, &http.Client{Timeout: within, Transport: publicTransport()}, req, within)
+	transport := publicTransport()
+	defer transport.CloseIdleConnections()
+	return evaluateCheck(c, &http.Client{Timeout: within, Transport: transport}, req, within)
 }
 
 // runCheckDirect performs a check against the new container that would
@@ -732,7 +773,7 @@ func runCheckDirect(ctx context.Context, e checkInspector, m *manifest.Manifest,
 		return fmt.Errorf("check %s: %s has no address", c.URL, containers[name])
 	}
 	within := checkTimeout(c)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://%s:%d%s", ip, servePort(w, &route), u.RequestURI()), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+net.JoinHostPort(ip, strconv.Itoa(servePort(w, &route)))+u.RequestURI(), nil)
 	if err != nil {
 		return err
 	}
@@ -757,7 +798,10 @@ func evaluateCheck(c manifest.Check, client *http.Client, req *http.Request, wit
 		return fmt.Errorf("check %s: %w", c.URL, err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return fmt.Errorf("check %s: read response: %w", c.URL, err)
+	}
 	took := time.Since(started)
 	want := c.Status
 	if want == 0 {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -238,5 +239,51 @@ func TestWhatARemovedAppLeftCanGoWithItsData(t *testing.T) {
 	}
 	if _, err := plan(`{"app":"loom","data":true}`); err == nil || !strings.Contains(err.Error(), "nothing of it is left") {
 		t.Fatalf("a second purge found something: %v", err)
+	}
+}
+
+func TestRemovingDataIncludesVolumesFromRetiredAndFailedRevisions(t *testing.T) {
+	ctx := context.Background()
+	store := releaseTestStore(t)
+	for i, rev := range []state.Revision{
+		{App: "site", ID: "retired-revision", Status: state.RevisionRetired, Manifest: json.RawMessage(`{"app":"site","data":{"volumes":{"old-files":{}}}}`)},
+		{App: "site", ID: "failed-revision", Status: state.RevisionFailed, Manifest: json.RawMessage(`{"app":"site","data":{"volumes":{"failed-files":{}}}}`)},
+		{App: "site", ID: "active-revision", Status: state.RevisionActive, Manifest: json.RawMessage(`{"app":"site","data":{"volumes":{"files":{}}}}`)},
+	} {
+		rev.CreatedAt = time.Now().Add(time.Duration(i) * time.Minute)
+		if err := store.SaveRevision(ctx, rev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fake := dockertest.New(t)
+	owned := map[string]string{docker.LabelOwner: docker.OwnerValue}
+	for _, name := range []string{"bedrock-site-files", "bedrock-site-old-files", "bedrock-site-failed-files", "bedrock-other-files"} {
+		fake.AddVolume(name, owned)
+	}
+	plan, err := (Remove{Store: store, StateDir: t.TempDir()}).Plan(ctx, json.RawMessage(`{"app":"site","data":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range plan.Steps {
+		if step.Name == "data" {
+			if err := step.Apply(ctx, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if got := strings.Join(fake.VolumeNames(), " "); got != "bedrock-other-files" {
+		t.Fatalf("data removal left historical volumes or touched another app: %s", got)
+	}
+}
+
+func TestRemovingDataRefusesUnreadableHistoricalManifests(t *testing.T) {
+	ctx := context.Background()
+	store := releaseTestStore(t)
+	seedApp(t, store, "site")
+	if err := store.SaveRevision(ctx, state.Revision{App: "site", ID: "old-revision", Status: state.RevisionRetired, Manifest: json.RawMessage(`{"broken":`), CreatedAt: time.Now().Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (Remove{Store: store, StateDir: t.TempDir()}).Plan(ctx, json.RawMessage(`{"app":"site","data":true}`)); err == nil {
+		t.Fatal("removal cannot identify historical data safely from a malformed manifest")
 	}
 }

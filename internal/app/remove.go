@@ -61,6 +61,7 @@ type removal struct {
 	stateDir string
 	// secrets says whether the app's sealed secrets go too.
 	secrets bool
+	volumes []string
 }
 
 // Plan implements kernel.Definition.
@@ -103,6 +104,22 @@ func (r Remove) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 	plan := &kernel.Plan{Target: in.App, Recovery: kernel.Resume}
 	plan.Steps = append(plan.Steps, x.unrouteStep(), x.dnsStep(), x.containersStep())
 	if in.Data {
+		// A later manifest can drop a volume, and a failed candidate can add
+		// one. Every recorded revision remains part of this app's data.
+		names := map[string]bool{docker.VolumeName(in.App, postgresWorkload): true}
+		for _, rev := range revs {
+			var stored manifest.Manifest
+			if err := json.Unmarshal(rev.Manifest, &stored); err != nil {
+				return nil, fmt.Errorf("revision %s of %s: its manifest doesn't parse: %w", rev.ID, in.App, err)
+			}
+			if stored.App != in.App {
+				return nil, fmt.Errorf("revision %s of %s has a manifest for %s; refusing data removal", rev.ID, in.App, stored.App)
+			}
+			for _, volume := range stored.DataVolumes() {
+				names[docker.VolumeName(in.App, volume)] = true
+			}
+		}
+		x.volumes = sortedKeys(names)
 		plan.Steps = append(plan.Steps, x.dataStep())
 	}
 	plan.Steps = append(plan.Steps, x.forgetStep())
@@ -262,18 +279,14 @@ func (x *removal) removeContainer(ctx context.Context, e *docker.Engine, c docke
 
 func (x *removal) dataStep() kernel.Step {
 	return kernel.Step{
-		Name: "data", Change: "remove the app's volumes, database and object store (no way back except a backup; its backups in the storage bucket stay)",
+		Name: "data", Change: "remove the app's volumes, database and object store: " + strings.Join(x.volumes, ", ") + " (no way back except a backup; its backups in the storage bucket stay)",
 		Apply: func(ctx context.Context, out io.Writer) error {
 			e, err := docker.Connect(ctx)
 			if err != nil {
 				return err
 			}
 			defer e.Close()
-			names := []string{docker.VolumeName(x.in.App, postgresWorkload)}
-			for _, v := range x.m.DataVolumes() {
-				names = append(names, docker.VolumeName(x.in.App, v))
-			}
-			for _, v := range names {
+			for _, v := range x.volumes {
 				removed, err := e.RemoveVolume(ctx, v)
 				if err != nil {
 					return err
@@ -354,6 +367,9 @@ func forgetApp(ctx context.Context, store *state.Store, sec *secrets.Store, stat
 			}
 			fmt.Fprintf(out, "%s's secrets forgotten\n", app)
 		}
+	}
+	if err := forgetDeploySourceReservations(stateDir, app); err != nil {
+		return err
 	}
 	if err := forgetMigration(store.Path(), app); err != nil {
 		return err

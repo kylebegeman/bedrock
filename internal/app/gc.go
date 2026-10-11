@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -181,7 +182,7 @@ const retiredKept = 5
 
 func (g GC) forgetStep() kernel.Step {
 	return kernel.Step{
-		Name: "forget", Change: "forget retired revisions older than the last five",
+		Name: "forget", Change: "forget retired revisions older than the last five and discard source captures of finished deployments",
 		Apply: func(ctx context.Context, out io.Writer) error {
 			keep, err := gcResourcesToKeep(ctx, g.Store)
 			if err != nil {
@@ -209,6 +210,13 @@ func (g GC) forgetStep() kernel.Step {
 					fmt.Fprintf(out, "forgot %s %s\n", r.App, r.ID)
 				}
 			}
+			removed, err := collectDeploySources(ctx, g.Store, filepath.Dir(g.Store.Path()))
+			if err != nil {
+				return err
+			}
+			if removed > 0 {
+				fmt.Fprintf(out, "removed source captures for %d finished deployment(s)\n", removed)
+			}
 			return nil
 		},
 	}
@@ -226,6 +234,13 @@ type gcRetention struct {
 // migrations, and the code paired with each unconsumed data checkpoint.
 func gcResourcesToKeep(ctx context.Context, store *state.Store) (*gcRetention, error) {
 	keep := &gcRetention{revisions: map[string]bool{}, images: map[string]bool{}}
+	openJobs, err := store.OpenJobRuns(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, run := range openJobs {
+		keep.revisions[run.App+"/"+run.Revision] = true
+	}
 	boundaries, err := store.ReleaseBoundaries(ctx, "")
 	if err != nil {
 		return nil, err
@@ -303,8 +318,8 @@ func staleImages(ctx context.Context, e *docker.Engine, keep *gcRetention) ([]do
 			continue
 		}
 		referenced := false
-		for _, tag := range img.Tags {
-			if keep.images[tag] {
+		for _, ref := range append(img.Tags, img.Digests...) {
+			if keep.images[ref] {
 				referenced = true
 				break
 			}

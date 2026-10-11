@@ -1,11 +1,13 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -210,9 +212,23 @@ func (r *rollout) recordStep() kernel.Step {
 		Name: "record", Change: "record a new revision of " + r.m.App,
 		Note: notes("revision "+r.revision, noteCommit(r.from.commit)),
 		Apply: func(ctx context.Context, out io.Writer) error {
+			existing, err := r.store.GetRevision(ctx, r.m.App, r.revision)
+			if err == nil {
+				if kernel.Attempt(ctx) < 2 {
+					return fmt.Errorf("revision %s of %s already exists; choose a new revision", r.revision, r.m.App)
+				}
+				if !bytes.Equal(existing.Manifest, r.manifestJSON) || !maps.Equal(existing.Containers, r.containers) || existing.Source != r.from.commit {
+					return errors.New("recorded revision does not match this interrupted deployment")
+				}
+				fmt.Fprintf(out, "revision %s already recorded\n", r.revision)
+				return nil
+			}
+			if !errors.Is(err, state.ErrNotFound) {
+				return err
+			}
 			rev := state.Revision{App: r.m.App, ID: r.revision, Status: state.RevisionFailed, Manifest: r.manifestJSON,
 				Images: r.images, Containers: r.containers, Source: r.from.commit, CreatedAt: time.Now().UTC()}
-			if err := r.store.SaveRevision(ctx, rev); err != nil {
+			if err := r.store.CreateRevision(ctx, rev); err != nil {
 				return err
 			}
 			fmt.Fprintf(out, "revision %s\n", r.revision)
@@ -366,7 +382,7 @@ func (r *rollout) imageStep(group []string) kernel.Step {
 						return err
 					}
 				}
-				return saveImageReferences(ctx, r.store, r.m.App, r.revision, group, w.Image)
+				return recordImage(ctx, r.store, r.connect, r.m.App, r.revision, group, w.Image, r.images, out)
 			},
 		}
 	}

@@ -192,3 +192,59 @@ func TestGCPreservesRecoveredImageIDsWithOriginalSourceLabels(t *testing.T) {
 		t.Fatal("collection ignored the recovered revision's pinned image identity")
 	}
 }
+
+func TestGCPreservesRetainedRepositoryDigestsWithOriginalSourceLabels(t *testing.T) {
+	ctx := context.Background()
+	store := releaseTestStore(t)
+	m := releaseTestManifest()
+	rev := releaseTestRevision(t, store, m, "recovered-target", state.RevisionActive, time.Now())
+	digest := "registry.example/app@sha256:" + strings.Repeat("a", 64)
+	rev.Images = map[string]string{"web": digest}
+	if err := store.SaveRevision(ctx, *rev); err != nil {
+		t.Fatal(err)
+	}
+	fake := dockertest.New(t)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/v"+dockertest.APIVersion)
+		if path == "/images/json" {
+			json.NewEncoder(w).Encode([]any{map[string]any{"Id": "sha256:source-image", "Labels": imageLabels(m.App, "web", "source-revision"), "RepoTags": []string{"registry.example/app:old"}, "RepoDigests": []string{digest}}})
+			return
+		}
+		fake.ServeHTTP(w, r)
+	}))
+	defer proxy.Close()
+	t.Setenv("DOCKER_HOST", "tcp"+strings.TrimPrefix(proxy.URL, "http"))
+	e, err := docker.Connect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	keep, err := gcResourcesToKeep(ctx, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale, err := staleImages(ctx, e, keep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stale) != 0 {
+		t.Fatalf("GC would discard the retained digest %s: %+v", digest, stale)
+	}
+}
+
+func TestGCProtectsTheRevisionOfAnOpenJob(t *testing.T) {
+	ctx := context.Background()
+	store := releaseTestStore(t)
+	m := releaseTestManifest()
+	rev := releaseTestRevision(t, store, m, "running-job-revision", state.RevisionRetired, time.Now())
+	if _, err := store.StartJobRun(ctx, state.JobRun{App: m.App, Revision: rev.ID, Workload: "web", Kind: JobCron, StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	keep, err := gcResourcesToKeep(ctx, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !keep.revisions[rev.App+"/"+rev.ID] || !keep.images[rev.Images["web"]] {
+		t.Fatal("GC discarded the image and manifest needed by an unfinished job")
+	}
+}
