@@ -849,6 +849,9 @@ func validateIsolation(at string, w Workload, fail func(format string, args ...a
 	if w.Build != nil && (strings.HasPrefix(w.Build.Context, "/") || strings.Contains(w.Build.Context, "..")) {
 		fail("%s.build.context: must be inside the source", at)
 	}
+	if w.Build != nil && w.Build.Dockerfile != "" && (!filepath.IsLocal(w.Build.Dockerfile) || strings.ContainsRune(w.Build.Dockerfile, '\x00')) {
+		fail("%s.build.dockerfile: must be relative to its build context and stay inside it", at)
+	}
 	if w.Dir != "" && (strings.HasPrefix(w.Dir, "/") || strings.Contains(w.Dir, "..")) {
 		fail("%s.dir: must be inside the source", at)
 	}
