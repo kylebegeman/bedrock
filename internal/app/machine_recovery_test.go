@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -424,12 +425,19 @@ func TestRecoveryEmbeddedDataDoesNotDependOnRetainedAppRepositories(t *testing.T
 			}
 			s.Update(c.Name, func(c *dockertest.Container) {
 				c.ExitAfter = 1
-				c.Logs = `{"message_type":"summary","files_restored":1,"total_files":1}`
+				c.Logs = `{"message_type":"summary","files_restored":8,"total_files":6}`
 			})
 		}
 	}
 	if err := x.data(context.Background(), io.Discard); err != nil {
 		t.Fatal(err)
+	}
+	if !slices.Contains(restored.Cmd, "--verify") {
+		t.Error("machine data recovery must verify restored content")
+	}
+	loaded, err := x.load()
+	if err != nil || !loaded.DataReady[m.App] {
+		t.Fatal("verified embedded data with matching provenance was not marked ready:", err)
 	}
 	if len(restored.Cmd) < 2 || restored.Cmd[1] != in.Snapshot {
 		t.Fatal("embedded data restore followed an external app snapshot instead of the exact machine snapshot")
@@ -507,5 +515,68 @@ func TestRecoveryMachineCatalogArchivesImmutableLoadedImageIDs(t *testing.T) {
 	}
 	if history.Images["web"] != original.Images["web"] {
 		t.Fatal("machine catalog mutated the original source revision")
+	}
+}
+
+func TestRecoveryEmbeddedDataStillRequiresMatchingMetadataAndVerifiedSuccess(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		code    int
+		failure string
+	}{
+		{name: "layout mismatch", failure: "different service version or volume layout"},
+		{name: "provenance mismatch", failure: "differs from its machine recovery catalog"},
+		{name: "partial restore", code: 3, failure: "file restore failed"},
+		{name: "verification failure", code: 1, failure: "verification failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := recoveryFixture(t)
+			in := recoveryInput(true)
+			x := &machineRecovering{r: r, in: in, dir: RecoveryDirectory(r.StateDir, in.ID)}
+			m := recoveryManifest()
+			m.Data = &manifest.Data{Volumes: map[string]manifest.Volume{"uploads": {}}}
+			body, _ := json.Marshal(m)
+			rev := state.Revision{App: m.App, ID: "source-current", Manifest: body, CreatedAt: time.Now().Add(-time.Hour)}
+			provenance := newAppBackupProvenance(rev, time.Now())
+			rec := &machineRecoveryRecord{Input: in, Snapshot: restic.Snapshot{ID: in.Snapshot}, Catalog: machineRecoveryCatalog{EmbeddedData: true, Revisions: []state.Revision{rev}, AppData: map[string]appBackupProvenance{m.App: provenance}}, DataReady: map[string]bool{}}
+			if err := x.save(rec); err != nil {
+				t.Fatal(err)
+			}
+			fake := dockertest.New(t)
+			fake.OnCreate = func(c dockertest.Container) {
+				if len(c.Cmd) == 0 || c.Cmd[0] != "restore" {
+					return
+				}
+				restoredBody, restoredProvenance := body, provenance
+				if tc.name == "layout mismatch" {
+					old := recoveryManifest()
+					old.Data = &manifest.Data{Volumes: map[string]manifest.Volume{"different": {}}}
+					restoredBody, _ = json.Marshal(old)
+				}
+				if tc.name == "provenance mismatch" {
+					restoredProvenance.CapturedAt = restoredProvenance.CapturedAt.Add(time.Second)
+				}
+				if err := os.WriteFile(filepath.Join(x.names(&m).dir, "manifest.json"), restoredBody, 0o600); err != nil {
+					t.Error(err)
+				}
+				if err := writeRecoveryJSON(filepath.Join(x.names(&m).dir, appBackupProvenanceFile), restoredProvenance); err != nil {
+					t.Error(err)
+				}
+				fake.Update(c.Name, func(c *dockertest.Container) {
+					c.ExitCode, c.ExitAfter = tc.code, 1
+					c.Logs = `{"message_type":"summary","files_restored":8,"total_files":6}`
+					if tc.code != 0 {
+						c.Logs += "\n" + `{"message_type":"exit_error","message":"` + tc.failure + `"}`
+					}
+				})
+			}
+			if err := x.data(context.Background(), io.Discard); err == nil || !strings.Contains(err.Error(), tc.failure) {
+				t.Fatalf("unsafe restored data was accepted or failed at the wrong gate: %v", err)
+			}
+			loaded, err := x.load()
+			if err != nil || loaded.DataReady[m.App] {
+				t.Fatal("failed restored data was marked ready:", err)
+			}
+		})
 	}
 }

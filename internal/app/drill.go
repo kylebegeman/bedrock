@@ -202,9 +202,6 @@ func (d *drillState) restoreStep() kernel.Step {
 			if err != nil {
 				return d.abort(e, err)
 			}
-			if d.restored.FilesRestored != d.restored.TotalFiles {
-				return d.abort(e, fmt.Errorf("restored %d of %d files", d.restored.FilesRestored, d.restored.TotalFiles))
-			}
 			d.details = append(d.details, fmt.Sprintf("%d files (%s) restored", d.restored.FilesRestored, HumanBytes(d.restored.BytesRestored)))
 			fmt.Fprintf(out, "snapshot %s from %s: %s\n", d.found.ShortID, d.found.Time.Local().Format("2006-01-02 15:04"), d.details[0])
 			return nil

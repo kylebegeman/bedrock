@@ -171,13 +171,8 @@ func (x *machineRecovering) data(ctx context.Context, out io.Writer) error {
 		if !fullSnapshotID.MatchString(snapshot) {
 			return fmt.Errorf("%s has no exact pinned data recovery point", rev.App)
 		}
-		summary, err := r.Restore(ctx, snapshot, target, mounts, includes...)
-
-		if err != nil {
+		if _, err := r.Restore(ctx, snapshot, target, mounts, includes...); err != nil {
 			return err
-		}
-		if summary.FilesRestored != summary.TotalFiles {
-			return fmt.Errorf("%s restored %d of %d files", rev.App, summary.FilesRestored, summary.TotalFiles)
 		}
 		// An old backup must restore the same data layout. A machine
 		// catalog can otherwise pair new service versions with older data.

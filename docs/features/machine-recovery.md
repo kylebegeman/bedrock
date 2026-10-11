@@ -58,7 +58,8 @@ catalogs and image archives were introduced require a new machine backup.
 Recovery restores app data into volumes claimed on the clean target and starts
 long-running workloads on internal networks. It publishes no ports, installs
 no live app routes, changes no DNS records and runs no release or cron jobs.
-Private health probes verify the restored runtime. The source host profile is
+Restored file contents are verified against their snapshot before private
+health probes verify the restored runtime. The source host profile is
 applied; missing non-storage integrations and operational keys are recovered
 while target storage and already configured target values remain authoritative.
 

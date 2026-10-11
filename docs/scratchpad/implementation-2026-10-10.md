@@ -293,3 +293,67 @@ formatting, vet and the full Go suite. Shellcheck and whitespace checks pass.
 Only this verification note was added after the check. Production Go source
 remains unchanged; full product and two-machine proofs will run from the next
 clean committed snapshot.
+
+
+## First real data proof and restore-counter defect
+
+The clean `6d10cd1` product run passed upgrade/bootstrap, remote approvals,
+source preflight, deploy/previews, authenticated HTTPS and cross-origin refusal.
+Its real app backup passed. Scratch release rehearsal changed restored data,
+left live data and active revision unchanged, and removed scratch resources.
+The live incompatible candidate changed the marker; ordinary rollback was
+refused and explicit checkpoint rollback restored the original marker.
+The fresh app backup and machine backup then succeeded.
+
+Machine backup receipt `op-20261011-004423-eh4ku` captured snapshot
+`f195c346b5d09037bd59ef76f4fc9cb1b99a62524aa09b005bfa051f0aee8965`.
+Recovery rehearsal receipt `op-20261011-004526-q3dqw` passed fetch, resealing
+and recorded-image loading, then failed with `notes restored 8 of 6 files`.
+Retain the failed report and transcript at
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-product-final-6d10cd1`.
+This is not a passing recovery or full product proof.
+
+Pinned restic v0.19.1 source explains the exact discrepancy: a filtered restore
+selects `/data/app-data/notes`, but completes metadata for its two unselected
+ancestor directories. Its total counter increments only selected entries;
+its completed counter also increments those ancestors. File-count equality
+is therefore not a valid integrity gate. The bounded correction will require
+restic content verification on restore, retain raw counters for diagnostics,
+and rely on verified successful completion plus existing manifest/provenance
+checks rather than counter equality. Partial restore and verification errors
+must continue to fail, with meaningful regression coverage.
+
+The transfer preflight also found a stale scratch cleanup namespace. MoveTest
+uses `bedrock.notes.rehearse.move-test-`, while the proof checked an obsolete
+drill prefix. Correct container and volume filters and an added network
+assertion will be tested against deliberately present owned scratch resources.
+
+For the two-host proof, the post-product capacity measurement will decide
+whether to apply a target-only 1536 MiB boot override. A sample during product
+showed about 2.5 GiB available backend RAM, insufficient reserve for the earlier
+2048 MiB proposal. Original/replacement bytes, hashes and measured rationale
+will remain in external artifacts. Source memory and global settings stay as-is.
+
+
+Exact fresh-target `--verify` restore of the failed machine snapshot succeeded
+with the same eight-versus-six counts and all 671 bytes restored. A repeated
+verified restore also succeeded with three skipped files, proving that retry
+progress counters are unsuitable for integrity comparisons. The metadata-only
+inventory, raw restore summaries and probe scripts are saved at
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-recovery-f195c346-evidence`.
+Owned probe resources were cleaned; the original failed workspace is retained.
+
+Shared restores now require `--verify`; recovery and drills retain raw counters
+but accept verified successful completion. Regressions reproduce the live
+counter discrepancy, reject partial restore/verification errors despite a
+summary, preserve credential/container cleanup, enforce recovery metadata and
+provenance, and check drill failure receipts and scratch cleanup. The focused
+Restic and app suites passed before integration. The corrected snapshot passed
+`make check`: 32 lane safeguards, formatting, vet and the full Go suite.
+
+The corrected transfer cleanup assertion passed seven actual local checks:
+clean baseline, deliberate stopped-container/volume/network leaks each fail,
+and exact ownership-checked cleanup returns to success after each. Evidence:
+`/Users/kyle/Developer/lanes/bedrock/main/space/tmp/bedrock-transfer-provider-resources/cleanup-filter-probe-eb7d2810d231/report.md`.
+Only this evidence note was added after the full check. Another clean frozen
+product proof and the two-machine proof remain required.

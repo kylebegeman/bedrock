@@ -80,7 +80,9 @@ type Snapshot struct {
 	Summary  *Summary  `json:"summary,omitempty"`
 }
 
-// RestoreSummary is what restic reports after a restore.
+// RestoreSummary contains restic's restore progress counters. Selected
+// ancestor directories and files skipped on retry are accounted differently,
+// so the file counts cannot establish restore completeness.
 type RestoreSummary struct {
 	TotalFiles    int64 `json:"total_files"`
 	FilesRestored int64 `json:"files_restored"`
@@ -334,9 +336,10 @@ func (r Runner) Forget(ctx context.Context, host string, keep Keep) (int, error)
 }
 
 // Restore puts a snapshot's files back under /data, into whatever is
-// mounted there. Includes limit it to paths inside the snapshot.
+// mounted there and verifies restored file contents before returning success.
+// Includes limit it to paths inside the snapshot.
 func (r Runner) Restore(ctx context.Context, snapshot, host string, mounts []string, includes ...string) (*RestoreSummary, error) {
-	args := []string{"restore", snapshot, "--json", "--target", "/"}
+	args := []string{"restore", snapshot, "--json", "--verify", "--target", "/"}
 	if snapshot == "latest" {
 		args = append(args, "--host", host, "--tag", Tag)
 	}
