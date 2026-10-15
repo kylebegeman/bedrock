@@ -43,9 +43,10 @@ type Backup struct {
 	Deadlines restic.Deadlines
 }
 
-// retentionDeferred marks a run whose snapshot was kept while retention
-// failed or ran out of time. The next backup applies retention again.
-const retentionDeferred = "retention deferred"
+// RetentionDeferred marks a run whose snapshot was kept while retention
+// failed or ran out of time. The next backup applies retention again, and
+// the watcher reports retention that stays deferred.
+const RetentionDeferred = "retention deferred"
 
 // BackupInput says what to back up: an app, or helios's own name for the
 // machine's state.
@@ -708,8 +709,8 @@ func (x *backingUp) retentionStep() kernel.Step {
 					return x.run.fail(err)
 				}
 				reason := firstLine(err.Error())
-				detail += "; " + retentionDeferred + ": " + reason
-				fmt.Fprintf(out, "%s: %s\nthe snapshot is kept, and the next backup applies retention again\n", retentionDeferred, reason)
+				detail += "; " + RetentionDeferred + ": " + reason
+				fmt.Fprintf(out, "%s: %s\nthe snapshot is kept, and the next backup applies retention again\n", RetentionDeferred, reason)
 			}
 			s := x.summary
 			if err := x.run.done(ctx, state.BackupRun{Snapshot: s.SnapshotID, SnapshotAt: s.BackupStart, Files: s.TotalFiles, Bytes: s.TotalBytes, Detail: detail}); err != nil {
@@ -719,10 +720,9 @@ func (x *backingUp) retentionStep() kernel.Step {
 				return err
 			}
 			switch {
-			case err != nil:
 			case removed > 0:
 				fmt.Fprintf(out, "removed %d old snapshot(s)\n", removed)
-			default:
+			case err == nil:
 				fmt.Fprintln(out, "nothing old enough to remove")
 			}
 			return nil

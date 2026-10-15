@@ -175,12 +175,22 @@ func recoveryImageID(ctx context.Context, ref, container string) (string, error)
 	return id, nil
 }
 
+// machineImagesTimeout bounds archiving the workload images into a machine
+// backup, which runs under the operation lock.
+const machineImagesTimeout = time.Hour
+
 func saveMachineImages(ctx context.Context, path string, refs []string) error {
 	if len(refs) == 0 {
 		return nil
 	}
+	saveCtx, cancel := context.WithTimeout(ctx, machineImagesTimeout)
+	defer cancel()
 	args := append([]string{"image", "save", "--output", path + ".tmp"}, refs...)
-	if _, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput(); err != nil {
+	if _, err := exec.CommandContext(saveCtx, "docker", args...).CombinedOutput(); err != nil {
+		_ = os.Remove(path + ".tmp")
+		if ctx.Err() == nil && errors.Is(saveCtx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("archive the machine's workload images: did not finish within %s and was stopped", machineImagesTimeout)
+		}
 		return fmt.Errorf("archive the machine's workload images: %w", err)
 	}
 	if err := os.Chmod(path+".tmp", 0o600); err != nil {
@@ -278,6 +288,12 @@ func (b Backup) prepareMachineRecoveryCatalog(ctx context.Context, hostname, sta
 		r, _, err := openRepo(b.Secrets, e, manifest.ReservedApp, rev.App, nil)
 		if err != nil {
 			return err
+		}
+		// The machine backup holds the operation lock while it copies the
+		// app's data in, so the copy has a limit like its other calls.
+		r.Deadlines = b.Deadlines
+		if r.Deadlines.Restore <= 0 {
+			r.Deadlines.Restore = restic.RestoreTimeout
 		}
 		snaps, err := r.Snapshots(ctx, rev.App)
 		if err != nil {
