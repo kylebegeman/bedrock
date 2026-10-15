@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	apps "github.com/kylebegeman/bedrock/internal/app"
+	apps "github.com/kylebegeman/helios/internal/app"
 )
 
 func TestRehearsalReportShowsExactEvidenceAndRejectsPathTraversal(t *testing.T) {

@@ -14,8 +14,8 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // Renderer writes events to out.

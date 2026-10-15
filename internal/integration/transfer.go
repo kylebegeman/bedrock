@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/helios/internal/secrets"
 )
 
 const TransferVersion = 1

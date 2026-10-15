@@ -38,7 +38,7 @@ func TestAnotherManifestIsAPlainYAMLFileAtTheSourcesRoot(t *testing.T) {
 	if err != nil || m.App != "runner" {
 		t.Fatalf("%v %+v", err, m)
 	}
-	for _, name := range []string{"", "../bedrock.yaml", "sub/bedrock.yaml", ".bedrock.yaml", "bedrock.json", "/etc/bedrock.yaml"} {
+	for _, name := range []string{"", "../helios.yaml", "sub/helios.yaml", ".helios.yaml", "bedrock.json", "/etc/helios.yaml"} {
 		if _, err := LoadFile(dir, name); err == nil {
 			t.Fatalf("%q must be refused", name)
 		}

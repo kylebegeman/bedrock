@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/docker/dockertest"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/docker/dockertest"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 type lsInventoryJSON struct {

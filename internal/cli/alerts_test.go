@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 func TestAlertsAlwaysIncludeOpenIncidentsBeyondHistoryLimit(t *testing.T) {

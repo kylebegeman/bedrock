@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	apps "github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	apps "github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/manifest"
 )
 
 type hostCheckReport struct {
@@ -36,7 +36,7 @@ func newCheck(a *app) *cobra.Command {
 			"This is an offline check. It does not establish DNS, certificates,\n" +
 			"image availability, secret values or capacity on a target machine.\n" +
 			"Add --host while running on the target to check the same read-only\n" +
-			"preconditions as bedrock deploy --plan, including integrations and\n" +
+			"preconditions as helios deploy --plan, including integrations and\n" +
 			"route/published-port ownership and availability of named secrets.\n" +
 			"It does not execute the plan or prove disk/aggregate resource capacity,\n" +
 			"runtime readiness, DNS or certificate issuance.",
@@ -49,7 +49,7 @@ func newCheck(a *app) *cobra.Command {
 			report := sourceCheckReport{CheckReport: manifest.CheckSource(dir, name)}
 			if report.Valid && host {
 				report.HostPreflight = &hostCheckReport{NotChecked: []string{"image builds and pulls", "runtime workload readiness", "DNS and certificate issuance", "disk space and aggregate resource capacity"}}
-				plan, err := a.checkHost(cmd.Context(), report.Source, name)
+				plan, err := a.checkHost(cmd.Context(), report.Source, report.Manifest)
 				if err != nil {
 					report.Valid = false
 					report.Diagnostics = append(report.Diagnostics, manifest.Diagnostic{Code: "host.preflight", Message: err.Error()})
@@ -58,11 +58,11 @@ func newCheck(a *app) *cobra.Command {
 					report.HostPreflight.Plan = plan
 				}
 			}
-			return a.printCheckReport(report, name)
+			return a.printCheckReport(report, report.Manifest)
 		},
 	}
 	cmd.Flags().BoolVar(&host, "host", false, "also check deploy-plan preconditions on this target; applies and journals nothing")
-	cmd.Flags().StringVar(&name, "manifest", manifest.FileName, "the .yaml or .yml manifest at the source's root")
+	cmd.Flags().StringVar(&name, "manifest", "", "the manifest at the source's root (default: helios.yaml, or bedrock.yaml)")
 	return cmd
 }
 
@@ -91,10 +91,10 @@ func (a *app) printCheckReport(report sourceCheckReport, name string) error {
 		fmt.Fprintf(a.stdout, "%s: %s manifest and local source inputs are valid\n", name, report.App)
 		if report.HostPreflight != nil {
 			fmt.Fprintln(a.stdout, "Host deploy-plan preconditions and secret names passed; runtime readiness remains to be verified during deploy.")
-			fmt.Fprintln(a.stdout, "Disk space and aggregate resource capacity are not checked; use bedrock doctor for current host capacity.")
+			fmt.Fprintln(a.stdout, "Disk space and aggregate resource capacity are not checked; use helios doctor for current host capacity.")
 			a.renderer().Plan(report.HostPreflight.Plan)
 		} else {
-			fmt.Fprintln(a.stdout, "Offline check only; use bedrock check --host on the target before deploying.")
+			fmt.Fprintln(a.stdout, "Offline check only; use helios check --host on the target before deploying.")
 		}
 	} else {
 		for _, d := range report.Diagnostics {

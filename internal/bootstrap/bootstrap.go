@@ -14,12 +14,12 @@ import (
 
 	"filippo.io/age"
 
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/release"
-	"github.com/kylebegeman/bedrock/internal/remote"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/version"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/release"
+	"github.com/kylebegeman/helios/internal/remote"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/version"
 )
 
 const Kind = "client.bootstrap"
@@ -122,7 +122,7 @@ func (d Definition) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 	if in.Target.MachineID == "" || facts.MachineID != in.Target.MachineID || facts.Arch != in.Arch {
 		return nil, errors.New("bootstrap target identity or architecture changed; prepare a new plan")
 	}
-	checksum := in.Profile.Bedrock.SHA256["linux_"+facts.Arch]
+	checksum := in.Profile.Helios.SHA256["linux_"+facts.Arch]
 	if !checksumPattern.MatchString(checksum) {
 		return nil, fmt.Errorf("profile has no checksum for linux_%s", facts.Arch)
 	}
@@ -130,7 +130,7 @@ func (d Definition) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 		if err := verifyFile(in.BinaryPath, checksum); err != nil {
 			return nil, err
 		}
-	} else if err := release.CheckVersion(in.Profile.Bedrock.Version); err != nil {
+	} else if err := release.CheckVersion(in.Profile.Helios.Version); err != nil {
 		return nil, err
 	}
 	if len(in.Profile.Integrations) > 0 {
@@ -155,7 +155,7 @@ func (d Definition) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 	add := func(name, change string, apply func(context.Context, io.Writer) error) {
 		plan.Steps = append(plan.Steps, kernel.Step{Name: name, Change: change, Apply: apply})
 	}
-	add("install", fmt.Sprintf("install bedrock %s SHA-256 %s on %s (%s, linux_%s)", in.Profile.Bedrock.Version, checksum, in.Target.SSH, in.Target.MachineID, in.Arch)+"; connection "+(remote.Binding{Target: in.Target}).ScopeDigest("bootstrap"), func(ctx context.Context, out io.Writer) error {
+	add("install", fmt.Sprintf("install helios %s SHA-256 %s on %s (%s, linux_%s)", in.Profile.Helios.Version, checksum, in.Target.SSH, in.Target.MachineID, in.Arch)+"; connection "+(remote.Binding{Target: in.Target}).ScopeDigest("bootstrap"), func(ctx context.Context, out io.Writer) error {
 		path := in.BinaryPath
 		if path == "" {
 			if err := os.MkdirAll(d.CacheDir, 0o700); err != nil {
@@ -166,7 +166,7 @@ func (d Definition) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 				fetch = release.FetchPlatform
 			}
 			var err error
-			path, err = fetch(ctx, in.Profile.Bedrock.Version, d.CacheDir, checksum, "linux", in.Arch)
+			path, err = fetch(ctx, in.Profile.Helios.Version, d.CacheDir, checksum, "linux", in.Arch)
 			if err != nil {
 				return err
 			}
@@ -195,7 +195,7 @@ cat > "$work/bedrock"
 printf '%s  %s\n' "$want" "$work/bedrock" | sha256sum -c - >/dev/null
 chmod 755 "$work/bedrock"
 if test -e "$binary"; then
- test "$(sha256sum "$binary" | cut -d ' ' -f 1)" = "$want" || { printf 'Target already has a different bedrock build; use bedrock upgrade first.\n' >&2; exit 1; }
+ test "$(sha256sum "$binary" | cut -d ' ' -f 1)" = "$want" || { printf 'Target already has a different helios build; use helios upgrade first.\n' >&2; exit 1; }
 else
  install -d "$(dirname "$binary")"
  install -m 755 "$work/bedrock" "$binary.next"
@@ -225,7 +225,7 @@ printf 'Pinned binary installed and checksum verified.\n'`
 			return err
 		}
 		var info version.Info
-		if json.Unmarshal(out.Bytes(), &info) != nil || info.Version != in.Profile.Bedrock.Version || info.OS != "linux" || info.Arch != in.Arch {
+		if json.Unmarshal(out.Bytes(), &info) != nil || info.Version != in.Profile.Helios.Version || info.OS != "linux" || info.Arch != in.Arch {
 			return errors.New("installed binary does not match profile version and target platform")
 		}
 		return nil

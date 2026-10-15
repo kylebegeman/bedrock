@@ -60,7 +60,7 @@ func CheckMachineRecoveryAccess(stateFile, kind string, raw json.RawMessage) err
 			return nil
 		}
 	}
-	return fmt.Errorf("machine is reserved by recovery %s from %s; inspect bedrock recover report %s and retry that recovery or cut over after readiness", gate.ID, gate.Source, gate.ID)
+	return fmt.Errorf("machine is reserved by recovery %s from %s; inspect helios recover report %s and retry that recovery or cut over after readiness", gate.ID, gate.Source, gate.ID)
 }
 
 // CheckMachineRecoveryWriteAccess excludes direct data commands and jobs

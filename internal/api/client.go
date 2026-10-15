@@ -14,10 +14,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/compat"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/state"
-	"github.com/kylebegeman/bedrock/internal/version"
+	"github.com/kylebegeman/helios/internal/compat"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/state"
+	"github.com/kylebegeman/helios/internal/version"
 )
 
 // Client talks to a daemon.

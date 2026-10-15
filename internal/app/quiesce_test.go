@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/manifest"
 )
 
 type pauseFixture struct {

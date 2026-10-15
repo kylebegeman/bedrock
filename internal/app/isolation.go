@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/manifest"
 )
 
 // DefaultMemory bounds a workload that doesn't say how much memory it may

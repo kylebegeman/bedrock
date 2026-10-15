@@ -11,7 +11,7 @@ import (
 
 // Request is what an SSH client asked the bedrock user for.
 type Request struct {
-	// Kind is receive (git push), upload (git fetch) or tarball (bedrock
+	// Kind is receive (git push), upload (git fetch) or tarball (helios
 	// deploy --to).
 	Kind string
 	App  string
@@ -24,7 +24,7 @@ const (
 	Tarball = "tarball"
 )
 
-// ParseCommand reads SSH_ORIGINAL_COMMAND: what git or bedrock on the other
+// ParseCommand reads SSH_ORIGINAL_COMMAND: what git or helios on the other
 // end asked to run. Anything else is refused.
 func ParseCommand(cmd string) (Request, error) {
 	fields := strings.Fields(strings.TrimSpace(cmd))
@@ -34,10 +34,10 @@ func ParseCommand(cmd string) (Request, error) {
 		kind, arg = strings.TrimPrefix(fields[0], "git-"), fields[1]
 	case len(fields) == 3 && fields[0] == "git" && (fields[1] == "receive-pack" || fields[1] == "upload-pack"):
 		kind, arg = fields[1], fields[2]
-	case len(fields) == 3 && fields[0] == "bedrock" && fields[1] == "receive":
+	case len(fields) == 3 && (fields[0] == "bedrock" || fields[0] == "helios") && fields[1] == "receive":
 		kind, arg = Tarball, fields[2]
 	case len(fields) == 0:
-		return Request{}, errors.New("this key deploys apps with git push or bedrock deploy --to; it opens no shell")
+		return Request{}, errors.New("this key deploys apps with git push or helios deploy --to; it opens no shell")
 	default:
 		return Request{}, fmt.Errorf("this key only deploys apps; %q isn't something it runs", fields[0])
 	}
@@ -64,7 +64,7 @@ func (r Request) Allowed(apps []string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("this key deploys %s, not %s; on the machine, bedrock git allow %s <key> adds it", strings.Join(apps, ", "), r.App, r.App)
+	return fmt.Errorf("this key deploys %s, not %s; on the machine, helios git allow %s <key> adds it", strings.Join(apps, ", "), r.App, r.App)
 }
 
 // RepoDir is where an app's repository lives.

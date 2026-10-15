@@ -23,7 +23,7 @@ quiet() { grep -v '^  \.\.\.  ' ; }
 # hello_manifest <greeting> <check text> <host> writes the web fixture's
 # manifest on the box.
 hello_manifest() {
-  run "cat > /srv/lane/hello/bedrock.yaml <<EOF
+  run "cat > /srv/lane/hello/helios.yaml <<EOF
 app: hello
 description: The lane's web fixture
 owner: personal
@@ -48,7 +48,7 @@ EOF"
 }
 
 echo "== build and install"
-(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -o bin/bedrock-linux-$LANE_ARCH ./cmd/bedrock)
+(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -o bin/bedrock-linux-$LANE_ARCH ./cmd/helios)
 put "$here/../bin/bedrock-linux-$LANE_ARCH" /usr/local/bin/bedrock.new
 run 'chmod 755 /usr/local/bin/bedrock.new && mv -f /usr/local/bin/bedrock.new /usr/local/bin/bedrock && bedrock daemon install >/dev/null && bedrock version'
 
@@ -58,7 +58,7 @@ run 'bedrock host reconcile --yes' | tail -2
 echo "== copy the fixtures"
 run 'rm -rf /srv/lane && mkdir -p /srv/lane'
 (cd "$here/fixtures" && COPYFILE_DISABLE=1 tar czf - hello site) | run 'tar xzf - -C /srv/lane 2>/dev/null'
-localize /srv/lane/hello/bedrock.yaml /srv/lane/site/bedrock.yaml
+localize /srv/lane/hello/helios.yaml /srv/lane/site/helios.yaml
 
 echo "== deploy the static site"
 run 'bedrock deploy /srv/lane/site --yes' | quiet

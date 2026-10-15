@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/helios/internal/manifest"
 )
 
 // MaxSource bounds an uploaded or exported source tree.
@@ -191,21 +191,18 @@ func Extract(r io.Reader, dest string) error {
 }
 
 // CheckSource makes sure a tree is the app it is deployed as: a real
-// bedrock.yaml at its root naming that app.
+// helios.yaml at its root naming that app.
 func CheckSource(dir, app string) (*manifest.Manifest, error) {
-	info, err := os.Lstat(filepath.Join(dir, manifest.FileName))
+	name, err := manifest.ResolveFileName(dir, "")
 	if err != nil {
-		return nil, fmt.Errorf("the source has no %s at its root", manifest.FileName)
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s must be a plain file", manifest.FileName)
+		return nil, err
 	}
 	m, err := manifest.Load(dir)
 	if err != nil {
 		return nil, err
 	}
 	if m.App != app {
-		return nil, fmt.Errorf("%s says app: %s, but this is %s's remote", manifest.FileName, m.App, app)
+		return nil, fmt.Errorf("%s says app: %s, but this is %s's remote", name, m.App, app)
 	}
 	return m, nil
 }

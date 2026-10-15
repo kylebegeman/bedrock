@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/helios/internal/kernel"
 )
 
 func TestRemoteMoveHandoffIsReplayedAndBoundToApproval(t *testing.T) {

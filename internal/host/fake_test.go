@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/version"
+	"github.com/kylebegeman/helios/internal/version"
 )
 
 // fakeMachine answers commands from a table and keeps files under a temp
@@ -120,7 +120,7 @@ func freshUbuntu(t *testing.T) *fakeMachine {
 	return m
 }
 
-// setUpBox is a machine after bedrock host setup.
+// setUpBox is a machine after helios host setup.
 func setUpBox(t *testing.T) *fakeMachine {
 	t.Helper()
 	m := freshUbuntu(t)

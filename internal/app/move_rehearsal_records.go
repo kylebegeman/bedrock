@@ -10,9 +10,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // The reservation contains no secrets and survives uploaded source cleanup.
@@ -91,7 +91,7 @@ func cleanupMoveTest(ctx context.Context, r *rollout, names drillNames, workspac
 			return err
 		}
 		if !slices.Contains(owned, names.network) {
-			return fmt.Errorf("move test scratch network %s is not owned by bedrock", names.network)
+			return fmt.Errorf("move test scratch network %s is not owned by helios", names.network)
 		}
 	}
 	var failures []error

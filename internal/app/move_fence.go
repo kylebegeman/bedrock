@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/manifest"
 )
 
 type migrationWriter struct {
@@ -91,7 +91,7 @@ func CheckMigrationAccess(stateFile, app string) error {
 	if record == nil || record.Role == "target" && record.Phase == "cutover" {
 		return nil
 	}
-	return fmt.Errorf("%s is fenced for migration %s (%s); use bedrock move resume deliberately on the source, or finish target cutover", app, record.Handoff.Migration, record.Role)
+	return fmt.Errorf("%s is fenced for migration %s (%s); use helios move resume deliberately on the source, or finish target cutover", app, record.Handoff.Migration, record.Role)
 }
 
 func saveMigration(stateFile string, record *migrationRecord) error {

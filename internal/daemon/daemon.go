@@ -1,4 +1,4 @@
-// Package daemon is bedrock on a machine it manages: it owns the state store,
+// Package daemon is helios on a machine it manages: it owns the state store,
 // recovers interrupted operations at start, serves the API on a Unix socket,
 // and keeps systemd's watchdog fed from its own loop.
 package daemon
@@ -19,20 +19,20 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/api"
-	"github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/edge"
-	"github.com/kylebegeman/bedrock/internal/gitdeploy"
-	"github.com/kylebegeman/bedrock/internal/host"
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/signals"
-	"github.com/kylebegeman/bedrock/internal/state"
-	"github.com/kylebegeman/bedrock/internal/version"
-	"github.com/kylebegeman/bedrock/internal/watch"
+	"github.com/kylebegeman/helios/internal/api"
+	"github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/edge"
+	"github.com/kylebegeman/helios/internal/gitdeploy"
+	"github.com/kylebegeman/helios/internal/host"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/signals"
+	"github.com/kylebegeman/helios/internal/state"
+	"github.com/kylebegeman/helios/internal/version"
+	"github.com/kylebegeman/helios/internal/watch"
 )
 
 // Config says where the daemon keeps things.
@@ -201,7 +201,7 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	clearStaleUpgrade(logf)
 	sec := secrets.DefaultStore(cfg.StateDir)
 	engine := kernel.New(store, Registry(store, sec, cfg.Socket, cfg.StateDir), cfg.Owner)
-	logf("bedrock daemon %s, state %s, owner %s", version.Current().Version, store.Path(), cfg.Owner)
+	logf("helios daemon %s, state %s, owner %s", version.Current().Version, store.Path(), cfg.Owner)
 	d := &daemon{cfg: cfg, logf: logf, store: store, sec: sec, api: &api.Server{Engine: engine, Store: store, Lifetime: ctx}, machine: hostname(), cancel: cancel}
 	defer func() {
 		cancel()
@@ -215,9 +215,9 @@ func Run(ctx context.Context, cfg Config, logw io.Writer) error {
 	if err := d.recoverOperations(ctx); err != nil {
 		return err
 	}
-	// The edge gets the configuration this build of bedrock makes for the
+	// The edge gets the configuration this build of helios makes for the
 	// active revisions, in case the shape changed since the last deploy;
-	// an edge an older bedrock made is replaced, keeping its routes.
+	// an edge an older helios made is replaced, keeping its routes.
 	if err := app.UpgradeEdge(ctx, store, sec, logWriter{logf}); err != nil {
 		logf("edge: %v", err)
 	}

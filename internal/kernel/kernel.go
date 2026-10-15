@@ -18,8 +18,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/state"
-	"github.com/kylebegeman/bedrock/internal/version"
+	"github.com/kylebegeman/helios/internal/state"
+	"github.com/kylebegeman/helios/internal/version"
 )
 
 // Step is one unit of work in a plan.

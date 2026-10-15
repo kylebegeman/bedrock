@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/helios/internal/secrets"
 )
 
 func newStore(t *testing.T) *secrets.Store {
@@ -18,7 +18,7 @@ func newStore(t *testing.T) *secrets.Store {
 	return s
 }
 
-func TestStorageIsStoredUnderBedrockAndListedWithoutSecrets(t *testing.T) {
+func TestStorageIsStoredUnderHeliosAndListedWithoutSecrets(t *testing.T) {
 	s := newStore(t)
 	version, generated, err := Set(s, StorageName, map[string]string{"kind": "s3", "endpoint": "http://127.0.0.1:9000", "key_id": "id", "key": "k", "bucket_prefix": "lane"})
 	if err != nil {
@@ -47,7 +47,7 @@ func TestStorageIsStoredUnderBedrockAndListedWithoutSecrets(t *testing.T) {
 	if list[1].Set {
 		t.Fatal("email shouldn't be set")
 	}
-	// The values live under bedrock's own name and never leak into an app.
+	// The values live under helios's own name and never leak into an app.
 	names, _, _ := s.Names(App)
 	if strings.Join(names, ",") != "STORAGE_BUCKET_PREFIX,STORAGE_ENDPOINT,STORAGE_KEY,STORAGE_KEY_ID,STORAGE_KIND,STORAGE_PASSWORD" {
 		t.Fatalf("names %v", names)

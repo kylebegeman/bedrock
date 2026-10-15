@@ -9,10 +9,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	apps "github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/dns"
-	"github.com/kylebegeman/bedrock/internal/edge"
-	"github.com/kylebegeman/bedrock/internal/host"
+	apps "github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/dns"
+	"github.com/kylebegeman/helios/internal/edge"
+	"github.com/kylebegeman/helios/internal/host"
 )
 
 func newDNS(a *app) *cobra.Command {
@@ -63,9 +63,9 @@ func (a *app) showDNS(ctx context.Context) error {
 		kept := "you (manual)"
 		switch st.Mode {
 		case "direct":
-			kept = "bedrock, direct"
+			kept = "helios, direct"
 		case "proxied":
-			kept = "bedrock, proxied"
+			kept = "helios, proxied"
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", st.Host, st.App, kept, orDash(st.Record), st.Verdict)
 	}
@@ -102,7 +102,7 @@ func resolvedStatuses(ctx context.Context, routes []dns.Route, addrs []string) [
 func newDNSAudit(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "audit",
-		Short: "Records that point here without a route, records bedrock left behind, routes whose records point elsewhere.",
+		Short: "Records that point here without a route, records helios left behind, routes whose records point elsewhere.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
@@ -144,7 +144,7 @@ func newDNSAudit(a *app) *cobra.Command {
 			}
 			for _, f := range findings {
 				if f.Droppable {
-					fmt.Fprintln(a.stdout, "bedrock dns drop <host> deletes a record that points here with no route here, once you are sure nothing needs it")
+					fmt.Fprintln(a.stdout, "helios dns drop <host> deletes a record that points here with no route here, once you are sure nothing needs it")
 					break
 				}
 			}
@@ -177,7 +177,7 @@ func newDNSDrop(a *app) *cobra.Command {
 		Use:   "drop <host>",
 		Short: "Delete a record that points here for a host no app on this machine routes.",
 		Long: `Delete a record that points here for a host no app on this machine routes,
-such as one bedrock dns audit finds after an app was removed.
+such as one helios dns audit finds after an app was removed.
 
 Only the A and AAAA records at exactly that name go, and only when every
 record there points at this machine: a record that names another machine,

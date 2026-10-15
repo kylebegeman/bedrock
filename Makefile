@@ -1,10 +1,12 @@
 .PHONY: build test check linux lane-check lane-up lane-down lane-proof lane-reset lane-status
 
 build:
-	CGO_ENABLED=0 go build -trimpath -o bin/bedrock ./cmd/bedrock
+	CGO_ENABLED=0 go build -trimpath -o bin/helios ./cmd/helios
+	cp bin/helios bin/bedrock
 
 linux:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/bedrock-linux-amd64 ./cmd/bedrock
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/helios-linux-amd64 ./cmd/helios
+	cp bin/helios-linux-amd64 bin/bedrock-linux-amd64
 
 test:
 	go test ./...

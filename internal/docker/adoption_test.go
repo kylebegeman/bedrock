@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/docker/dockertest"
+	"github.com/kylebegeman/helios/internal/docker/dockertest"
 )
 
 func interceptedEngine(t *testing.T, intercept func(http.ResponseWriter, *http.Request) bool) (*Engine, *dockertest.Server) {

@@ -12,7 +12,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 run() { ssh "${ssh_opts[@]}" "$box" "$@"; }
 put() { scp -q "${scp_opts[@]}" "$1" "$box:$2"; }
 build() { # build <output> <version>
-  (cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -ldflags "-X github.com/kylebegeman/bedrock/internal/version.number=$2" -o "$1" ./cmd/bedrock)
+  (cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -ldflags "-X github.com/kylebegeman/helios/internal/version.number=$2" -o "$1" ./cmd/helios)
 }
 wait_ssh() {
   local deadline=$((SECONDS + 300))

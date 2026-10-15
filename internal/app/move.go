@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // Handoff is everything a machine needs to take an app over from another
@@ -123,7 +123,7 @@ func (h *Handoff) Check(app string, st *integration.Storage) error {
 	case h.Snapshot == "":
 		return fmt.Errorf("the handoff for %s names no snapshot", h.App)
 	case st == nil || st.BucketPrefix == "":
-		return errors.New("this machine has no storage integration; set one that reads the same bucket: bedrock integration set storage")
+		return errors.New("this machine has no storage integration; set one that reads the same bucket: helios integration set storage")
 	case st.Bucket(h.App) != h.Bucket:
 		return fmt.Errorf("the handoff points at %s and this machine reads %s; both machines must use the same storage integration, the same bucket prefix and the same backup password",
 			h.Bucket, st.Bucket(h.App))

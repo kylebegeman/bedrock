@@ -19,9 +19,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/kylebegeman/bedrock/internal/gitdeploy"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/remote"
+	"github.com/kylebegeman/helios/internal/gitdeploy"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/remote"
 )
 
 func defaultTargetsFile() string {
@@ -37,6 +38,9 @@ func configureTargets(root *cobra.Command, a *app) {
 	root.PersistentFlags().StringVar(&a.targetsFile, "targets-file", envOr("BEDROCK_TARGETS_FILE", defaultTargetsFile()), "the local named-target configuration")
 	root.AddCommand(newTarget(a), newRemoteArtifact(a))
 	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if err := validateEnvironmentAliases(cmd); err != nil {
+			return err
+		}
 		a.remoteStateFlags = make([]string, 0, 2)
 		if cmd.Flags().Changed("state-dir") || a.stateDir != defaultStateDir() {
 			a.remoteStateFlags = append(a.remoteStateFlags, "--state-dir="+a.stateDir)
@@ -82,8 +86,8 @@ func newTarget(a *app) *cobra.Command {
 	set.Flags().IntVar(&target.Port, "port", 0, "SSH port, or use the SSH configuration")
 	set.Flags().StringVar(&target.IdentityFile, "identity", "", "SSH identity file")
 	set.Flags().StringVar(&target.KnownHostsFile, "known-hosts", "", "pinned known-hosts file, or the SSH default")
-	set.Flags().StringVar(&target.Binary, "binary", "", "absolute path of bedrock on the target")
-	set.Flags().BoolVar(&target.Sudo, "sudo", false, "run bedrock through noninteractive sudo")
+	set.Flags().StringVar(&target.Binary, "binary", "", "absolute path of helios on the target")
+	set.Flags().BoolVar(&target.Sudo, "sudo", false, "run helios through noninteractive sudo")
 	set.Flags().StringVar(&target.MachineID, "machine-id", "", "expected machine identity from capabilities")
 	_ = set.MarkFlagRequired("ssh")
 	list := &cobra.Command{Use: "list", Short: "List saved targets.", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
@@ -103,7 +107,7 @@ func newTarget(a *app) *cobra.Command {
 			fmt.Fprintf(a.stdout, "%s\t%s\n", n, c.Targets[n].SSH)
 		}
 		if len(names) == 0 {
-			fmt.Fprintln(a.stdout, "No targets. Add one with bedrock target set <name> --ssh user@host.")
+			fmt.Fprintln(a.stdout, "No targets. Add one with helios target set <name> --ssh user@host.")
 		}
 		return nil
 	}}
@@ -163,12 +167,12 @@ func (a *app) loadTarget(name string) (remote.Target, error) {
 	}
 	t, ok := c.Targets[name]
 	if !ok {
-		return t, fmt.Errorf("unknown target %q; use bedrock target set", name)
+		return t, fmt.Errorf("unknown target %q; use helios target set", name)
 	}
 	return t, nil
 }
 func targetTransport() remote.Transport {
-	return remote.Transport{Program: strings.Fields(os.Getenv("BEDROCK_SSH"))}
+	return remote.Transport{Program: strings.Fields(envOr("BEDROCK_SSH", ""))}
 }
 
 type targetCapabilities struct {
@@ -192,7 +196,7 @@ func (a *app) targetCapabilities(ctx context.Context, t remote.Target) (targetCa
 	var c targetCapabilities
 	err := targetTransport().Run(ctx, t, append(a.targetStateArgs(), "capabilities", "--json"), nil, &boundedBuffer{Buffer: &out, Max: 1 << 20}, a.stderr)
 	if err != nil {
-		return c, fmt.Errorf("target capabilities unavailable: %w; install a compatible bedrock on the target", err)
+		return c, fmt.Errorf("target capabilities unavailable: %w; install a compatible helios on the target", err)
 	}
 	if err = json.Unmarshal(out.Bytes(), &c); err != nil {
 		return c, fmt.Errorf("target returned invalid capabilities: %w", err)
@@ -307,6 +311,18 @@ func (a *app) dispatchTarget(cmd *cobra.Command, args []string) error {
 			source = args[0]
 		}
 		localSource = source
+		// The target may still use Bedrock's default filename. Bind and forward
+		// the client's selection rather than letting the remote choose again.
+		if command == "deploy" || command == "check" {
+			name, _ := cmd.Flags().GetString("manifest")
+			selected, err := manifest.ResolveFileName(source, name)
+			if err != nil {
+				return err
+			}
+			if err := cmd.Flags().Set("manifest", selected); err != nil {
+				return err
+			}
+		}
 		archive, hash, err := snapshotSource(cmd.Context(), source)
 		if err != nil {
 			return err

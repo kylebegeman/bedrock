@@ -37,7 +37,7 @@ MAILPIT="axllent/mailpit:v1.31.2@sha256:74d609a42ec279aa63c6b4622a6fa9b5408d1ad5
 MINIO="quay.io/minio/minio:latest"
 
 echo "== build and install"
-(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -o bin/bedrock-linux-$LANE_ARCH ./cmd/bedrock)
+(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -o bin/bedrock-linux-$LANE_ARCH ./cmd/helios)
 put "$here/../bin/bedrock-linux-$LANE_ARCH" /usr/local/bin/bedrock.new
 run 'chmod 755 /usr/local/bin/bedrock.new && mv -f /usr/local/bin/bedrock.new /usr/local/bin/bedrock && bedrock daemon install >/dev/null && bedrock version'
 run 'bedrock ps' | grep -q dragon-writer || fail "run prove-m4.sh first; Dragon Writer isn't deployed"
@@ -62,7 +62,7 @@ run 'bedrock alerts test'
 mail_subjects | grep -q "test alert" || fail "the test alert didn't arrive"
 
 echo "== Dragon Writer gets a verify query for its drills (a redeploy; the build is cached)"
-run "cat > /srv/lane/dragon-writer/bedrock.yaml <<'EOF'
+run "cat > /srv/lane/dragon-writer/helios.yaml <<'EOF'
 app: dragon-writer
 description: A writing app
 owner: personal
@@ -142,7 +142,7 @@ echo "-- first tick after the restore: $after"
 [[ -n "$before" && "$before" == "$after" ]] || fail "the restored volume doesn't hold the old ticks"
 
 echo "== a scheduled backup: hello backs up every two minutes for a while"
-run "sed -i 's/^checks:/backup:\n  schedule: \"*\/2 * * * *\"\nchecks:/' /srv/lane/hello/bedrock.yaml && grep -A1 '^backup:' /srv/lane/hello/bedrock.yaml"
+run "sed -i 's/^checks:/backup:\n  schedule: \"*\/2 * * * *\"\nchecks:/' /srv/lane/hello/helios.yaml && grep -A1 '^backup:' /srv/lane/hello/helios.yaml"
 run 'bedrock deploy /srv/lane/hello --yes' | quiet | tail -2
 deployed=$(date -u +%s)
 sleep 150
@@ -187,7 +187,7 @@ total=$(mail_subjects | wc -l | tr -d ' ')
 [[ "$total" == "5" ]] || fail "expected exactly 5 emails (test, 2 down, 2 recovered), got $total"
 
 echo "== back to hello's stock manifest"
-run "sed -i '/^backup:/,/^checks:/{/^checks:/!d}' /srv/lane/hello/bedrock.yaml && bedrock deploy /srv/lane/hello --yes" | quiet | tail -1
+run "sed -i '/^backup:/,/^checks:/{/^checks:/!d}' /srv/lane/hello/helios.yaml && bedrock deploy /srv/lane/hello --yes" | quiet | tail -1
 
 echo "== history"
 run 'bedrock history --limit 12'

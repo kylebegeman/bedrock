@@ -36,6 +36,7 @@ lane_require_disposable() {
 set -eu
 [ "$(id -u)" = 0 ] || { echo 'Lane must connect as root.' >&2; exit 1; }
 [ ! -e /etc/bedrock-production ] && [ ! -L /etc/bedrock-production ] || { echo 'Refusing a production-marked machine.' >&2; exit 1; }
+[ ! -e /etc/helios-production ] && [ ! -L /etc/helios-production ] || { echo 'Refusing a production-marked machine.' >&2; exit 1; }
 [ -f /etc/bedrock-lane-id ] && [ ! -L /etc/bedrock-lane-id ] || { echo 'Remote disposable identity is missing.' >&2; exit 1; }
 [ "$(stat -c %u /etc/bedrock-lane-id)" = 0 ] && [ "$(stat -c %a /etc/bedrock-lane-id)" = 600 ] || { echo 'Remote identity must be owned by root with mode 600.' >&2; exit 1; }
 [ "$(cat /etc/bedrock-lane-id)" = "$1" ] || { echo 'Remote disposable identity differs from LANE_ID.' >&2; exit 1; }

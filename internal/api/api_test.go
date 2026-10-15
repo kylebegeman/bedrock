@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 func server(t *testing.T) (*Client, *state.Store) {
@@ -131,7 +131,7 @@ func TestOnlyOneLocalOperationRunsAtATime(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	if _, err := lockOperations(ctx, path); err == nil || !strings.Contains(err.Error(), "another bedrock operation is running on this machine") {
+	if _, err := lockOperations(ctx, path); err == nil || !strings.Contains(err.Error(), "another helios operation is running on this machine") {
 		t.Fatalf("a second operation got the lock: %v", err)
 	}
 	unlock()

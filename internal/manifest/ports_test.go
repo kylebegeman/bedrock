@@ -58,7 +58,7 @@ func TestPublishedPortsAreValidated(t *testing.T) {
 		{strings.Replace(headscale, "host_port: 19090", "host_port: 443", 1), "443 on the machine belongs to the edge"},
 		{strings.Replace(headscale, "- port: 3478\n        protocol: udp", "- port: 80", 1), "80 on the machine belongs to the edge"},
 		{strings.Replace(headscale, "- port: 3478\n        protocol: udp", "- port: 22", 1), "belongs to ssh"},
-		{strings.Replace(headscale, "host_port: 19090", "host_port: 5000", 1), "bedrock's image registry"},
+		{strings.Replace(headscale, "host_port: 19090", "host_port: 5000", 1), "helios's image registry"},
 		// The same port and protocol twice in one app, even on two addresses.
 		{strings.Replace(headscale, "host_port: 19090", "host_port: 9091", 1), "9091/tcp is already published by metrics"},
 		{strings.Replace(headscale, "- port: 9091", "- port: 3478\n        protocol: udp", 1), "3478/udp is already published by metrics"},

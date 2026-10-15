@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	apps "github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/integration"
+	apps "github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/integration"
 )
 
 func newMove(a *app) *cobra.Command {
@@ -23,16 +23,16 @@ The staged workflow first rehearses a capture, then freezes source writers for
 an exact final snapshot. The target restores and checks that snapshot before
 an explicit write-authority and DNS cutover.
 
-  on the source: bedrock move rehearse <app> --to target-name > rehearsal.json
-  on the target: bedrock move test <source-dir> --handoff rehearsal.json
-  on the source: bedrock move final <app> --to target-name > final.json
-  on the target: bedrock move stage <source-dir> --handoff final.json
-  on the target: bedrock move cutover <app>
+  on the source: helios move rehearse <app> --to target-name > rehearsal.json
+  on the target: helios move test <source-dir> --handoff rehearsal.json
+  on the source: helios move final <app> --to target-name > final.json
+  on the target: helios move stage <source-dir> --handoff final.json
+  on the target: helios move cutover <app>
 
 The source stays frozen after final capture, including after a host or daemon
 restart. Resume it only deliberately, after stopping destination writers:
 
-  on the source: bedrock move resume <app> --target-stopped
+  on the source: helios move resume <app> --target-stopped
 
 Destination writes are not included in the source snapshot. Returning those
 writes requires a reverse move; an old source is not a lossless rollback.
@@ -46,11 +46,11 @@ same bucket prefix and the same backup password. A machine reading its own
 bucket instead of the source's finds nothing there, which looks like an app
 with no data rather than like a failure.
 
-  on the source:  bedrock move out <app> --yes > handoff.json
-  on the target:  bedrock move in <app> --handoff handoff.json
-                  bedrock deploy <source>
-                  bedrock dns point <host>          # once it answers
-  on the source:  bedrock remove <app>              # after a rollback window
+  on the source:  helios move out <app> --yes > handoff.json
+  on the target:  helios move in <app> --handoff handoff.json
+                  helios deploy <source>
+                  helios dns point <host>          # once it answers
+  on the source:  helios remove <app>              # after a rollback window
 
 These legacy commands provide a manual copy, without a durable source write
 fence or automatic cutover. Quiesce writers before a final manual transfer.`,
@@ -183,7 +183,7 @@ func newMoveIn(a *app) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&handoffPath, "handoff", "-", "the handoff written by 'bedrock move out', or - for standard input")
+	cmd.Flags().StringVar(&handoffPath, "handoff", "-", "the handoff written by 'helios move out', or - for standard input")
 	a.mutatingFlags(cmd, &planOnly)
 	return cmd
 }
@@ -217,12 +217,12 @@ func newMoveSecrets(a *app) *cobra.Command {
 A moved app has to arrive with the secrets it left with. Its database comes
 back from a snapshot still holding the role password the source generated, so
 a target that generated its own would be handed a database it cannot open.
-bedrock refuses that restore rather than performing it, which is why this
+helios refuses that restore rather than performing it, which is why this
 step exists.
 
-  on the target:  bedrock secret recipient
-  on the source:  bedrock move secrets <app> --to <age1...> > secrets.age
-  on the target:  bedrock move secrets <app> --accept < secrets.age
+  on the target:  helios secret recipient
+  on the source:  helios move secrets <app> --to <age1...> > secrets.age
+  on the target:  helios move secrets <app> --accept < secrets.age
 
 Only ciphertext is ever printed, sealed to the target's own key, and it stops
 being readable ten minutes after it is made. The values never appear in a
@@ -245,7 +245,7 @@ terminal, a log or a shell history on either machine.`,
 				fmt.Fprintf(a.stdout, "stored %d secret(s) for %s: %s\n", len(stored), name, strings.Join(stored, ", "))
 				return nil
 			case recipient == "":
-				return fmt.Errorf("give --to with the target's recipient (bedrock secret recipient, run there), or --accept to read a bundle here")
+				return fmt.Errorf("give --to with the target's recipient (helios secret recipient, run there), or --accept to read a bundle here")
 			}
 			sealed, err := a.secretsStore().ExportBundle(name, recipient)
 			if err != nil {
@@ -261,7 +261,7 @@ terminal, a log or a shell history on either machine.`,
 		}
 		return ""
 	})
-	cmd.Flags().StringVar(&recipient, "to", "", "the target machine's recipient, from 'bedrock secret recipient' there")
+	cmd.Flags().StringVar(&recipient, "to", "", "the target machine's recipient, from 'helios secret recipient' there")
 	cmd.Flags().BoolVar(&accept, "accept", false, "read a sealed bundle from standard input and store it here")
 	return cmd
 }

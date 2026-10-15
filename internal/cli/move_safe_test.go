@@ -11,11 +11,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	apps "github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/docker/dockertest"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/state"
+	apps "github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/docker/dockertest"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 func sourceForSafeMove(t *testing.T) (string, *state.Store, *manifest.Manifest) {

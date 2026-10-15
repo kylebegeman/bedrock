@@ -12,12 +12,12 @@ import (
 	"testing"
 
 	"filippo.io/age"
-	"github.com/kylebegeman/bedrock/internal/host"
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/remote"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/host"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/remote"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 func bootstrapFixture(t *testing.T) (Definition, Input, string) {
@@ -47,7 +47,7 @@ esac
 		t.Fatal(err)
 	}
 	t.Setenv("BOOTSTRAP_TEST_COMMANDS", record)
-	in := Input{TargetName: "fixture", Target: remote.Target{SSH: "fixture", MachineID: "linux:fixture", Binary: filepath.Join(dir, "target", "bedrock")}, Profile: Profile{Version: 1, Host: host.Profile{Hostname: "fixture", SwapGiB: 0}, Bedrock: Binary{Version: "fixture-dev", SHA256: map[string]string{"linux_arm64": hex.EncodeToString(sum[:])}}}, Arch: "arm64", BinaryPath: source}
+	in := Input{TargetName: "fixture", Target: remote.Target{SSH: "fixture", MachineID: "linux:fixture", Binary: filepath.Join(dir, "target", "bedrock")}, Profile: Profile{Version: 1, Host: host.Profile{Hostname: "fixture", SwapGiB: 0}, Helios: Binary{Version: "fixture-dev", SHA256: map[string]string{"linux_arm64": hex.EncodeToString(sum[:])}}}, Arch: "arm64", BinaryPath: source}
 	def := Definition{Transport: remote.Transport{Program: []string{wrapper}}, CacheDir: filepath.Join(dir, "cache"), Probe: func(context.Context, remote.Target) (Facts, error) {
 		return Facts{MachineID: "linux:fixture", Arch: "arm64", OS: "ubuntu", OSVersion: "24.04", Root: true, Systemd: true}, nil
 	}}

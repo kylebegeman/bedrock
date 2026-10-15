@@ -3,7 +3,7 @@
 // Docker's client speaks HTTP, so a package that talks to Docker through
 // docker.Connect needs no seam of its own: New starts this server and
 // points DOCKER_HOST at it for the test, and every call lands here. It
-// keeps containers by name, answers what bedrock asks, and records each
+// keeps containers by name, answers what helios asks, and records each
 // request so a test can say what happened and in what order.
 package dockertest
 

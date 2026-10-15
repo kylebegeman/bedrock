@@ -155,3 +155,69 @@ func TestFailedFetchPreservesPreviousVerifiedAsset(t *testing.T) {
 		t.Fatalf("failed download destroyed previous asset: %q %v", got, err)
 	}
 }
+
+func TestHeliosCanFetchHistoricalBedrockAssetsWithPublishedOrPinnedChecksums(t *testing.T) {
+	for _, pinned := range []bool{false, true} {
+		t.Run(fmt.Sprint(pinned), func(t *testing.T) {
+			body := []byte("historical verified binary")
+			asset := fmt.Sprintf("bedrock_%s_%s_%s", "0.7.10", runtime.GOOS, runtime.GOARCH)
+			mux := http.NewServeMux()
+			mux.HandleFunc("/releases/download/v0.7.10/"+asset, func(w http.ResponseWriter, r *http.Request) { w.Write(body) })
+			mux.HandleFunc("/releases/download/v0.7.10/SHA256SUMS", func(w http.ResponseWriter, r *http.Request) {
+				if pinned {
+					t.Error("pinned downloads must not require the published checksum file")
+				}
+				fmt.Fprintln(w, sumOf(body)+"  "+asset)
+			})
+			srv := httptest.NewServer(mux)
+			defer srv.Close()
+			previous := repo
+			repo = srv.URL
+			defer func() { repo = previous }()
+			pin := ""
+			if pinned {
+				pin = sumOf(body)
+			}
+			path, err := Fetch(context.Background(), "0.7.10", t.TempDir(), pin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if filepath.Base(path) != asset {
+				t.Fatalf("unexpected asset: %s", path)
+			}
+			if got, err := os.ReadFile(path); err != nil || string(got) != string(body) {
+				t.Fatalf("download changed: %q %v", got, err)
+			}
+		})
+	}
+}
+
+func TestAHeliosChecksumFailureCannotFallBackToAnotherAsset(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusForbidden, http.StatusInternalServerError} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			mux := http.NewServeMux()
+			legacyRequested := false
+			mux.HandleFunc("/releases/download/v0.7.11/"+AssetName("0.7.11", runtime.GOOS, runtime.GOARCH), func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(status); fmt.Fprint(w, "wrong candidate") })
+			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+				legacyRequested = true
+				fmt.Fprint(w, "fallback must not run")
+			})
+			srv := httptest.NewServer(mux)
+			defer srv.Close()
+			previous := repo
+			repo = srv.URL
+			defer func() { repo = previous }()
+			dir := t.TempDir()
+			if _, err := Fetch(context.Background(), "0.7.11", dir, sumOf([]byte("the approved binary"))); err == nil {
+				t.Fatal("failed candidate accepted")
+			}
+			if legacyRequested {
+				t.Fatal("failure was bypassed through a different asset")
+			}
+			files, err := os.ReadDir(dir)
+			if err != nil || len(files) != 0 {
+				t.Fatalf("failed download left files: %v %v", files, err)
+			}
+		})
+	}
+}

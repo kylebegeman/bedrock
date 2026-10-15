@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/restic"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/restic"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // DrillKind proves a backup: it restores the latest snapshot beside the
@@ -215,7 +215,7 @@ func (d *drillState) pick(ctx context.Context, r restic.Runner) (*restic.Snapsho
 	if d.snapshot == "latest" {
 		found, err := r.Latest(ctx, d.app)
 		if errors.Is(err, restic.ErrNoRepository) {
-			return nil, fmt.Errorf("%s has no backups yet; run bedrock backup %s first", d.app, d.app)
+			return nil, fmt.Errorf("%s has no backups yet; run helios backup %s first", d.app, d.app)
 		}
 		return found, err
 	}
@@ -417,7 +417,7 @@ func restoredWritable(name string, w manifest.Workload, u docker.User, volumes m
 	if len(problems) == 0 {
 		return nil
 	}
-	return fmt.Errorf("%s; the backup holds files the app can't save to, and bedrock doctor names the live ones and how to give them back", strings.Join(problems, "; "))
+	return fmt.Errorf("%s; the backup holds files the app can't save to, and helios doctor names the live ones and how to give them back", strings.Join(problems, "; "))
 }
 
 func (d *drillState) cleanupStep() kernel.Step {

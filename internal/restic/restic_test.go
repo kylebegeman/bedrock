@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/docker/dockertest"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/docker/dockertest"
 )
 
 const summary = `{"message_type":"summary"}` + "\n"

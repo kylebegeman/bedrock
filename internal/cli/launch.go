@@ -12,9 +12,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	apps "github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/gitdeploy"
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	apps "github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/gitdeploy"
+	"github.com/kylebegeman/helios/internal/manifest"
 )
 
 // launching is one run of launch: its flags, and the steps from a
@@ -38,12 +38,12 @@ func newLaunch(a *app) *cobra.Command {
 		Long: `Take a repository from nothing to running here.
 
 Fetches the repository, works out what it is, writes the manifest it is
-missing and deploys it. A repository that already has a bedrock.yaml is not
+missing and deploys it. A repository that already has a helios.yaml is not
 launched: deploy it instead, because overwriting a manifest somebody wrote
 with a guess is worse than refusing.
 
-  bedrock launch https://github.com/you/site --host site.example.com
-  bedrock launch git@github.com:you/api.git --host api.example.com --postgres
+  helios launch https://github.com/you/site --host site.example.com
+  helios launch git@github.com:you/api.git --host api.example.com --postgres
 
 What it can work out on its own is deliberately narrow, because a wrong
 guess becomes a manifest someone has to debug:
@@ -64,7 +64,7 @@ manifest it writes is an ordinary one: read it, change it, commit it.`,
 	cmd.Flags().StringVar(&l.branch, "branch", "main", "the branch to launch")
 	cmd.Flags().BoolVar(&l.postgres, "postgres", false, "give the app a database, and DATABASE_URL to reach it")
 	cmd.Flags().IntVar(&l.port, "port", 0, fmt.Sprintf("the port a web app listens on (default %d)", manifest.DefaultPort))
-	cmd.Flags().BoolVar(&l.keep, "keep", false, "leave the fetched tree and the manifest bedrock wrote behind after a --plan or a failure, to read them")
+	cmd.Flags().BoolVar(&l.keep, "keep", false, "leave the fetched tree and the manifest helios wrote behind after a --plan or a failure, to read them")
 	a.mutatingFlags(cmd, &l.planOnly)
 	return cmd
 }

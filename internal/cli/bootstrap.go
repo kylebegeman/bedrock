@@ -11,12 +11,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/kylebegeman/bedrock/internal/api"
-	"github.com/kylebegeman/bedrock/internal/bootstrap"
-	"github.com/kylebegeman/bedrock/internal/host"
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/api"
+	"github.com/kylebegeman/helios/internal/bootstrap"
+	"github.com/kylebegeman/helios/internal/host"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 func addHostBootstrap(parent *cobra.Command, a *app) {
@@ -108,7 +108,7 @@ func addHostBootstrap(parent *cobra.Command, a *app) {
 					return err
 				}
 				defer f.Close()
-				if hash != profile.Bedrock.SHA256["linux_"+facts.Arch] {
+				if hash != profile.Helios.SHA256["linux_"+facts.Arch] {
 					runner.Close()
 					return errors.New("local bootstrap binary does not match the profile checksum")
 				}
@@ -160,16 +160,16 @@ func newHostProfiles(a *app) *cobra.Command {
 			return errors.New("profile write is local; omit --target")
 		}
 		p.Version = bootstrap.ProfileVersion
-		p.Bedrock.SHA256 = map[string]string{}
+		p.Helios.SHA256 = map[string]string{}
 		for _, value := range sums {
 			platform, sum, ok := strings.Cut(value, "=")
 			if !ok {
 				return errors.New("--checksum expects linux_arm64=SHA256 or linux_amd64=SHA256")
 			}
-			if _, duplicate := p.Bedrock.SHA256[platform]; duplicate {
+			if _, duplicate := p.Helios.SHA256[platform]; duplicate {
 				return errors.New("checksum platform repeated")
 			}
-			p.Bedrock.SHA256[platform] = sum
+			p.Helios.SHA256[platform] = sum
 		}
 		if err := bootstrap.Save(args[0], p); err != nil {
 			return err
@@ -181,7 +181,7 @@ func newHostProfiles(a *app) *cobra.Command {
 	create.Flags().IntVar(&p.Host.SwapGiB, "swap", 4, "swap size in GiB")
 	create.Flags().StringVar(&p.Host.Timezone, "timezone", "", "IANA timezone")
 	create.Flags().StringVar(&p.Host.WebFrom, "web-from", host.WebFromAnyone, "who may reach the web: anyone or cloudflare")
-	create.Flags().StringVar(&p.Bedrock.Version, "version", "", "exact binary version to install")
+	create.Flags().StringVar(&p.Helios.Version, "version", "", "exact binary version to install")
 	create.Flags().StringArrayVar(&sums, "checksum", nil, "target platform=SHA256, repeatable")
 	create.Flags().StringSliceVar(&p.Integrations, "integration", nil, "integrations to seal from this client's store")
 	_ = create.MarkFlagRequired("hostname")

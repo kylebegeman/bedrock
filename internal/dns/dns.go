@@ -1,6 +1,6 @@
 // Package dns keeps the records an app's routes call for: made when the
 // app deploys, checked before every switch, removed when the app leaves.
-// Records bedrock makes carry a comment naming the app and the machine, so
+// Records helios makes carry a comment naming the app and the machine, so
 // an audit can tell them from everything else.
 package dns
 
@@ -12,8 +12,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kylebegeman/bedrock/internal/cloudflare"
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/helios/internal/cloudflare"
+	"github.com/kylebegeman/helios/internal/manifest"
 )
 
 // Manager keeps records for one machine.
@@ -27,7 +27,8 @@ type Manager struct {
 	zones map[string]cloudflare.Zone
 }
 
-// Comment marks a record as bedrock's, for an app on a machine.
+// Comment retains the historical ownership marker until the host migration,
+// so existing records remain recognizable by both old and new binaries.
 func Comment(app, hostname string) string { return "bedrock: " + app + " on " + hostname }
 
 // commentApp reads an app and machine back out of a comment.
@@ -144,7 +145,7 @@ func (m *Manager) Ensure(ctx context.Context, app, host string, mode manifest.DN
 			if other, machine, ok := commentApp(r.Comment); ok {
 				where += fmt.Sprintf(" (%s on %s)", other, machine)
 			}
-			return Outcome{}, fmt.Errorf("%s %w: at %s, not this machine (%s); when it is time to move it, run bedrock dns point %s", host, ErrElsewhere, where, ip, host)
+			return Outcome{}, fmt.Errorf("%s %w: at %s, not this machine (%s); when it is time to move it, run helios dns point %s", host, ErrElsewhere, where, ip, host)
 		}
 		if a == nil || a.Content != ip && r.Content == ip {
 			a = r
@@ -155,7 +156,7 @@ func (m *Manager) Ensure(ctx context.Context, app, host string, mode manifest.DN
 			continue
 		}
 		if !take {
-			return Outcome{}, fmt.Errorf("%s has an additional %s record (%s) that would split or shadow the A record bedrock keeps; remove it, or run bedrock dns point %s", host, r.Type, r.Content, host)
+			return Outcome{}, fmt.Errorf("%s has an additional %s record (%s) that would split or shadow the A record helios keeps; remove it, or run helios dns point %s", host, r.Type, r.Content, host)
 		}
 		if err := m.CF.Delete(ctx, z.ID, r.ID); err != nil {
 			return Outcome{}, err
@@ -178,9 +179,9 @@ func (m *Manager) Ensure(ctx context.Context, app, host string, mode manifest.DN
 	return Outcome{Host: host, Action: "updated", Content: ip, Proxied: proxied, Zone: z.Name, Removed: removed}, nil
 }
 
-// Remove deletes the records bedrock made for an app on this machine: the
+// Remove deletes the records helios made for an app on this machine: the
 // ones carrying its comment that still name this machine. A record that
-// has since been pointed elsewhere, by bedrock or by hand, stays.
+// has since been pointed elsewhere, by helios or by hand, stays.
 func (m *Manager) Remove(ctx context.Context, app string, hosts []string) ([]string, error) {
 	mine := m.mine()
 	var removed []string
@@ -252,11 +253,11 @@ func (m *Manager) Droppable(ctx context.Context, host string) (Drop, error) {
 		switch r.Type {
 		case "A", "AAAA":
 			if !mine[r.Content] {
-				return Drop{}, fmt.Errorf("%s %w: its %s record names %s, not this machine; bedrock drops only a record that points here", host, ErrElsewhere, r.Type, r.Content)
+				return Drop{}, fmt.Errorf("%s %w: its %s record names %s, not this machine; helios drops only a record that points here", host, ErrElsewhere, r.Type, r.Content)
 			}
 			d.Records = append(d.Records, r)
 		case "CNAME":
-			return Drop{}, fmt.Errorf("%s is a CNAME to %s, not a record that points at this machine; bedrock drops only those", host, r.Content)
+			return Drop{}, fmt.Errorf("%s is a CNAME to %s, not a record that points at this machine; helios drops only those", host, r.Content)
 		}
 	}
 	if len(d.Records) == 0 {
@@ -304,7 +305,7 @@ func (m *Manager) DropRecords(ctx context.Context, d Drop) ([]string, error) {
 	return dropped, nil
 }
 
-// Status is one host's record as bedrock sees it.
+// Status is one host's record as helios sees it.
 type Status struct {
 	Host    string `json:"host"`
 	App     string `json:"app"`
@@ -385,7 +386,7 @@ func (m *Manager) Look(ctx context.Context, routes []Route) ([]Status, error) {
 		case r.Mode == manifest.DNSDirect && found.Proxied:
 			st.Verdict = "points here but proxied"
 		case r.Mode.Managed() && found.Comment != Comment(r.App, m.Hostname):
-			st.Verdict = "points here, not made by bedrock"
+			st.Verdict = "points here, not made by helios"
 		default:
 			st.Verdict = "ok"
 		}
@@ -434,13 +435,13 @@ type Finding struct {
 	Comment string `json:"comment,omitempty"`
 	What    string `json:"what"`
 	// Droppable marks a record that points here with no route here to
-	// answer for it: what bedrock dns drop deletes.
+	// answer for it: what helios dns drop deletes.
 	Droppable bool `json:"droppable,omitempty"`
 }
 
 // Audit looks at every record in the zones the routes live in and reports
 // what doesn't line up: records that point here without a route (a site
-// answering 525 or 404), records bedrock made that no route keeps any more,
+// answering 525 or 404), records helios made that no route keeps any more,
 // routed hosts whose records point elsewhere, and routed hosts with no
 // record at all.
 func (m *Manager) Audit(ctx context.Context, routes []Route) ([]Finding, error) {
@@ -477,7 +478,7 @@ func (m *Manager) Audit(ctx context.Context, routes []Route) ([]Finding, error) 
 				continue
 			}
 			f := Finding{Zone: z.Name, Host: r.Name, Type: r.Type, Content: r.Content, Comment: r.Comment}
-			app, machine, byBedrock := commentApp(r.Comment)
+			app, machine, byHelios := commentApp(r.Comment)
 			if strings.HasPrefix(r.Name, "*.") {
 				used := false
 				for host := range routed {
@@ -499,14 +500,14 @@ func (m *Manager) Audit(ctx context.Context, routes []Route) ([]Finding, error) 
 				answered[r.Name] = true
 			}
 			switch {
-			case mine[r.Content] && !hasRoute && byBedrock:
-				f.What, f.Droppable = fmt.Sprintf("made by bedrock for %s on %s, which no longer routes it", app, machine), true
+			case mine[r.Content] && !hasRoute && byHelios:
+				f.What, f.Droppable = fmt.Sprintf("made by helios for %s on %s, which no longer routes it", app, machine), true
 			case mine[r.Content] && !hasRoute:
 				f.What, f.Droppable = "points at this machine without a route: nothing answers for it", true
 			case hasRoute && r.Type == "CNAME":
 				f.What = fmt.Sprintf("routed by %s here but is a CNAME to %s", route.App, r.Content)
-			case hasRoute && !mine[r.Content] && byBedrock && machine != m.Hostname:
-				f.What = fmt.Sprintf("routed by %s here but kept by bedrock for %s on %s", route.App, app, machine)
+			case hasRoute && !mine[r.Content] && byHelios && machine != m.Hostname:
+				f.What = fmt.Sprintf("routed by %s here but kept by helios for %s on %s", route.App, app, machine)
 			case hasRoute && !mine[r.Content]:
 				f.What = fmt.Sprintf("routed by %s here but points at %s", route.App, r.Content)
 			default:

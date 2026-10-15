@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/helios/internal/docker"
 )
 
 // TestResticRunsAgainstARealRepository drives the pinned restic image
@@ -61,7 +61,7 @@ func TestResticRunsAgainstARealRepository(t *testing.T) {
 	repoMount := []string{repo + ":/repo"}
 	withRepo := func(mounts ...string) []string { return append(append([]string{}, repoMount...), mounts...) }
 
-	// Ensure runs without mounts in bedrock, against a bucket; a local
+	// Ensure runs without mounts in helios, against a bucket; a local
 	// repository needs its directory, so init runs through run directly.
 	if _, err := r.run(ctx, withRepo(), "init", "--json"); err != nil {
 		t.Fatalf("init: %v", err)

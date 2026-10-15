@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/helios/internal/docker"
 )
 
 // The edge's container, image and the places it shares with this machine.
@@ -17,7 +17,7 @@ const (
 	Image     = "caddy:2-alpine"
 	// ConfigDir holds what the edge shares with the machine.
 	ConfigDir = "/var/lib/bedrock/edge"
-	// RunDir holds the sockets: Caddy's admin API, and bedrock's hooks
+	// RunDir holds the sockets: Caddy's admin API, and helios's hooks
 	// endpoint the edge proxies to. The edge sees it as /run/bedrock.
 	RunDir = ConfigDir + "/run"
 	// BootDir holds the configuration the edge starts with; the edge sees
@@ -25,7 +25,7 @@ const (
 	BootDir = ConfigDir + "/boot"
 	// AdminSocket is the admin API's socket, as this machine sees it.
 	AdminSocket = RunDir + "/caddy.sock"
-	// HooksSocket is where bedrock answers hooks, as this machine sees it.
+	// HooksSocket is where helios answers hooks, as this machine sees it.
 	HooksSocket = RunDir + "/hooks.sock"
 	// BootFile is the configuration the edge starts with.
 	BootFile = BootDir + "/caddy.json"
@@ -34,7 +34,7 @@ const (
 	runDirInside  = "/run/bedrock"
 	bootDirInside = "/etc/caddy/bedrock"
 	adminListen   = "unix/" + runDirInside + "/caddy.sock"
-	// HooksDial is how the edge reaches bedrock's hooks endpoint.
+	// HooksDial is how the edge reaches helios's hooks endpoint.
 	HooksDial = "unix/" + runDirInside + "/hooks.sock"
 	// HookPath is where GitHub's webhooks arrive, on an app's own first
 	// host; the edge routes it to HooksDial.
@@ -74,7 +74,7 @@ func Leave(ctx context.Context, engine *docker.Engine, app string) error {
 // Ensure runs the edge on ports 80 and 443 and waits until its admin API
 // answers. It starts with boot, the whole configuration for the apps this
 // machine runs, when it has to make the container; an edge made by an
-// older bedrock is replaced that way, which takes a few seconds. Safe to
+// older helios is replaced that way, which takes a few seconds. Safe to
 // call any time.
 func Ensure(ctx context.Context, engine *docker.Engine, boot []byte, out io.Writer) error {
 	info, err := engine.Inspect(ctx, Container)
@@ -97,7 +97,7 @@ func Ensure(ctx context.Context, engine *docker.Engine, boot []byte, out io.Writ
 	}
 	switch {
 	case err == nil && info.Labels[LayoutLabel] != Layout:
-		// Made by an older bedrock, whose admin API listened on the network.
+		// Made by an older helios, whose admin API listened on the network.
 		if err := WriteBoot(BootFile, boot); err != nil {
 			return err
 		}

@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/edge"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/edge"
 )
 
-// Facts is what bedrock knows about the machine after looking, without
+// Facts is what helios knows about the machine after looking, without
 // changing anything.
 type Facts struct {
 	OSID      string `json:"os_id"`
@@ -90,7 +90,7 @@ type PublishedPort struct {
 	Port string `json:"port"`
 	// Container is the container that publishes it.
 	Container string `json:"container,omitempty"`
-	// App and Workload are whose it is. Bedrock's own containers, such
+	// App and Workload are whose it is. Helios's own containers, such
 	// as the edge, have no workload.
 	App      string `json:"app"`
 	Workload string `json:"workload"`
@@ -114,7 +114,7 @@ type DataAccess struct {
 }
 
 // Whose names what publishes the port, the way the doctor reads: the edge
-// or the registry for bedrock's own, an app's workload for the rest, and
+// or the registry for helios's own, an app's workload for the rest, and
 // the app or the container alone when a label is missing.
 func (p PublishedPort) Whose() string {
 	switch {
@@ -340,7 +340,7 @@ const dataFormat = "{{.Name}}\t{{index .Config.Labels \"bedrock.app\"}}\t{{index
 	"{{range .Mounts}}{{if eq .Type \"volume\"}}\t{{.Name}}={{.Source}}={{.RW}}{{end}}{{end}}"
 
 // gatherData walks the volumes each running app workload mounts writable,
-// as the workload's user. Root, a user bedrock didn't set, bedrock's own
+// as the workload's user. Root, a user helios didn't set, helios's own
 // containers and a drill's scratch copies are left out.
 func gatherData(ctx context.Context, env Env) []DataAccess {
 	names, err := env.Run(ctx, "docker", "ps", "--filter", "label=bedrock.app", "--format", "{{.Names}}")

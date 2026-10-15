@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	apps "github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/state"
+	apps "github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 const helloWithDataJSON = `{"app":"hello","workloads":{"web":{"kind":"web","image":"x","port":80,"routes":[{"host":"hello.example.com"}]}},"data":{"postgres":{"version":"16"}}}`

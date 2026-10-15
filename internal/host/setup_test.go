@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 func profileJSON(t *testing.T, p Profile) json.RawMessage {
@@ -123,7 +123,7 @@ func TestSetupAppliesInASafeOrderOnAFreshBox(t *testing.T) {
 	if index("ufw allow OpenSSH") > index("ufw --force enable") || index("ufw default deny incoming") > index("ufw --force enable") {
 		t.Fatalf("firewall order: %v", cmds)
 	}
-	// Files bedrock owns exist with the expected content.
+	// Files helios owns exist with the expected content.
 	for path, want := range map[string]string{
 		"/etc/docker/daemon.json":                   `"live-restore": true`,
 		"/etc/ssh/sshd_config.d/00-bedrock.conf":    "PasswordAuthentication no",
@@ -156,7 +156,7 @@ func TestSetupOnASetUpBoxChangesNothingHeavy(t *testing.T) {
 	allowEverything(m)
 	m.answers["dpkg-query *"] = "ca-certificates install ok installed\ncurl install ok installed\ngnupg install ok installed\nufw install ok installed\nfail2ban install ok installed\nunattended-upgrades install ok installed\njq install ok installed\ngit install ok installed\ndocker-ce install ok installed\ndocker-ce-cli install ok installed\ncontainerd.io install ok installed\ndocker-buildx-plugin install ok installed\ndocker-compose-plugin install ok installed\n"
 	m.write("/etc/docker/daemon.json", dockerDaemonJSON)
-	m.write(SSHDropIn, sshdBedrock)
+	m.write(SSHDropIn, sshdHelios)
 	m.write("/etc/hosts", "127.0.0.1 localhost\n127.0.1.1 personal-vps\n")
 	_, notes := planSteps(t, m, Profile{Hostname: "personal-vps", SwapGiB: 4})
 	for name, note := range map[string]string{"packages": "all installed", "hostname": "already personal-vps", "swap": "already 4.0 GiB", "docker": "already 29.5.2", "registry": "already running", "ssh": "already keys only", "firewall": "already active", "fail2ban": "already active", "journal": "already capped", "security-updates": "already on"} {

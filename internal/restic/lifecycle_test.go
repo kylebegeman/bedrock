@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/docker/dockertest"
+	"github.com/kylebegeman/helios/internal/docker/dockertest"
 )
 
 func resticFaultServer(t *testing.T, fault func(http.ResponseWriter, *http.Request) bool) *dockertest.Server {

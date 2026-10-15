@@ -42,9 +42,9 @@ trap 'run "bedrock git deny begamin \"$(cat "$push_key.pub")\"" >/dev/null 2>&1 
 push_ssh=$(printf '%q ' ssh -i "$push_key" -o IdentityAgent=none -o IdentitiesOnly=yes -o BatchMode=yes -p "$PORT" -o "UserKnownHostsFile=$KNOWN_HOSTS" -o StrictHostKeyChecking=yes)
 
 echo "== build and install; reconcile keeps the bedrock user that receives pushes"
-(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -o bin/bedrock-linux-$LANE_ARCH ./cmd/bedrock \
+(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -o bin/bedrock-linux-$LANE_ARCH ./cmd/helios \
   && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -o bin/fakeflare-linux-$LANE_ARCH ./lane/fixtures/fakeflare \
-  && go build -trimpath -o bin/bedrock ./cmd/bedrock)
+  && go build -trimpath -o bin/bedrock ./cmd/helios)
 put "$here/../bin/bedrock-linux-$LANE_ARCH" /usr/local/bin/bedrock.new
 run 'mkdir -p /srv/lane/bin'
 put "$here/../bin/fakeflare-linux-$LANE_ARCH" /srv/lane/bin/fakeflare.new
@@ -67,8 +67,8 @@ echo "-- the zone the stand-in serves:"; records
 echo "== every app redeployed under isolation"
 run 'rm -rf /srv/lane/hello /srv/lane/site'
 (cd "$here/fixtures" && COPYFILE_DISABLE=1 tar czf - hello site) | run 'tar xzf - -C /srv/lane 2>/dev/null'
-localize /srv/lane/hello/bedrock.yaml /srv/lane/site/bedrock.yaml
-run "sed -i 's|    resources:\n      memory: 1g|&|' /srv/lane/dragon-writer/bedrock.yaml; grep -q 'tmpfs:' /srv/lane/dragon-writer/bedrock.yaml || sed -i 's|^    mounts:|    tmpfs: [/app/.next/cache]\n    mounts:|' /srv/lane/dragon-writer/bedrock.yaml; grep -B1 -A1 tmpfs /srv/lane/dragon-writer/bedrock.yaml"
+localize /srv/lane/hello/helios.yaml /srv/lane/site/helios.yaml
+run "sed -i 's|    resources:\n      memory: 1g|&|' /srv/lane/dragon-writer/helios.yaml; grep -q 'tmpfs:' /srv/lane/dragon-writer/helios.yaml || sed -i 's|^    mounts:|    tmpfs: [/app/.next/cache]\n    mounts:|' /srv/lane/dragon-writer/helios.yaml; grep -B1 -A1 tmpfs /srv/lane/dragon-writer/helios.yaml"
 for a in site hello dragon-writer; do
   run "bedrock deploy /srv/lane/$a --yes" | quiet | grep -E "running as|volume .* belongs|succeeded|failed"
 done
@@ -78,7 +78,7 @@ echo "== git push deploys begamin, and its records appear"
 run 'rm -rf /var/lib/bedrock-git/begamin.git'
 run "bedrock git allow begamin '$(cat "$push_key.pub")'" | head -1
 git clone -q --no-hardlinks "$begamin_repo" "$work/begamin"
-cat > "$work/begamin/bedrock.yaml" <<EOF
+cat > "$work/begamin/helios.yaml" <<EOF
 app: begamin
 description: A private API
 owner: personal
@@ -113,7 +113,7 @@ checks:
   - url: https://api.$LANE_DOMAIN/healthz
 EOF
 g() { git -C "$work/begamin" -c user.name=lane -c user.email=lane@bedrock "$@"; }
-g add bedrock.yaml && g commit -q -m "lane: deploy with bedrock"
+g add helios.yaml && g commit -q -m "lane: deploy with bedrock"
 g remote add bedrock "bedrock@$HOST:begamin.git"
 GIT_SSH_COMMAND="$push_ssh" g push bedrock HEAD:main 2>&1 | quiet | tail -8
 commit=$(g rev-parse --short=12 HEAD)
@@ -126,7 +126,7 @@ records | grep -q "^api.$LANE_DOMAIN $HOST bedrock: begamin on" || fail "api's r
 
 echo "== a push whose deploy fails is refused, and the running revision stays"
 before=$(run 'bedrock ps' | awk '$1=="begamin" {print $3}')
-sed -i.bak "s|  - url: https://api.$LANE_DOMAIN/healthz|  - url: https://api.$LANE_DOMAIN/not-a-page|" "$work/begamin/bedrock.yaml" && rm -f "$work/begamin/bedrock.yaml.bak"
+sed -i.bak "s|  - url: https://api.$LANE_DOMAIN/healthz|  - url: https://api.$LANE_DOMAIN/not-a-page|" "$work/begamin/helios.yaml" && rm -f "$work/begamin/helios.yaml.bak"
 g commit -q -am "lane: a check that fails"
 if GIT_SSH_COMMAND="$push_ssh" g push bedrock HEAD:main >"$work/refused.log" 2>&1; then fail "a failing deploy was accepted"; fi
 grep -E "fail |the push is refused|declined" "$work/refused.log" | head -4
@@ -199,14 +199,14 @@ echo "-- from the outside: $(fetch -o /dev/null -w '%{http_code}' https://api.$L
 run "bedrock run begamin web -- sh -c 'ls /var/lib/begamin'" | quiet | grep -E '^ +\| ' | head -3
 
 echo "== a name at another machine stops a deploy until it is pointed here"
-run "sed -i 's|      - host: hello.$LANE_DOMAIN|      - host: hello.$LANE_DOMAIN\n      - host: moved.$LANE_DOMAIN\n        dns: direct|' /srv/lane/hello/bedrock.yaml"
+run "sed -i 's|      - host: hello.$LANE_DOMAIN|      - host: hello.$LANE_DOMAIN\n      - host: moved.$LANE_DOMAIN\n        dns: direct|' /srv/lane/hello/helios.yaml"
 run 'bedrock deploy /srv/lane/hello --yes' 2>&1 | quiet | grep -E "fail dns|points elsewhere" | head -2 || true
 run 'bedrock ps' | grep -q "hello  *web" || fail "hello stopped running"
 run "bedrock dns point moved.$LANE_DOMAIN --yes" | quiet | grep -E "updated|points here"
 run 'bedrock deploy /srv/lane/hello --yes' | quiet | grep -E "moved|succeeded|failed"
 echo "-- from the outside: $(fetch https://moved.$LANE_DOMAIN/)"
 echo "-- and when hello stops routing it, the record goes at retire:"
-run "sed -i '/moved.$LANE_DOMAIN/,+1d' /srv/lane/hello/bedrock.yaml && bedrock deploy /srv/lane/hello --yes" | quiet | grep -E "record removed|succeeded|failed"
+run "sed -i '/moved.$LANE_DOMAIN/,+1d' /srv/lane/hello/helios.yaml && bedrock deploy /srv/lane/hello --yes" | quiet | grep -E "record removed|succeeded|failed"
 records | grep -q "^moved.$LANE_DOMAIN" && fail "moved.$LANE_DOMAIN's record survived hello dropping it"
 
 echo "== bedrock dns, and its audit"

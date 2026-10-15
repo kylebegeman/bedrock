@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/secrets"
 )
 
 // Names the data services use.
@@ -32,7 +32,7 @@ const (
 )
 
 // PostgresPasswordName is the secret holding the database superuser's
-// password, for bedrock's own commands.
+// password, for helios's own commands.
 const PostgresPasswordName = postgresPasswordName
 
 // PostgresContainer names an app's database container. It carries no
@@ -140,7 +140,7 @@ func ensureServiceCredentials(store *secrets.Store, m *manifest.Manifest, out io
 	return nil
 }
 
-// ensureAppSecrets makes the secrets the manifest asks bedrock to generate
+// ensureAppSecrets makes the secrets the manifest asks helios to generate
 // and derives the rest. Values never reach the output, only names.
 func ensureAppSecrets(store *secrets.Store, m *manifest.Manifest, out io.Writer) error {
 	if err := ensureServiceCredentials(store, m, out); err != nil {
@@ -342,7 +342,7 @@ func ensurePostgres(ctx context.Context, e *docker.Engine, store *secrets.Store,
 // Object store names.
 const (
 	objectsWorkload = "objects"
-	// ObjectsImage is bedrock's MinIO, pinned by digest.
+	// ObjectsImage is helios's MinIO, pinned by digest.
 	ObjectsImage = "quay.io/minio/minio@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e"
 	// ObjectsUserName and ObjectsPasswordName are the object store's root
 	// credentials in the app's secrets.

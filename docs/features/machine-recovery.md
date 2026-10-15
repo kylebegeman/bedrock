@@ -1,6 +1,6 @@
 # Whole-machine recovery
 
-`bedrock backup bedrock` now preserves a self-contained recovery point: the
+`helios backup bedrock` now preserves a self-contained recovery point: the
 SQLite state, sealed secret histories, host profile, active workload images and
 the exact last successful data backup for each active app. App data is embedded
 inside the machine snapshot, so later app retention cannot delete the recovery
@@ -12,7 +12,7 @@ when the volume layout and service versions are identical. The recorded app
 recovery points can be older than the machine snapshot;
 inspect the app backup history when choosing how much data loss is acceptable.
 Before losing the source, record its machine snapshot IDs with
-`bedrock backups bedrock --json` on that source machine and keep the inventory
+`helios backups bedrock --json` on that source machine and keep the inventory
 with your recovery materials. This command reads local backup history.
 
 The backup omits the machine's private identity. Keep the source recovery
@@ -26,15 +26,15 @@ Initialize the target with its own identity and configure storage to read the
 source machine's repository. Use the source storage bucket prefix and backup
 encryption password. Never replace the target private identity with the source
 identity. Real recovery requires a different target identity, a compatible
-Bedrock version and matching operating system and architecture. It refuses
+Helios version and matching operating system and architecture. It refuses
 existing app history, app secrets and app resources rather than overwriting them.
 
 Choose an explicit source hostname and machine snapshot ID:
 
 ```sh
-bedrock recover old-host --snapshot <machine-snapshot-id> \
+helios recover old-host --snapshot <machine-snapshot-id> \
   --identity-file ./source-recovery.key --plan
-bedrock recover old-host --snapshot <machine-snapshot-id> \
+helios recover old-host --snapshot <machine-snapshot-id> \
   --identity-file ./source-recovery.key --yes
 ```
 
@@ -74,10 +74,10 @@ operator data commands and jobs. The reservation survives reboot and remains
 until cutover or explicit abandonment. Reports stay available:
 
 ```sh
-bedrock recover report <recovery-id>
-bedrock recover report <recovery-id> --json
-bedrock recover cutover <recovery-id> --plan
-bedrock recover cutover <recovery-id> --yes
+helios recover report <recovery-id>
+helios recover report <recovery-id> --json
+helios recover cutover <recovery-id> --plan
+helios recover cutover <recovery-id> --yes
 ```
 
 Cutover brings services onto their normal app networks, restores normal
@@ -93,9 +93,9 @@ recovery ID; it cannot be abandoned after that start marker.
 ## Disposable rehearsal
 
 ```sh
-bedrock recover old-host --snapshot <machine-snapshot-id> \
+helios recover old-host --snapshot <machine-snapshot-id> \
   --identity-file ./source-recovery.key --rehearsal --yes
-bedrock recover report <rehearsal-id> --json
+helios recover report <rehearsal-id> --json
 ```
 
 Rehearsal can run beside existing apps, including on the source machine with
@@ -109,8 +109,8 @@ removes only resources the rehearsal claimed. A rehearsal cannot be cut over.
 ## Abandon a private recovery
 
 ```sh
-bedrock recover abandon <recovery-id> --plan
-bedrock recover abandon <recovery-id> --yes
+helios recover abandon <recovery-id> --plan
+helios recover abandon <recovery-id> --yes
 ```
 
 Abandonment removes only ownership-labeled private recovery containers and

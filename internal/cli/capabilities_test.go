@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/compat"
+	"github.com/kylebegeman/helios/internal/compat"
 )
 
 func TestCapabilitiesDoesNotCreateStateOrSecrets(t *testing.T) {

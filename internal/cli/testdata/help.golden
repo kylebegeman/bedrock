@@ -1,12 +1,12 @@
-== bedrock (hidden false)
+== helios (hidden false)
 One small program that runs your machines.
 
 Usage:
-  bedrock [command]
+  helios [command]
 
 Available Commands:
   alerts           What is wrong right now, and what was recently.
-  backup           Back the app's data up to its bucket now. "bedrock" backs up the machine's own state.
+  backup           Back the app's data up to its bucket now. "helios" backs up the machine's own state.
   backups          List backups, drills and restores, newest first.
   capabilities     Print this build's supported contracts and read-only machine identity.
   check            Validate a manifest and its local source inputs without a host.
@@ -21,8 +21,8 @@ Available Commands:
   git              Deploy by pushing: which keys may push which apps, remotes, and GitHub webhooks.
   history          List recent operations, show a receipt, or retrieve saved diagnostic output.
   host             Set up, keep and maintain this machine.
-  init             Write a starting bedrock.yaml for a new app.
-  integration      The credentials bedrock itself uses: storage for backups, email for alerts, Cloudflare for DNS.
+  init             Write a starting helios.yaml for a new app.
+  integration      The credentials helios itself uses: storage for backups, email for alerts, Cloudflare for DNS.
   jobs             List recent cron runs and one-off commands.
   launch           Take a repository from nothing to running here.
   logs             Show a workload's output; the app's only workload when there is one.
@@ -40,23 +40,23 @@ Available Commands:
   secret           Keep an app's secrets sealed on this machine.
   status           How the machine and its apps are doing: health, traffic, resources, backups, alerts.
   target           Configure explicit SSH targets with pinned host-key verification.
-  upgrade          Replace bedrock with a new build and restart the daemon; systemd rolls back if it can't start.
+  upgrade          Replace helios with a new build and restart the daemon; systemd rolls back if it can't start.
   version          Print the version of this build.
   watch            Public URLs this machine checks from the outside, such as the other machine's sites.
 
 Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
 
-Use "bedrock [command] --help" for more information about a command.
-== bedrock _remote-artifact (hidden true)
+Use "helios [command] --help" for more information about a command.
+== helios _remote-artifact (hidden true)
 
 
 Usage:
-  bedrock _remote-artifact [flags]
+  helios _remote-artifact [flags]
 
 Flags:
       --kind string     source, binary or data
@@ -65,15 +65,15 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock alerts (hidden false)
+== helios alerts (hidden false)
 What is wrong right now, and what was recently.
 
 Usage:
-  bedrock alerts [flags]
-  bedrock alerts [command]
+  helios alerts [flags]
+  helios alerts [command]
 
 Available Commands:
   test        Send a test alert through the email integration.
@@ -84,28 +84,28 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
 
-Use "bedrock alerts [command] --help" for more information about a command.
-== bedrock alerts test (hidden false)
+Use "helios alerts [command] --help" for more information about a command.
+== helios alerts test (hidden false)
 Send a test alert through the email integration.
 
 Usage:
-  bedrock alerts test [flags]
+  helios alerts test [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock backup (hidden false)
-Back the app's data up to its bucket now. "bedrock" backs up the machine's own state.
+== helios backup (hidden false)
+Back the app's data up to its bucket now. "helios" backs up the machine's own state.
 
 Usage:
-  bedrock backup <app> [flags]
+  helios backup <app> [flags]
 
 Flags:
       --digest string   apply only if the plan is still the one with this digest; implies --yes
@@ -115,14 +115,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock backups (hidden false)
+== helios backups (hidden false)
 List backups, drills and restores, newest first.
 
 Usage:
-  bedrock backups [app] [flags]
+  helios backups [app] [flags]
 
 Flags:
       --limit int   how many to list (default 20)
@@ -130,22 +130,22 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock capabilities (hidden false)
+== helios capabilities (hidden false)
 Print this build's supported contracts and read-only machine identity.
 
 Usage:
-  bedrock capabilities [flags]
+  helios capabilities [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock check (hidden false)
+== helios check (hidden false)
 Validate a manifest and its local source inputs without a host.
 Validate a manifest and its local source inputs without a host.
 
@@ -156,28 +156,28 @@ and PostgreSQL init inputs. Nothing is built or changed.
 This is an offline check. It does not establish DNS, certificates,
 image availability, secret values or capacity on a target machine.
 Add --host while running on the target to check the same read-only
-preconditions as bedrock deploy --plan, including integrations and
+preconditions as helios deploy --plan, including integrations and
 route/published-port ownership and availability of named secrets.
 It does not execute the plan or prove disk/aggregate resource capacity,
 runtime readiness, DNS or certificate issuance.
 Usage:
-  bedrock check [source-dir] [flags]
+  helios check [source-dir] [flags]
 
 Flags:
       --host              also check deploy-plan preconditions on this target; applies and journals nothing
-      --manifest string   the .yaml or .yml manifest at the source's root (default "bedrock.yaml")
+      --manifest string   the manifest at the source's root (default: helios.yaml, or bedrock.yaml)
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock daemon (hidden false)
+== helios daemon (hidden false)
 The host daemon: run it, install it under systemd, or check it.
 
 Usage:
-  bedrock daemon [command]
+  helios daemon [command]
 
 Available Commands:
   install     Install this binary as the systemd service and start it.
@@ -187,56 +187,56 @@ Available Commands:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
 
-Use "bedrock daemon [command] --help" for more information about a command.
-== bedrock daemon install (hidden false)
+Use "helios daemon [command] --help" for more information about a command.
+== helios daemon install (hidden false)
 Install this binary as the systemd service and start it.
 
 Usage:
-  bedrock daemon install [flags]
+  helios daemon install [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock daemon run (hidden false)
+== helios daemon run (hidden false)
 Run the daemon in the foreground (what systemd starts).
 
 Usage:
-  bedrock daemon run [flags]
+  helios daemon run [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock daemon status (hidden false)
+== helios daemon status (hidden false)
 Report the service's state and whether the daemon answers.
 
 Usage:
-  bedrock daemon status [flags]
+  helios daemon status [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock deploy (hidden false)
+== helios deploy (hidden false)
 Deploy the app in a source directory: build, start, check, switch the edge, retire the old revision.
 
 Usage:
-  bedrock deploy <source-dir> [flags]
+  helios deploy <source-dir> [flags]
 
 Flags:
       --digest string                apply only if the plan is still the one with this digest; implies --yes
-      --manifest string              the manifest at the source's root, for a source that holds several apps (default "bedrock.yaml")
+      --manifest string              the manifest at the source's root (default: helios.yaml, or bedrock.yaml)
       --plan                         show the plan and change nothing
       --restore-postgres string      a pg_dump file to load into the app's empty database first
       --restore-volume stringArray   name=file.tar.gz to unpack into an empty volume first
@@ -246,45 +246,45 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock dns (hidden false)
+== helios dns (hidden false)
 The records behind every host this machine routes, as Cloudflare and the world see them.
 
 Usage:
-  bedrock dns [flags]
-  bedrock dns [command]
+  helios dns [flags]
+  helios dns [command]
 
 Available Commands:
-  audit       Records that point here without a route, records bedrock left behind, routes whose records point elsewhere.
+  audit       Records that point here without a route, records helios left behind, routes whose records point elsewhere.
   drop        Delete a record that points here for a host no app on this machine routes.
   point       Make a host's record name this machine, taking it from wherever it points now (moving day).
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
 
-Use "bedrock dns [command] --help" for more information about a command.
-== bedrock dns audit (hidden false)
-Records that point here without a route, records bedrock left behind, routes whose records point elsewhere.
+Use "helios dns [command] --help" for more information about a command.
+== helios dns audit (hidden false)
+Records that point here without a route, records helios left behind, routes whose records point elsewhere.
 
 Usage:
-  bedrock dns audit [flags]
+  helios dns audit [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock dns drop (hidden false)
+== helios dns drop (hidden false)
 Delete a record that points here for a host no app on this machine routes.
 Delete a record that points here for a host no app on this machine routes,
-such as one bedrock dns audit finds after an app was removed.
+such as one helios dns audit finds after an app was removed.
 
 Only the A and AAAA records at exactly that name go, and only when every
 record there points at this machine: a record that names another machine,
@@ -292,7 +292,7 @@ or a CNAME, refuses the drop. A wildcard that covers the host is never
 touched; name the wildcard itself, such as '*.example.com', to drop it,
 and only when no route here falls under it.
 Usage:
-  bedrock dns drop <host> [flags]
+  helios dns drop <host> [flags]
 
 Flags:
       --digest string   apply only if the plan is still the one with this digest; implies --yes
@@ -302,14 +302,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock dns point (hidden false)
+== helios dns point (hidden false)
 Make a host's record name this machine, taking it from wherever it points now (moving day).
 
 Usage:
-  bedrock dns point <host> [flags]
+  helios dns point <host> [flags]
 
 Flags:
       --digest string   apply only if the plan is still the one with this digest; implies --yes
@@ -320,26 +320,26 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock doctor (hidden false)
+== helios doctor (hidden false)
 Check this machine and say what to fix. Changes nothing.
 
 Usage:
-  bedrock doctor [flags]
+  helios doctor [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock drill (hidden false)
+== helios drill (hidden false)
 Prove a backup: restore it beside the app, start the app on it, check, clean up.
 
 Usage:
-  bedrock drill <app> [flags]
+  helios drill <app> [flags]
 
 Flags:
       --digest string     apply only if the plan is still the one with this digest; implies --yes
@@ -350,38 +350,38 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock exec (hidden false)
+== helios exec (hidden false)
 Run a command inside a workload's container.
 
 Usage:
-  bedrock exec <app> [workload] -- <command...> [flags]
+  helios exec <app> [workload] -- <command...> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock exposure (hidden false)
+== helios exposure (hidden false)
 What each container may do and what reaches it: user, capabilities, root filesystem, networks, ports, mounts.
 
 Usage:
-  bedrock exposure [app] [flags]
+  helios exposure [app] [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock gc (hidden false)
+== helios gc (hidden false)
 Remove containers, images and build cache that no kept revision uses.
 
 Usage:
-  bedrock gc [flags]
+  helios gc [flags]
 
 Flags:
       --digest string       apply only if the plan is still the one with this digest; implies --yes
@@ -393,17 +393,17 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock git (hidden false)
+== helios git (hidden false)
 Deploy by pushing: which keys may push which apps, remotes, and GitHub webhooks.
 
 Usage:
-  bedrock git [command]
+  helios git [command]
 
 Available Commands:
-  allow       Let an SSH key deploy an app with git push or bedrock deploy --to. The key comes from the argument or stdin.
+  allow       Let an SSH key deploy an app with git push or helios deploy --to. The key comes from the argument or stdin.
   branch      Choose the branch whose pushes deploy an app (main by default).
   deny        Stop a key from deploying an app; a key left with no apps is removed.
   keys        List the keys that may push, and the apps each deploys.
@@ -414,100 +414,100 @@ Available Commands:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
 
-Use "bedrock git [command] --help" for more information about a command.
-== bedrock git allow (hidden false)
-Let an SSH key deploy an app with git push or bedrock deploy --to. The key comes from the argument or stdin.
+Use "helios git [command] --help" for more information about a command.
+== helios git allow (hidden false)
+Let an SSH key deploy an app with git push or helios deploy --to. The key comes from the argument or stdin.
 
 Usage:
-  bedrock git allow <app> [public key] [flags]
+  helios git allow <app> [public key] [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock git branch (hidden false)
+== helios git branch (hidden false)
 Choose the branch whose pushes deploy an app (main by default).
 
 Usage:
-  bedrock git branch <app> <branch> [flags]
+  helios git branch <app> <branch> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock git deny (hidden false)
+== helios git deny (hidden false)
 Stop a key from deploying an app; a key left with no apps is removed.
 
 Usage:
-  bedrock git deny <app> <fingerprint or public key> [flags]
+  helios git deny <app> <fingerprint or public key> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock git hook (hidden true)
+== helios git hook (hidden true)
 The pre-receive hook of an app's repository.
 
 Usage:
-  bedrock git hook <app> [flags]
+  helios git hook <app> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock git keys (hidden false)
+== helios git keys (hidden false)
 List the keys that may push, and the apps each deploys.
 
 Usage:
-  bedrock git keys [flags]
+  helios git keys [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock git remote (hidden false)
+== helios git remote (hidden false)
 Print the git remote that deploys an app.
 
 Usage:
-  bedrock git remote <app> [flags]
+  helios git remote <app> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock git serve (hidden true)
+== helios git serve (hidden true)
 What a push key runs: git receive-pack, upload-pack or a tarball deploy, for its apps only.
 
 Usage:
-  bedrock git serve <apps...> [flags]
+  helios git serve <apps...> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock git webhook (hidden false)
+== helios git webhook (hidden false)
 Deploy an app when GitHub says its branch moved; prints what to paste into GitHub, once.
 
 Usage:
-  bedrock git webhook <app> [flags]
+  helios git webhook <app> [flags]
 
 Flags:
       --branch string   the branch whose pushes deploy (default "main")
@@ -517,22 +517,22 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock git webhooks (hidden false)
+== helios git webhooks (hidden false)
 List the webhooks and what their last delivery did.
 
 Usage:
-  bedrock git webhooks [flags]
+  helios git webhooks [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock history (hidden false)
+== helios history (hidden false)
 List recent operations, show a receipt, or retrieve saved diagnostic output.
 List recent operations, show a receipt, or retrieve saved diagnostic output.
 
@@ -540,15 +540,15 @@ List filters are combined and applied before --limit. --failed includes
 failed and compensated operations. --since accepts a positive duration
 such as 24h, or an RFC3339 timestamp such as 2026-10-10T12:00:00Z.
 
-  bedrock history --app api --kind app.deploy --failed --since 24h
-  bedrock history <operation-id> --output
-  bedrock history <operation-id> --output --step build-web
+  helios history --app api --kind app.deploy --failed --since 24h
+  helios history <operation-id> --output
+  helios history <operation-id> --output --step build-web
 
 Output is opt-in and contains saved tails, not a complete log. Each step
 execution keeps up to 40 lines; a running execution's output is saved when
 it finishes. --step selects an exact name or a one-based step position.
 Usage:
-  bedrock history [operation-id] [flags]
+  helios history [operation-id] [flags]
 
 Flags:
       --app string     only operations targeting this app
@@ -562,35 +562,35 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock host (hidden false)
+== helios host (hidden false)
 Set up, keep and maintain this machine.
 
 Usage:
-  bedrock host [command]
+  helios host [command]
 
 Available Commands:
   bootstrap   Provision a named SSH target from a pinned portable profile, with resumable receipts.
   maintain    Install updates, reboot if allowed and needed, bring everything back and check it.
   profile     Create and validate portable nonsecret bootstrap profiles.
   reconcile   Re-apply this machine's profile, repairing whatever drifted.
-  setup       Turn this machine into a bedrock host: Docker, firewall, key-only SSH, updates, swap, registry.
+  setup       Turn this machine into a helios host: Docker, firewall, key-only SSH, updates, swap, registry.
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
 
-Use "bedrock host [command] --help" for more information about a command.
-== bedrock host bootstrap (hidden false)
+Use "helios host [command] --help" for more information about a command.
+== helios host bootstrap (hidden false)
 Provision a named SSH target from a pinned portable profile, with resumable receipts.
 
 Usage:
-  bedrock host bootstrap [flags]
+  helios host bootstrap [flags]
 
 Flags:
       --binary string        local Linux binary; must match profile version and SHA-256
@@ -604,14 +604,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock host maintain (hidden false)
+== helios host maintain (hidden false)
 Install updates, reboot if allowed and needed, bring everything back and check it.
 
 Usage:
-  bedrock host maintain [flags]
+  helios host maintain [flags]
 
 Flags:
       --digest string   apply only if the plan is still the one with this digest; implies --yes
@@ -622,14 +622,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock host profile (hidden false)
+== helios host profile (hidden false)
 Create and validate portable nonsecret bootstrap profiles.
 
 Usage:
-  bedrock host profile [command]
+  helios host profile [command]
 
 Available Commands:
   check       Validate and display a portable profile.
@@ -638,28 +638,28 @@ Available Commands:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
 
-Use "bedrock host profile [command] --help" for more information about a command.
-== bedrock host profile check (hidden false)
+Use "helios host profile [command] --help" for more information about a command.
+== helios host profile check (hidden false)
 Validate and display a portable profile.
 
 Usage:
-  bedrock host profile check <file> [flags]
+  helios host profile check <file> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock host profile write (hidden false)
+== helios host profile write (hidden false)
 Write a reusable profile with reviewed binary checksums and named integrations.
 
 Usage:
-  bedrock host profile write <file> [flags]
+  helios host profile write <file> [flags]
 
 Flags:
       --checksum stringArray   target platform=SHA256, repeatable
@@ -673,14 +673,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock host reconcile (hidden false)
+== helios host reconcile (hidden false)
 Re-apply this machine's profile, repairing whatever drifted.
 
 Usage:
-  bedrock host reconcile [flags]
+  helios host reconcile [flags]
 
 Flags:
       --digest string   apply only if the plan is still the one with this digest; implies --yes
@@ -690,14 +690,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock host setup (hidden false)
-Turn this machine into a bedrock host: Docker, firewall, key-only SSH, updates, swap, registry.
+== helios host setup (hidden false)
+Turn this machine into a helios host: Docker, firewall, key-only SSH, updates, swap, registry.
 
 Usage:
-  bedrock host setup [flags]
+  helios host setup [flags]
 
 Flags:
       --digest string     apply only if the plan is still the one with this digest; implies --yes
@@ -711,22 +711,22 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock init (hidden false)
-Write a starting bedrock.yaml for a new app.
-Write a starting bedrock.yaml for a new app.
+== helios init (hidden false)
+Write a starting helios.yaml for a new app.
+Write a starting helios.yaml for a new app.
 
 The file is commented and ready to deploy once the app itself exists.
 Nothing on a machine is touched; this only writes a file.
 
-  bedrock init blog --kind static --host blog.example.com
-  bedrock init api --host api.example.com --postgres
-  bedrock init mailer --kind worker
-  bedrock init nightly --kind cron --schedule "0 4 * * *"
+  helios init blog --kind static --host blog.example.com
+  helios init api --host api.example.com --postgres
+  helios init mailer --kind worker
+  helios init nightly --kind cron --schedule "0 4 * * *"
 Usage:
-  bedrock init <app> [flags]
+  helios init <app> [flags]
 
 Flags:
       --dir string        the directory to write the manifest into (default ".")
@@ -740,14 +740,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock integration (hidden false)
-The credentials bedrock itself uses: storage for backups, email for alerts, Cloudflare for DNS.
+== helios integration (hidden false)
+The credentials helios itself uses: storage for backups, email for alerts, Cloudflare for DNS.
 
 Usage:
-  bedrock integration [command]
+  helios integration [command]
 
 Available Commands:
   export      Seal selected integrations, including the backup password, for a target recipient.
@@ -759,16 +759,16 @@ Available Commands:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
 
-Use "bedrock integration [command] --help" for more information about a command.
-== bedrock integration export (hidden false)
+Use "helios integration [command] --help" for more information about a command.
+== helios integration export (hidden false)
 Seal selected integrations, including the backup password, for a target recipient.
 
 Usage:
-  bedrock integration export <integration...> [flags]
+  helios integration export <integration...> [flags]
 
 Flags:
       --to string   target public age recipient
@@ -776,14 +776,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock integration import (hidden false)
+== helios integration import (hidden false)
 Read a recipient-bound encrypted integration transfer from stdin.
 
 Usage:
-  bedrock integration import <integration...> [flags]
+  helios integration import <integration...> [flags]
 
 Flags:
       --replace   explicitly replace conflicting target integration fields
@@ -791,50 +791,50 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock integration list (hidden false)
+== helios integration list (hidden false)
 List the integrations, which are set, and when they were last used.
 
 Usage:
-  bedrock integration list [flags]
+  helios integration list [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock integration remove (hidden false)
+== helios integration remove (hidden false)
 Drop an integration's values.
 
 Usage:
-  bedrock integration remove <name> [flags]
+  helios integration remove <name> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock integration set (hidden false)
+== helios integration set (hidden false)
 Type an integration's values in, or pipe field=value lines. Values are sealed and never shown.
 Integrations: storage, email, cloudflare, loom. In a terminal each field is asked for; otherwise stdin holds one field=value per line.
 Usage:
-  bedrock integration set <name> [flags]
+  helios integration set <name> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock jobs (hidden false)
+== helios jobs (hidden false)
 List recent cron runs and one-off commands.
 
 Usage:
-  bedrock jobs <app> [workload] [flags]
+  helios jobs <app> [workload] [flags]
 
 Flags:
       --limit int   how many runs to list (default 20)
@@ -842,14 +842,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock kernel (hidden true)
+== helios kernel (hidden true)
 Exercise the kernel itself.
 
 Usage:
-  bedrock kernel [command]
+  helios kernel [command]
 
 Available Commands:
   exercise    Run a fixture operation that writes marker files, to prove journaling and recovery.
@@ -857,16 +857,16 @@ Available Commands:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
 
-Use "bedrock kernel [command] --help" for more information about a command.
-== bedrock kernel exercise (hidden false)
+Use "helios kernel [command] --help" for more information about a command.
+== helios kernel exercise (hidden false)
 Run a fixture operation that writes marker files, to prove journaling and recovery.
 
 Usage:
-  bedrock kernel exercise [flags]
+  helios kernel exercise [flags]
 
 Flags:
       --digest string          apply only if the plan is still the one with this digest; implies --yes
@@ -881,20 +881,20 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock launch (hidden false)
+== helios launch (hidden false)
 Take a repository from nothing to running here.
 Take a repository from nothing to running here.
 
 Fetches the repository, works out what it is, writes the manifest it is
-missing and deploys it. A repository that already has a bedrock.yaml is not
+missing and deploys it. A repository that already has a helios.yaml is not
 launched: deploy it instead, because overwriting a manifest somebody wrote
 with a guess is worse than refusing.
 
-  bedrock launch https://github.com/you/site --host site.example.com
-  bedrock launch git@github.com:you/api.git --host api.example.com --postgres
+  helios launch https://github.com/you/site --host site.example.com
+  helios launch git@github.com:you/api.git --host api.example.com --postgres
 
 What it can work out on its own is deliberately narrow, because a wrong
 guess becomes a manifest someone has to debug:
@@ -906,14 +906,14 @@ guess becomes a manifest someone has to debug:
 Anything else is refused with a suggestion, rather than guessed at. The
 manifest it writes is an ordinary one: read it, change it, commit it.
 Usage:
-  bedrock launch <repository> [flags]
+  helios launch <repository> [flags]
 
 Flags:
       --app string      the app's name (default: the repository's name)
       --branch string   the branch to launch (default "main")
       --digest string   apply only if the plan is still the one with this digest; implies --yes
       --host string     the hostname it answers on
-      --keep            leave the fetched tree and the manifest bedrock wrote behind after a --plan or a failure, to read them
+      --keep            leave the fetched tree and the manifest helios wrote behind after a --plan or a failure, to read them
       --plan            show the plan and change nothing
       --port int        the port a web app listens on (default 8000)
       --postgres        give the app a database, and DATABASE_URL to reach it
@@ -922,14 +922,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock logs (hidden false)
+== helios logs (hidden false)
 Show a workload's output; the app's only workload when there is one.
 
 Usage:
-  bedrock logs <app> [workload] [flags]
+  helios logs <app> [workload] [flags]
 
 Flags:
   -f, --follow        keep streaming
@@ -938,22 +938,22 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock ls (hidden false)
+== helios ls (hidden false)
 List the apps on this machine: owner, hosts, repository, last deploy, last backup.
 
 Usage:
-  bedrock ls [flags]
+  helios ls [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock move (hidden false)
+== helios move (hidden false)
 Move an app, and its data, to another machine.
 Move an app, and its data, to another machine.
 
@@ -961,16 +961,16 @@ The staged workflow first rehearses a capture, then freezes source writers for
 an exact final snapshot. The target restores and checks that snapshot before
 an explicit write-authority and DNS cutover.
 
-  on the source: bedrock move rehearse <app> --to target-name > rehearsal.json
-  on the target: bedrock move test <source-dir> --handoff rehearsal.json
-  on the source: bedrock move final <app> --to target-name > final.json
-  on the target: bedrock move stage <source-dir> --handoff final.json
-  on the target: bedrock move cutover <app>
+  on the source: helios move rehearse <app> --to target-name > rehearsal.json
+  on the target: helios move test <source-dir> --handoff rehearsal.json
+  on the source: helios move final <app> --to target-name > final.json
+  on the target: helios move stage <source-dir> --handoff final.json
+  on the target: helios move cutover <app>
 
 The source stays frozen after final capture, including after a host or daemon
 restart. Resume it only deliberately, after stopping destination writers:
 
-  on the source: bedrock move resume <app> --target-stopped
+  on the source: helios move resume <app> --target-stopped
 
 Destination writes are not included in the source snapshot. Returning those
 writes requires a reverse move; an old source is not a lossless rollback.
@@ -984,16 +984,16 @@ same bucket prefix and the same backup password. A machine reading its own
 bucket instead of the source's finds nothing there, which looks like an app
 with no data rather than like a failure.
 
-  on the source:  bedrock move out <app> --yes > handoff.json
-  on the target:  bedrock move in <app> --handoff handoff.json
-                  bedrock deploy <source>
-                  bedrock dns point <host>          # once it answers
-  on the source:  bedrock remove <app>              # after a rollback window
+  on the source:  helios move out <app> --yes > handoff.json
+  on the target:  helios move in <app> --handoff handoff.json
+                  helios deploy <source>
+                  helios dns point <host>          # once it answers
+  on the source:  helios remove <app>              # after a rollback window
 
 These legacy commands provide a manual copy, without a durable source write
 fence or automatic cutover. Quiesce writers before a final manual transfer.
 Usage:
-  bedrock move [command]
+  helios move [command]
 
 Available Commands:
   cutover     Recheck the staged target, admit its writers and move production routes and DNS.
@@ -1009,21 +1009,21 @@ Available Commands:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
 
-Use "bedrock move [command] --help" for more information about a command.
-== bedrock move cutover (hidden false)
+Use "helios move [command] --help" for more information about a command.
+== helios move cutover (hidden false)
 Recheck the staged target, admit its writers and move production routes and DNS.
 Recheck the staged target, admit its writers and move production routes and DNS.
 
 This is the explicit write-authority boundary. Once destination writers
 start, source data may be stale. A failure leaves the source fenced and the
-target intact so the operation can be repaired and retried. Bedrock never
+target intact so the operation can be repaired and retried. Helios never
 automatically points production back at a stale source.
 Usage:
-  bedrock move cutover <app> [flags]
+  helios move cutover <app> [flags]
 
 Flags:
       --digest string   apply only if the plan is still the one with this digest; implies --yes
@@ -1033,14 +1033,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock move final (hidden false)
+== helios move final (hidden false)
 Fence all source writers and capture the final handoff; the source stays stopped.
 
 Usage:
-  bedrock move final <app> [flags]
+  helios move final <app> [flags]
 
 Flags:
       --digest string   apply only if the plan is still the one with this digest; implies --yes
@@ -1051,10 +1051,10 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock move in (hidden false)
+== helios move in (hidden false)
 Restore an app's data here from the handoff the source machine wrote.
 Restore an app's data here from the handoff the source machine wrote.
 
@@ -1062,21 +1062,21 @@ This brings the data across and stops. Deploying the app is a separate
 step, so the restore can be checked before anything starts serving, and
 so the source keeps answering until you move DNS yourself.
 Usage:
-  bedrock move in <app> [flags]
+  helios move in <app> [flags]
 
 Flags:
       --digest string    apply only if the plan is still the one with this digest; implies --yes
-      --handoff string   the handoff written by 'bedrock move out', or - for standard input (default "-")
+      --handoff string   the handoff written by 'helios move out', or - for standard input (default "-")
       --plan             show the plan and change nothing
       --yes              apply without asking
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock move out (hidden false)
+== helios move out (hidden false)
 Back an app up and write the handoff the target machine reads.
 Back an app up and write the handoff the target machine reads.
 
@@ -1088,7 +1088,7 @@ redirected to a file, read, and copied to the other machine.
 The app is left running and may accept writes after this snapshot. Use
 move final and move stage when you need a durable final write fence.
 Usage:
-  bedrock move out <app> [flags]
+  helios move out <app> [flags]
 
 Flags:
       --digest string   apply only if the plan is still the one with this digest; implies --yes
@@ -1099,14 +1099,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock move rehearse (hidden false)
+== helios move rehearse (hidden false)
 Capture a rehearsal snapshot while the source remains available afterwards.
 
 Usage:
-  bedrock move rehearse <app> [flags]
+  helios move rehearse <app> [flags]
 
 Flags:
       --digest string   apply only if the plan is still the one with this digest; implies --yes
@@ -1117,10 +1117,10 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock move resume (hidden false)
+== helios move resume (hidden false)
 Deliberately resume a frozen source after stopping the target.
 Deliberately resume a frozen source after stopping the target.
 
@@ -1129,7 +1129,7 @@ The source cannot prove this across disconnected machines. Its data excludes
 changes made on the destination; use a reverse move to preserve those writes.
 Resume does not change DNS. Review DNS separately before returning traffic.
 Usage:
-  bedrock move resume <app> [flags]
+  helios move resume <app> [flags]
 
 Flags:
       --digest string    apply only if the plan is still the one with this digest; implies --yes
@@ -1140,40 +1140,40 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock move secrets (hidden false)
+== helios move secrets (hidden false)
 Seal an app's secrets for the target machine, and accept them there.
 Seal an app's secrets for the target machine, and accept them there.
 
 A moved app has to arrive with the secrets it left with. Its database comes
 back from a snapshot still holding the role password the source generated, so
 a target that generated its own would be handed a database it cannot open.
-bedrock refuses that restore rather than performing it, which is why this
+helios refuses that restore rather than performing it, which is why this
 step exists.
 
-  on the target:  bedrock secret recipient
-  on the source:  bedrock move secrets <app> --to <age1...> > secrets.age
-  on the target:  bedrock move secrets <app> --accept < secrets.age
+  on the target:  helios secret recipient
+  on the source:  helios move secrets <app> --to <age1...> > secrets.age
+  on the target:  helios move secrets <app> --accept < secrets.age
 
 Only ciphertext is ever printed, sealed to the target's own key, and it stops
 being readable ten minutes after it is made. The values never appear in a
 terminal, a log or a shell history on either machine.
 Usage:
-  bedrock move secrets <app> [flags]
+  helios move secrets <app> [flags]
 
 Flags:
       --accept      read a sealed bundle from standard input and store it here
-      --to string   the target machine's recipient, from 'bedrock secret recipient' there
+      --to string   the target machine's recipient, from 'helios secret recipient' there
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock move stage (hidden false)
+== helios move stage (hidden false)
 Restore the final snapshot and validate the target without public routes or DNS.
 Restore the final snapshot and validate the target without public routes or DNS.
 
@@ -1183,22 +1183,22 @@ workloads for direct checks; worker, cron and release jobs wait. Staged
 workloads may write destination data, so resuming the source never recovers
 those changes. Use move cutover to admit normal destination writers and DNS.
 Usage:
-  bedrock move stage <source-dir> [flags]
+  helios move stage <source-dir> [flags]
 
 Flags:
       --digest string     apply only if the plan is still the one with this digest; implies --yes
       --handoff string    the final source handoff, or - for standard input (default "-")
-      --manifest string   the source manifest (default "bedrock.yaml")
+      --manifest string   the source manifest (default "helios.yaml")
       --plan              show the plan and change nothing
       --yes               apply without asking
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock move test (hidden false)
+== helios move test (hidden false)
 Prove a rehearsal snapshot on scratch target data without production activation.
 Prove a rehearsal snapshot on scratch target data without production activation.
 
@@ -1208,22 +1208,22 @@ network, checks them directly, and cleans up. Background workers, cron,
 release jobs, public routes and DNS are excluded. The source continues
 running after its capture; perform move final before a real cutover.
 Usage:
-  bedrock move test <source-dir> [flags]
+  helios move test <source-dir> [flags]
 
 Flags:
       --digest string     apply only if the plan is still the one with this digest; implies --yes
       --handoff string    the final source handoff, or - for standard input (default "-")
-      --manifest string   the source manifest (default "bedrock.yaml")
+      --manifest string   the source manifest (default "helios.yaml")
       --plan              show the plan and change nothing
       --yes               apply without asking
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock preview (hidden false)
+== helios preview (hidden false)
 Run a branch of an app beside it, behind a sign-in.
 Run a branch of an app beside it, behind a sign-in.
 
@@ -1231,17 +1231,17 @@ A preview is an ordinary app with a derived name, its own containers and its
 own empty database, deployed from a branch. Pushing the same branch again
 updates it rather than making a second one.
 
-  bedrock preview up https://github.com/you/app --branch new-nav \
+  helios preview up https://github.com/you/app --branch new-nav \
       --domain preview.example.com
-  bedrock preview ls
-  bedrock preview down app --branch new-nav
-  bedrock preview pin app --branch new-nav
-  bedrock preview prune --older-than 7d --plan
+  helios preview ls
+  helios preview down app --branch new-nav
+  helios preview pin app --branch new-nav
+  helios preview prune --older-than 7d --plan
 
 Every preview route is behind the Core's sign-in and there is no way to turn
 that off, so the machine needs the loom integration before any of this works.
 Usage:
-  bedrock preview [command]
+  helios preview [command]
 
 Available Commands:
   down        Remove a preview, including its data and secrets.
@@ -1254,19 +1254,19 @@ Available Commands:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
 
-Use "bedrock preview [command] --help" for more information about a command.
-== bedrock preview down (hidden false)
+Use "helios preview [command] --help" for more information about a command.
+== helios preview down (hidden false)
 Remove a preview, including its data and secrets.
 Remove a preview, including its data and secrets.
 
 Give the preview's name, or its parent app with --branch. Pinned previews can
 be removed explicitly here; preview prune leaves them alone.
 Usage:
-  bedrock preview down <preview-or-parent> [flags]
+  helios preview down <preview-or-parent> [flags]
 
 Flags:
       --branch string   the exact branch when naming the parent app
@@ -1277,14 +1277,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock preview ls (hidden false)
+== helios preview ls (hidden false)
 List the previews running on this machine.
 
 Usage:
-  bedrock preview ls [flags]
+  helios preview ls [flags]
 
 Aliases:
   ls, list
@@ -1292,14 +1292,14 @@ Aliases:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock preview pin (hidden false)
+== helios preview pin (hidden false)
 Keep a preview out of preview prune.
 
 Usage:
-  bedrock preview pin <preview-or-parent> [flags]
+  helios preview pin <preview-or-parent> [flags]
 
 Flags:
       --branch string   the exact branch when naming the parent app
@@ -1310,10 +1310,10 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock preview prune (hidden false)
+== helios preview prune (hidden false)
 Remove old, unpinned previews with one reviewable plan.
 Remove old, unpinned previews with one reviewable plan.
 
@@ -1321,7 +1321,7 @@ Age is measured from the latest deploy, not traffic or branch activity. Every
 selected preview's data and secrets are removed using the ordinary remove
 plan. Production apps and pinned previews are excluded.
 Usage:
-  bedrock preview prune [parent-app] [flags]
+  helios preview prune [parent-app] [flags]
 
 Flags:
       --digest string       apply only if the plan is still the one with this digest; implies --yes
@@ -1332,14 +1332,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock preview unpin (hidden false)
+== helios preview unpin (hidden false)
 Allow preview prune to remove this preview when old enough.
 
 Usage:
-  bedrock preview unpin <preview-or-parent> [flags]
+  helios preview unpin <preview-or-parent> [flags]
 
 Flags:
       --branch string   the exact branch when naming the parent app
@@ -1350,14 +1350,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock preview up (hidden false)
+== helios preview up (hidden false)
 Deploy a branch as a preview of the app in it.
 Deploy a branch as a preview of the app in it.
 
-The branch's own bedrock.yaml says which app this is a preview of. The
+The branch's own helios.yaml says which app this is a preview of. The
 preview is derived from it: a name with the branch in it, hostnames under
 the preview domain, every route behind a sign-in, preserved checks and no backups.
 
@@ -1369,14 +1369,14 @@ say. An app whose records are kept by hand has none for a preview, so
 either --dns direct makes them, or a wildcard under the preview domain
 points at this machine already.
 Usage:
-  bedrock preview up <repository> [flags]
+  helios preview up <repository> [flags]
 
 Flags:
       --branch string     the branch to preview
       --digest string     apply only if the plan is still the one with this digest; implies --yes
       --dns string        keep the preview's records this way: direct, proxied or manual (default: as the app's routes say)
       --domain string     the domain previews answer under, such as preview.example.com
-      --manifest string   the manifest at the branch's root, for a source that holds several apps (default "bedrock.yaml")
+      --manifest string   the manifest at the branch's root, for a source that holds several apps
       --pin               keep this preview out of preview prune (existing pin is preserved unless explicitly set)
       --plan              show the plan and change nothing
       --secrets           copy the parent's hand-set secrets so the preview can start (default true)
@@ -1385,46 +1385,46 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock ps (hidden false)
+== helios ps (hidden false)
 List apps, their workloads and what is running.
 
 Usage:
-  bedrock ps [flags]
+  helios ps [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock psql (hidden false)
+== helios psql (hidden false)
 Open psql on the app's database.
 
 Usage:
-  bedrock psql <app> [-- psql arguments] [flags]
+  helios psql <app> [-- psql arguments] [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock receive (hidden true)
-Deploy the source tree on stdin (what bedrock deploy --to sends).
+== helios receive (hidden true)
+Deploy the source tree on stdin (what helios deploy --to sends).
 
 Usage:
-  bedrock receive <app> [flags]
+  helios receive <app> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock recover (hidden false)
+== helios recover (hidden false)
 Recover an exact machine backup privately, or rehearse it in disposable isolation.
 Recover an exact machine backup privately, or rehearse it in disposable isolation.
 
@@ -1438,17 +1438,17 @@ published ports or live routes. A separate cutover changes live traffic after
 readiness. --rehearsal skips target state/profile/integrations and removes its
 isolated workloads and volumes after the check.
 
-  bedrock recover old-host --snapshot <id> --identity-file ./recovery.key --plan
-  bedrock recover old-host --snapshot <id> --identity-file ./recovery.key --yes
-  bedrock recover old-host --snapshot <id> --identity-stdin --rehearsal --yes
-  bedrock recover cutover <recovery-id> --plan
+  helios recover old-host --snapshot <id> --identity-file ./recovery.key --plan
+  helios recover old-host --snapshot <id> --identity-file ./recovery.key --yes
+  helios recover old-host --snapshot <id> --identity-stdin --rehearsal --yes
+  helios recover cutover <recovery-id> --plan
 
 The machine snapshot must contain a compatible recovery catalog and workload
 image archive. Data recovery restores the app recovery points embedded inside
 that machine snapshot, so app retention cannot remove them.
 Usage:
-  bedrock recover <source-machine> [flags]
-  bedrock recover [command]
+  helios recover <source-machine> [flags]
+  helios recover [command]
 
 Available Commands:
   abandon     Stop private recovery containers and release its reservation, preserving restored data and history.
@@ -1468,16 +1468,16 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
 
-Use "bedrock recover [command] --help" for more information about a command.
-== bedrock recover abandon (hidden false)
+Use "helios recover [command] --help" for more information about a command.
+== helios recover abandon (hidden false)
 Stop private recovery containers and release its reservation, preserving restored data and history.
 
 Usage:
-  bedrock recover abandon <recovery-id> [flags]
+  helios recover abandon <recovery-id> [flags]
 
 Flags:
       --digest string   apply only if the plan is still the one with this digest; implies --yes
@@ -1487,14 +1487,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock recover cutover (hidden false)
+== helios recover cutover (hidden false)
 Route live traffic to a completed private machine recovery after readiness.
 
 Usage:
-  bedrock recover cutover <recovery-id> [flags]
+  helios recover cutover <recovery-id> [flags]
 
 Flags:
       --digest string   apply only if the plan is still the one with this digest; implies --yes
@@ -1504,27 +1504,27 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock recover report (hidden false)
+== helios recover report (hidden false)
 Show the recovery's pinned snapshots, private readiness and cutover status.
 
 Usage:
-  bedrock recover report <recovery-id> [flags]
+  helios recover report <recovery-id> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock rehearse (hidden false)
+== helios rehearse (hidden false)
 Test a candidate's releases and checks on an isolated restored backup.
 
 Usage:
-  bedrock rehearse <source> [flags]
-  bedrock rehearse [command]
+  helios rehearse <source> [flags]
+  helios rehearse [command]
 
 Available Commands:
   report      Show the candidate's exact source, images, snapshot and rehearsal outcome.
@@ -1538,24 +1538,24 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
 
-Use "bedrock rehearse [command] --help" for more information about a command.
-== bedrock rehearse report (hidden false)
+Use "helios rehearse [command] --help" for more information about a command.
+== helios rehearse report (hidden false)
 Show the candidate's exact source, images, snapshot and rehearsal outcome.
 
 Usage:
-  bedrock rehearse report <app> <candidate-revision> [flags]
+  helios rehearse report <app> <candidate-revision> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock remove (hidden false)
+== helios remove (hidden false)
 Take an app off this machine. Its volumes, database and secrets stay unless asked.
 Take an app off this machine. Its volumes, database and sealed secrets
 stay unless asked, so it can be restored or deployed again with what it had.
@@ -1565,7 +1565,7 @@ on this machine, --data removes whatever it left behind: its sealed secrets,
 volumes, database and networks. Its backups in the storage bucket stay, and
 are the only way back.
 Usage:
-  bedrock remove <app> [flags]
+  helios remove <app> [flags]
 
 Flags:
       --data            also remove the app's volumes, database and sealed secrets, or what a removed app left; only a backup brings them back
@@ -1577,14 +1577,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock restore (hidden false)
+== helios restore (hidden false)
 Bring an app's data back from its bucket onto this machine, before deploying it here.
 
 Usage:
-  bedrock restore <app> [flags]
+  helios restore <app> [flags]
 
 Flags:
       --digest string     apply only if the plan is still the one with this digest; implies --yes
@@ -1595,14 +1595,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock rollback (hidden false)
+== helios rollback (hidden false)
 Make the previous revision active again.
 
 Usage:
-  bedrock rollback <app> [flags]
+  helios rollback <app> [flags]
 
 Flags:
       --digest string         apply only if the plan is still the one with this digest; implies --yes
@@ -1614,10 +1614,10 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock run (hidden false)
+== helios run (hidden false)
 Run a one-off command with a workload's image, environment, secrets and volumes.
 Run a one-off command with a workload's image, environment, secrets and volumes.
 
@@ -1627,7 +1627,7 @@ the command, for a value that must appear in no argument, log or record:
 the command then runs here, not in the daemon, and exits with the
 command's own exit code.
 Usage:
-  bedrock run <app> [workload] -- <command...> [flags]
+  helios run <app> [workload] -- <command...> [flags]
 
 Flags:
       --plan                 show what would run and change nothing
@@ -1637,14 +1637,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock secret (hidden false)
+== helios secret (hidden false)
 Keep an app's secrets sealed on this machine.
 
 Usage:
-  bedrock secret [command]
+  helios secret [command]
 
 Available Commands:
   copy        Give another app the same value of a secret, without showing it.
@@ -1659,31 +1659,31 @@ Available Commands:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
 
-Use "bedrock secret [command] --help" for more information about a command.
-== bedrock secret copy (hidden false)
+Use "helios secret [command] --help" for more information about a command.
+== helios secret copy (hidden false)
 Give another app the same value of a secret, without showing it.
 Give another app the same value of a secret, without showing it: for
 two apps that must share a credential, such as a worker that pairs with
 the product that made its token. The value never leaves the machine's
 store. Copying the same value again changes nothing.
 Usage:
-  bedrock secret copy <from-app> <NAME> <to-app> [flags]
+  helios secret copy <from-app> <NAME> <to-app> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock secret export (hidden false)
+== helios secret export (hidden false)
 Seal one secret for another machine; prints only age ciphertext.
 
 Usage:
-  bedrock secret export <from-app> <NAME> <to-app> [flags]
+  helios secret export <from-app> <NAME> <to-app> [flags]
 
 Flags:
       --recipient string   the receiving machine's public age recipient
@@ -1691,86 +1691,86 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock secret import (hidden false)
+== helios secret import (hidden false)
 Read a secret sealed for this machine from stdin, without showing it.
 
 Usage:
-  bedrock secret import <app> <NAME> [flags]
+  helios secret import <app> <NAME> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock secret list (hidden false)
+== helios secret list (hidden false)
 List the names in the current version. Values are never shown.
 
 Usage:
-  bedrock secret list <app> [flags]
+  helios secret list <app> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock secret recipient (hidden false)
+== helios secret recipient (hidden false)
 Print the machine's public encryption recipient, creating its key if needed.
 
 Usage:
-  bedrock secret recipient [flags]
+  helios secret recipient [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock secret remove (hidden false)
+== helios secret remove (hidden false)
 Drop a name from the next version.
 
 Usage:
-  bedrock secret remove <app> <NAME> [flags]
+  helios secret remove <app> <NAME> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock secret set (hidden false)
+== helios secret set (hidden false)
 Store a value, read from stdin or typed without echo. Never pass it as an argument.
 
 Usage:
-  bedrock secret set <app> <NAME> [flags]
+  helios secret set <app> <NAME> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock secret versions (hidden false)
+== helios secret versions (hidden false)
 List every version and the names it holds.
 
 Usage:
-  bedrock secret versions <app> [flags]
+  helios secret versions <app> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock status (hidden false)
+== helios status (hidden false)
 How the machine and its apps are doing: health, traffic, resources, backups, alerts.
 
 Usage:
-  bedrock status [app] [flags]
+  helios status [app] [flags]
 
 Flags:
       --since duration   the window for traffic and resources (default 24h0m0s)
@@ -1778,14 +1778,14 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock target (hidden false)
+== helios target (hidden false)
 Configure explicit SSH targets with pinned host-key verification.
 
 Usage:
-  bedrock target [command]
+  helios target [command]
 
 Available Commands:
   list        List saved targets.
@@ -1797,93 +1797,93 @@ Available Commands:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
 
-Use "bedrock target [command] --help" for more information about a command.
-== bedrock target list (hidden false)
+Use "helios target [command] --help" for more information about a command.
+== helios target list (hidden false)
 List saved targets.
 
 Usage:
-  bedrock target list [flags]
+  helios target list [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock target remove (hidden false)
+== helios target remove (hidden false)
 Remove a local target entry.
 
 Usage:
-  bedrock target remove <name> [flags]
+  helios target remove <name> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock target set (hidden false)
+== helios target set (hidden false)
 Save a named SSH connection; host keys must already be trusted.
 
 Usage:
-  bedrock target set <name> [flags]
+  helios target set <name> [flags]
 
 Flags:
-      --binary string        absolute path of bedrock on the target
+      --binary string        absolute path of helios on the target
       --identity string      SSH identity file
       --known-hosts string   pinned known-hosts file, or the SSH default
       --machine-id string    expected machine identity from capabilities
       --port int             SSH port, or use the SSH configuration
       --ssh string           SSH configuration alias or user@host
-      --sudo                 run bedrock through noninteractive sudo
+      --sudo                 run helios through noninteractive sudo
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock target show (hidden false)
+== helios target show (hidden false)
 Show a target's nonsecret connection settings.
 
 Usage:
-  bedrock target show <name> [flags]
+  helios target show <name> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock target verify (hidden false)
+== helios target verify (hidden false)
 Verify SSH and pin the machine's reported identity.
 
 Usage:
-  bedrock target verify <name> [flags]
+  helios target verify <name> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock upgrade (hidden false)
-Replace bedrock with a new build and restart the daemon; systemd rolls back if it can't start.
-Replace bedrock with a new build and restart the daemon; systemd rolls back if it can't start.
+== helios upgrade (hidden false)
+Replace helios with a new build and restart the daemon; systemd rolls back if it can't start.
+Replace helios with a new build and restart the daemon; systemd rolls back if it can't start.
 
 With --version the build is downloaded from the published release and checked
 against the SHA256SUMS beside it. That proves the two agree and nothing more,
 since whoever can replace one can replace both; pass --sha256 with a checksum
 from reviewed source to pin it.
 
-  bedrock upgrade --version 0.7.4
-  bedrock upgrade /tmp/bedrock-new
+  helios upgrade --version 0.7.4
+  helios upgrade /tmp/helios-new
 Usage:
-  bedrock upgrade [path-to-new-bedrock] [flags]
+  helios upgrade [path-to-new-helios] [flags]
 
 Flags:
       --digest string    apply only if the plan is still the one with this digest; implies --yes
@@ -1895,27 +1895,27 @@ Flags:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock version (hidden false)
+== helios version (hidden false)
 Print the version of this build.
 
 Usage:
-  bedrock version [flags]
+  helios version [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock watch (hidden false)
+== helios watch (hidden false)
 Public URLs this machine checks from the outside, such as the other machine's sites.
 
 Usage:
-  bedrock watch [flags]
-  bedrock watch [command]
+  helios watch [flags]
+  helios watch [command]
 
 Available Commands:
   add         Check a URL every minute and alert when it stops answering 200.
@@ -1924,32 +1924,32 @@ Available Commands:
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
 
-Use "bedrock watch [command] --help" for more information about a command.
-== bedrock watch add (hidden false)
+Use "helios watch [command] --help" for more information about a command.
+== helios watch add (hidden false)
 Check a URL every minute and alert when it stops answering 200.
 
 Usage:
-  bedrock watch add <url> [flags]
+  helios watch add <url> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")
-== bedrock watch remove (hidden false)
+== helios watch remove (hidden false)
 Stop checking a URL.
 
 Usage:
-  bedrock watch remove <url> [flags]
+  helios watch remove <url> [flags]
 
 Global Flags:
       --json                  print JSON, one object per line
       --socket string         the daemon's socket; the local kernel is used when nothing answers (default "/run/bedrock/bedrock.sock")
-      --state-dir string      where bedrock keeps its state (default "~/.bedrock")
+      --state-dir string      where helios keeps its state (default "~/.bedrock")
       --target string         operate on this explicitly named SSH target
       --targets-file string   the local named-target configuration (default "~/.bedrock/targets.json")

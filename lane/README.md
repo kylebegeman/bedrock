@@ -96,13 +96,13 @@ openssl rand -hex 16
 On the **already identified disposable machine**, its owner installs that
 same identity as a root-owned, mode-600 `/etc/bedrock-lane-id`. The runner
 never writes this marker automatically to an arbitrary SSH target. A
-`/etc/bedrock-production` marker always refuses the target. A missing,
+`/etc/bedrock-production` or `/etc/helios-production` marker always refuses the target. A missing,
 changed, symlinked or incorrectly permissioned disposable identity refuses
 it. SSH failure, a changed host key, malformed app registry, non-fixture
 apps and unmanaged non-fixture containers also refuse it. The allowed app
 names are the lane fixtures, not a wildcard prefix.
 
-`bedrock ls --json` reports `unmanaged_known: true` only after a successful
+`helios ls --json` reports `unmanaged_known: true` only after a successful
 Docker inventory, including an empty inventory. Its app listing remains useful
 when Docker is unavailable, with `unmanaged_known: false`; unknown inventory
 cannot authorize lane work. The guard checks the command exit separately from
@@ -118,7 +118,7 @@ explicit absence of `docker` and `dockerd` commands, `/var/lib/docker`, Docker
 sockets at `/run/docker.sock`, `/var/run/docker.sock`, and `/run/user/*/docker.sock`,
 and `docker.service` and `docker.socket` units under `/etc/systemd/system`,
 `/lib/systemd/system`, and `/usr/lib/systemd/system`. Existing paths and broken
-symlinks both count as installation evidence. A Docker footprint without Bedrock
+symlinks both count as installation evidence. A Docker footprint without Helios
 is also refused until its inventory can be verified. A stopped, broken, or
 partially installed Docker engine cannot take the fresh-machine exception.
 

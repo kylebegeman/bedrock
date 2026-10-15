@@ -10,9 +10,9 @@ import (
 	"testing"
 
 	"filippo.io/age"
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/remote"
-	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/remote"
+	"github.com/kylebegeman/helios/internal/secrets"
 )
 
 func TestLoadRejectsOversizedProfileEvenAfterCompleteJSON(t *testing.T) {

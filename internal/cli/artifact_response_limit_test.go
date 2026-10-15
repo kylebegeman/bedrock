@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/remote"
+	"github.com/kylebegeman/helios/internal/remote"
 )
 
 func TestUploadArtifactBoundsRemotePathResponse(t *testing.T) {

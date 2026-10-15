@@ -3,8 +3,8 @@ package app
 import (
 	"fmt"
 
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/secrets"
 )
 
 // CheckDeploySecrets proves that named workload, database-init and verification
@@ -86,7 +86,7 @@ func CheckDeploySecretsFrom(m *manifest.Manifest, store *secrets.Store, from str
 	}
 	if m.Data != nil && m.Data.Postgres != nil {
 		if missing := secrets.Missing(available, m.Data.Postgres.Secrets); len(missing) > 0 {
-			return fmt.Errorf("database init secrets not set: %v; set them with bedrock secret set %s NAME", missing, m.App)
+			return fmt.Errorf("database init secrets not set: %v; set them with helios secret set %s NAME", missing, m.App)
 		}
 	}
 	return checkVerificationSecrets(m, available)

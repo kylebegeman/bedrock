@@ -22,14 +22,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/cloudflare"
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/edge"
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/cloudflare"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/edge"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // DeployKind deploys a source directory as a new revision of its app.
@@ -44,7 +44,7 @@ type Deploy struct {
 	Secrets *secrets.Store
 	// Addresses are this machine's public addresses, for the DNS check.
 	Addresses func(ctx context.Context) []string
-	// StateDir is bedrock's state directory; empty means /var/lib/bedrock.
+	// StateDir is helios's state directory; empty means /var/lib/bedrock.
 	StateDir string
 	// CloudflareOnly refuses routes that would not go through Cloudflare's
 	// proxy on a machine that answers only Cloudflare.
@@ -53,7 +53,7 @@ type Deploy struct {
 
 // DeployInput says what to deploy.
 type DeployInput struct {
-	// Source is the directory holding bedrock.yaml and the code.
+	// Source is the directory holding helios.yaml and the code.
 	Source string `json:"source"`
 	// Revision names the new revision; the CLI makes one from the clock.
 	Revision string `json:"revision"`
@@ -62,7 +62,7 @@ type DeployInput struct {
 	// Commit is the source's commit when the caller knows it, as a push
 	// does; otherwise it is read from the source when it is a checkout.
 	Commit string `json:"commit,omitempty"`
-	// Manifest names the manifest at the source's root; empty is bedrock.yaml.
+	// Manifest names the manifest at the source's root; empty is helios.yaml.
 	Manifest string `json:"manifest,omitempty"`
 	// SecretsFrom names an app whose current secrets are copied to this one
 	// before its own are made: a preview inherits the values its parent was
@@ -96,9 +96,6 @@ func (d Deploy) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 	// The manifest is read as root: LoadFile takes only a plain file of
 	// the source's own, never a link out of it.
 	name := in.Manifest
-	if name == "" {
-		name = manifest.FileName
-	}
 	stateDir := d.StateDir
 	if stateDir == "" {
 		stateDir = defaultStateDir
@@ -141,7 +138,7 @@ func (d Deploy) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 			return nil, err
 		}
 		if g == nil {
-			return nil, fmt.Errorf("%s puts a sign-in on %s, and this machine has no loom integration to ask: bedrock integration set loom",
+			return nil, fmt.Errorf("%s puts a sign-in on %s, and this machine has no loom integration to ask: helios integration set loom",
 				m.App, strings.Join(guarded, ", "))
 		}
 	}
@@ -190,7 +187,7 @@ type buildFrom struct {
 	secretsFrom string
 }
 
-// defaultStateDir is bedrock's state on a machine, where a Deploy that
+// defaultStateDir is helios's state on a machine, where a Deploy that
 // doesn't say otherwise keeps what it copies.
 const defaultStateDir = "/var/lib/bedrock"
 
@@ -381,7 +378,10 @@ func containerSpec(m *manifest.Manifest, name string, w manifest.Workload, revis
 		// The one network it shares with the edge, and with no other app.
 		spec.Networks = append(spec.Networks, edge.AppNetwork(m.App))
 	}
-	spec.Env = []string{"BEDROCK_APP=" + m.App, "BEDROCK_WORKLOAD=" + name, "BEDROCK_REVISION=" + revision}
+	spec.Env = []string{
+		"HELIOS_APP=" + m.App, "HELIOS_WORKLOAD=" + name, "HELIOS_REVISION=" + revision,
+		"BEDROCK_APP=" + m.App, "BEDROCK_WORKLOAD=" + name, "BEDROCK_REVISION=" + revision,
+	}
 	for _, k := range sortedKeys(w.Env) {
 		spec.Env = append(spec.Env, k+"="+w.Env[k])
 	}
@@ -531,7 +531,7 @@ func HealthCommand(ctx context.Context, e *docker.Engine, container string, comm
 		if ctx.Err() != nil {
 			return errors.New("the health command took longer than 30s")
 		}
-		if words := lastWords(out); words != "it wrote nothing; see bedrock logs" {
+		if words := lastWords(out); words != "it wrote nothing; see helios logs" {
 			return fmt.Errorf("the health command failed: %s", words)
 		}
 		return errors.New("the health command failed")
@@ -540,7 +540,7 @@ func HealthCommand(ctx context.Context, e *docker.Engine, container string, comm
 }
 
 // servePort is the port a route reaches, or with no route the port the
-// workload listens on: static workloads serve on bedrock's own.
+// workload listens on: static workloads serve on helios's own.
 func servePort(w manifest.Workload, r *manifest.Route) int {
 	if w.Kind == manifest.Static {
 		port, _ := strconv.Atoi(docker.StaticPort)
@@ -553,7 +553,7 @@ func servePort(w manifest.Workload, r *manifest.Route) int {
 }
 
 // ReloadEdge gives the edge the configuration the active revisions call
-// for, when it is up. The daemon does this at start, so a bedrock that
+// for, when it is up. The daemon does this at start, so a helios that
 // changed how it configures the edge takes effect without a deploy.
 func ReloadEdge(ctx context.Context, store *state.Store, sec *secrets.Store) error {
 	admin := edge.NewAdmin()
@@ -567,7 +567,7 @@ func ReloadEdge(ctx context.Context, store *state.Store, sec *secrets.Store) err
 	return admin.Load(ctx, cfg)
 }
 
-// UpgradeEdge replaces an edge an older bedrock made, keeping its routes,
+// UpgradeEdge replaces an edge an older helios made, keeping its routes,
 // and then gives it the current configuration. A machine without an edge
 // yet is left for host setup.
 func UpgradeEdge(ctx context.Context, store *state.Store, sec *secrets.Store, out io.Writer) error {
@@ -639,7 +639,7 @@ func lastWords(logs string) string {
 			return l
 		}
 	}
-	return "it wrote nothing; see bedrock logs"
+	return "it wrote nothing; see helios logs"
 }
 
 var (
@@ -686,7 +686,7 @@ func edgeConfig(ctx context.Context, store *state.Store, sec *secrets.Store) ([]
 		}
 		if hosts := m.Hosts(); hooked[rev.App] && len(hosts) > 0 {
 			// Webhooks for the app arrive on its first host and go to
-			// bedrock, not to the app.
+			// helios, not to the app.
 			routes = append(routes, edge.Route{Host: hosts[0], Path: HookRoute, Dial: edge.HooksDial})
 		}
 		for _, name := range m.WorkloadNames() {
@@ -698,7 +698,7 @@ func edgeConfig(ctx context.Context, store *state.Store, sec *secrets.Store) ([]
 					// would put the app on the open internet, so the whole
 					// configuration is refused instead.
 					if guard == nil {
-						return nil, fmt.Errorf("%s routes %s with auth: %s, and this machine has no loom integration: bedrock integration set loom", rev.App, r.Host, r.Auth)
+						return nil, fmt.Errorf("%s routes %s with auth: %s, and this machine has no loom integration: helios integration set loom", rev.App, r.Host, r.Auth)
 					}
 					route.Guard = guard
 				}
@@ -1052,7 +1052,7 @@ func checkSecrets(m *manifest.Manifest, values map[string]string) error {
 		}
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("secrets not set: %s; set each with bedrock secret set %s NAME", strings.Join(missing, ", "), m.App)
+		return fmt.Errorf("secrets not set: %s; set each with helios secret set %s NAME", strings.Join(missing, ", "), m.App)
 	}
 	return nil
 }
@@ -1083,7 +1083,7 @@ func publishedSummary(m *manifest.Manifest) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return ", publishing " + strings.Join(parts, ", ") + " on the machine, past the edge and the firewall (bedrock doctor lists them)"
+	return ", publishing " + strings.Join(parts, ", ") + " on the machine, past the edge and the firewall (helios doctor lists them)"
 }
 
 // checkPublishedPorts refuses a port on the machine that another app's

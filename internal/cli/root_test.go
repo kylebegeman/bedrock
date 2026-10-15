@@ -10,12 +10,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/version"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/version"
 )
 
-// run executes bedrock with a private state directory and no daemon.
+// run executes helios with a private state directory and no daemon.
 func run(t *testing.T, stateDir string, args ...string) (string, string, int) {
 	t.Helper()
 	var out, errOut bytes.Buffer

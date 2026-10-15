@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kylebegeman/bedrock/internal/cloudflare"
+	"github.com/kylebegeman/helios/internal/cloudflare"
 )
 
 // Where a machine takes web traffic from: the profile's web_from.
@@ -26,14 +26,14 @@ const (
 	WebFromCloudflare = "cloudflare"
 )
 
-// cloudflareComment marks the rules bedrock keeps for Cloudflare's ranges,
+// cloudflareComment marks the rules helios keeps for Cloudflare's ranges,
 // so it can tell them from rules a person added.
-const cloudflareComment = "bedrock: cloudflare"
+const cloudflareComment = "helios: cloudflare"
 
 // webPorts is the edge's ports as one ufw rule allows them.
 const webPorts = "80,443"
 
-// RangesPath keeps the last list of Cloudflare's ranges bedrock read, so a
+// RangesPath keeps the last list of Cloudflare's ranges helios read, so a
 // reconcile still works while the list cannot be fetched, and so the edge
 // knows which connections are Cloudflare's.
 const RangesPath = cloudflare.RangesFile
@@ -73,7 +73,7 @@ func (r FirewallRule) Web() bool {
 	return false
 }
 
-// ours reports whether bedrock keeps the rule for Cloudflare.
+// ours reports whether helios keeps the rule for Cloudflare.
 func (r FirewallRule) ours() bool { return strings.TrimSpace(r.Comment) == cloudflareComment }
 
 // ufwRule reads one row of `ufw status` or `ufw status numbered`. An
@@ -181,7 +181,7 @@ func (f Facts) WebOpen() bool {
 	return false
 }
 
-// CloudflareSources are the ranges bedrock's Cloudflare rules let reach
+// CloudflareSources are the ranges helios's Cloudflare rules let reach
 // 80 and 443.
 func (f Facts) CloudflareSources() []string {
 	var out []string
@@ -321,7 +321,7 @@ func firewallDone(f Facts, ranges []string) bool {
 // ensureFirewall allows ssh before anything is denied, so a mistake can't
 // lock the door. With ranges it lets only those reach 80 and 443: they are
 // allowed before the open rules go, so the web never closes to Cloudflare
-// on the way. Without, 80 and 443 are open to anyone and bedrock's
+// on the way. Without, 80 and 443 are open to anyone and helios's
 // Cloudflare rules, if an earlier setup made them, are removed.
 func ensureFirewall(ctx context.Context, env Env, out io.Writer, ranges []string) error {
 	ufw := func(args ...string) error {

@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/kernel"
 )
 
 // The operation lock serializes execution; a persistent recovery reservation

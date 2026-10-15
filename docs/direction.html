@@ -1,4 +1,4 @@
-<title>Bedrock Direction</title>
+<title>Helios Direction</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
@@ -85,8 +85,8 @@
 <main>
   <header>
     <div class="eyebrow">Direction · September 21, 2026</div>
-    <h1>Bedrock Direction</h1>
-    <p class="lead">Bedrock hosts any software on a VPS, and makes the next VPS cost almost nothing. There are no more milestone releases. It stays on 0.7.x and ships one feature at a time.</p>
+    <h1>Helios Direction</h1>
+    <p class="lead">Helios hosts any software on a VPS, and makes the next VPS cost almost nothing. There are no more milestone releases. It stays on 0.7.x and ships one feature at a time. Helios is the new product name; live installations retain their existing identities until the planned migration.</p>
     <p class="muted">This replaces the release ladder in the <a href="plan.html">0.7 plan</a>, which is delivered and closed. The backlog is still <a href="ideas.html">Ideas</a>.</p>
   </header>
 
@@ -94,7 +94,7 @@
     <div class="eyebrow">The change</div>
     <h2>No 0.8, no 0.9, no date for 1.0</h2>
     <p>The plan had four rungs: 0.7 runs the personal machine, 0.8 wires Loom, 0.9 opens the launchpad, 1.0 keeps the promise. 0.7 is done. The rest is cancelled as a sequence.</p>
-    <p>Bedrock stays on 0.7.x. Each finished feature is a patch release, cut when it is finished rather than when a group of things is finished. 0.7.2 was the build cache bounded and garbage collection scheduled, and that was the whole release. That is the size a release is allowed to be.</p>
+    <p>Helios stays on 0.7.x. Each finished feature is a patch release, cut when it is finished rather than when a group of things is finished. 0.7.2 was the build cache bounded and garbage collection scheduled, and that was the whole release. That is the size a release is allowed to be.</p>
     <p>1.0 is still a real bar: a stable manifest, a stable API, upgrade guarantees, a security review and written docs. It is no longer a release that work aims at, and nothing is being sequenced to reach it.</p>
   </section>
 
@@ -108,11 +108,11 @@
 
   <section>
     <div class="eyebrow">Purpose</div>
-    <h2>What Bedrock is for</h2>
+    <h2>What Helios is for</h2>
     <p class="lead">Take any piece of software, put it on a VPS, and keep it alive without thinking about the VPS.</p>
-    <p>Not a Loom deployer. Loom is the largest thing it hosts and the reason it was built, but it is one app in a manifest like any other, and nothing in Bedrock knows its name. The personal sites, braintreelabs.io and anything else are the same shape.</p>
+    <p>Not a Loom deployer. Loom is the largest thing it hosts and the reason it was built, but it is one app in a manifest like any other, and nothing in Helios knows its name. The personal sites, braintreelabs.io and anything else are the same shape.</p>
     <p>The shape of the work is several businesses and several SaaS products, each one getting its own VPS so that its workload, its storage and its blast radius belong to it alone. That means buying a machine is a routine act, not an event, and the thing being deployed onto it is almost always a web app, an API or something else server-side.</p>
-    <p>Two things follow, and they are the whole roadmap. <strong>Any software</strong> means the manifest describes the thing without special cases, and starting a new one is quick. <strong>Any VPS</strong> means machine number nine costs the same as machine number two: buy it, point Bedrock at it, deploy. <strong>Keep it alive</strong> is the floor under both, and it is the part that already works: backups that restore, certificates that renew, and a machine that cleans up after itself without being asked.</p>
+    <p>Two things follow, and they are the whole roadmap. <strong>Any software</strong> means the manifest describes the thing without special cases, and starting a new one is quick. <strong>Any VPS</strong> means machine number nine costs the same as machine number two: buy it, point Helios at it, deploy. <strong>Keep it alive</strong> is the floor under both, and it is the part that already works: backups that restore, certificates that renew, and a machine that cleans up after itself without being asked.</p>
   </section>
 
   <section>
@@ -125,20 +125,20 @@
           <tr><td class="k">Workload shapes</td><td>Done</td><td><code>web</code>, <code>static</code>, <code>worker</code>, <code>cron</code> and <code>release</code>. A release workload runs migrations after the data is up and before the new revision starts.</td></tr>
           <tr><td class="k">Getting an image</td><td>Done</td><td>Build from a Dockerfile with BuildKit into a local registry, or pull a published image. Build context, target stage and args are all in the manifest.</td></tr>
           <tr><td class="k">Routing and TLS</td><td>Done</td><td>Caddy, routes by host and path, certificates issued and renewed automatically, DNS written to Cloudflare to match the manifest. As of 0.7.8 a reload lets upgraded connections finish for up to five minutes instead of cutting them. As of 0.7.9 apps are told their visitor's address, trusting only Cloudflare's ranges to name it, and <code>host setup --web-from cloudflare</code> lets only Cloudflare's proxy reach 80 and 443.</td></tr>
-          <tr><td class="k">Data</td><td>Partial</td><td>Postgres and named volumes are first class. S3-compatible object storage is first class. Everything else, including Redis or MySQL, has to be hand-rolled as a worker with a volume. As of 0.7.9 the daemon alerts, and <code>bedrock doctor</code> names the fix, when a workload can't write files in its own volume.</td></tr>
+          <tr><td class="k">Data</td><td>Partial</td><td>Postgres and named volumes are first class. S3-compatible object storage is first class. Everything else, including Redis or MySQL, has to be hand-rolled as a worker with a volume. As of 0.7.9 the daemon alerts, and <code>helios doctor</code> names the fix, when a workload can't write files in its own volume.</td></tr>
           <tr><td class="k">Secrets</td><td>Done</td><td>Sealed with age against a recovery identity, generated or derived per app, never in arguments, logs, receipts or backups.</td></tr>
           <tr><td class="k">Backups</td><td>Done</td><td>restic to B2, writers quiesced before the snapshot and the capture refused if a writer had to be killed, scheduled, with restore drills and a verification query. As of 0.7.9 a drill fails when the app can't write what it restored.</td></tr>
           <tr><td class="k">Isolation</td><td>Done</td><td>Read-only root, no capabilities, non-root user, tmpfs <code>/tmp</code>, memory and pid ceilings, all by default and all overridable per workload.</td></tr>
-          <tr><td class="k">Housekeeping</td><td>Done</td><td>Nightly at 04:00. Old revisions, unused images, dangling volumes, and build cache trimmed by age and then to an 8&nbsp;GiB ceiling. As of 0.7.9 <code>bedrock remove --data</code> clears what a removed app left behind, and <code>bedrock dns drop</code> deletes records that point here with nothing routed.</td></tr>
+          <tr><td class="k">Housekeeping</td><td>Done</td><td>Nightly at 04:00. Old revisions, unused images, dangling volumes, and build cache trimmed by age and then to an 8&nbsp;GiB ceiling. As of 0.7.9 <code>helios remove --data</code> clears what a removed app left behind, and <code>helios dns drop</code> deletes records that point here with nothing routed.</td></tr>
           <tr><td class="k">Machine setup</td><td>Done</td><td>One command on a fresh Ubuntu 22.04 or 24.04, or Debian 12 or 13, on x86_64 or aarch64. Docker, firewall, key-only SSH, updates, swap and a local registry.</td></tr>
-          <tr><td class="k">Getting Bedrock onto a machine</td><td>Done</td><td><code>bedrock upgrade --version</code> as of 0.7.4: the machine fetches its own build and checksums it. <code>scripts/install-release.sh</code> remains the bootstrap for a machine with no bedrock yet.</td></tr>
-          <tr><td class="k">Starting a new app</td><td>Done</td><td><code>bedrock init</code> as of 0.7.3 writes a commented manifest; <code>bedrock launch &lt;repo&gt;</code> as of 0.7.6 goes from a repository to running in one command.</td></tr>
-          <tr><td class="k">Moving an app to its own machine</td><td>Partial</td><td><code>bedrock move</code> as of 0.7.6: two commands, one per machine, over the shared bucket. Needs both machines reading the same storage, which these two do not.</td></tr>
+          <tr><td class="k">Getting Helios onto a machine</td><td>Done</td><td><code>helios upgrade --version</code> as of 0.7.4: the machine fetches its own build and checksums it. <code>scripts/install-release.sh</code> remains the bootstrap for a machine with no bedrock yet.</td></tr>
+          <tr><td class="k">Starting a new app</td><td>Done</td><td><code>helios init</code> as of 0.7.3 writes a commented manifest; <code>bedrock launch &lt;repo&gt;</code> as of 0.7.6 goes from a repository to running in one command.</td></tr>
+          <tr><td class="k">Moving an app to its own machine</td><td>Partial</td><td><code>helios move</code> as of 0.7.6: two commands, one per machine, over the shared bucket. Needs both machines reading the same storage, which these two do not.</td></tr>
           <tr><td class="k">Putting a sign-in on a route</td><td>Done</td><td><code>auth: loom</code> as of 0.7.6, through the edge, with no auth code in the app. Fixed in 0.7.7: a status code alone could be answered by the Core's single-page fallback, which left the guard open.</td></tr>
-          <tr><td class="k">Previewing a branch</td><td>Done</td><td><code>bedrock preview up</code> as of 0.7.7. A branch runs as its own app, guarded, with an empty database.</td></tr>
-          <tr><td class="k">Publishing a port on the machine</td><td>Done</td><td><code>ports:</code> as of 0.7.8, for a singleton web or worker workload, such as a STUN relay on 3478/udp. Docker publishes ahead of ufw, so <code>bedrock doctor</code> reports each public port ufw does not allow.</td></tr>
+          <tr><td class="k">Previewing a branch</td><td>Done</td><td><code>helios preview up</code> as of 0.7.7. A branch runs as its own app, guarded, with an empty database.</td></tr>
+          <tr><td class="k">Publishing a port on the machine</td><td>Done</td><td><code>ports:</code> as of 0.7.8, for a singleton web or worker workload, such as a STUN relay on 3478/udp. Docker publishes ahead of ufw, so <code>helios doctor</code> reports each public port ufw does not allow.</td></tr>
           <tr><td class="k">Setting up machine number two</td><td>Partial</td><td>Every integration is sealed per machine and typed in again on each new one. Nothing carries over.</td></tr>
-          <tr><td class="k">The test bed</td><td>Broken</td><td>The lane has no machine: its target became production. Proofs cannot run until it points somewhere disposable.</td></tr>
+          <tr><td class="k">The test bed</td><td>Available</td><td>The disposable Linux lane provides local QEMU guests and guarded SSH targets. CI proves daemon recovery; other workflows report their external prerequisites.</td></tr>
         </tbody>
       </table>
     </div>
@@ -147,34 +147,34 @@
   <section>
     <div class="eyebrow">Gap one</div>
     <h2>Any software: mostly solved</h2>
-    <p>The manifest already describes more than anything currently deployed uses. The obstacle was never that Bedrock could not express a new app, it was that expressing one meant opening an existing app's <code>bedrock.yaml</code> and copying from it, with nothing in the repo to copy from.</p>
-    <p><code>bedrock init</code> closed that in 0.7.3. It writes a commented manifest for a web, static, worker or cron app, adds a database on request, and validates what it wrote before it reaches disk, so a generated manifest always loads.</p>
-    <pre><code>bedrock init api --host api.example.com --postgres</code></pre>
+    <p>The manifest already describes more than anything currently deployed uses. The obstacle was never that Helios could not express a new app, it was that expressing one meant opening an existing app's <code>helios.yaml</code> and copying from it, with nothing in the repo to copy from.</p>
+    <p><code>helios init</code> closed that in 0.7.3. It writes a commented manifest for a web, static, worker or cron app, adds a database on request, and validates what it wrote before it reaches disk, so a generated manifest always loads.</p>
+    <pre><code>helios init api --host api.example.com --postgres</code></pre>
     <p>What is left:</p>
     <ul class="rules">
-      <li><strong>A manifest schema.</strong> Editors could then complete and validate a <code>bedrock.yaml</code> while it is being written rather than at deploy time. This is <a href="ideas.html#i5">item 5</a>, dropped before 0.7 and worth reviving now that <code>init</code> exists to pair with it.</li>
+      <li><strong>A manifest schema.</strong> Editors could then complete and validate a <code>helios.yaml</code> while it is being written rather than at deploy time. This is <a href="ideas.html#i5">item 5</a>, dropped before 0.7 and worth reviving now that <code>init</code> exists to pair with it.</li>
       <li><strong>Redis or Valkey as a declared data service</strong>, the way Postgres is. It is the one dependency common enough that hand-rolling it as a worker with a volume will keep coming up.</li>
-      <li><strong>An adopt path</strong> for software with no Dockerfile. Today the answer is to write one. Whether Bedrock should ever generate one is an open question, not a plan.</li>
+      <li><strong>An adopt path</strong> for software with no Dockerfile. Today the answer is to write one. Whether Helios should ever generate one is an open question, not a plan.</li>
     </ul>
   </section>
 
   <section>
     <div class="eyebrow">Gap two</div>
     <h2>Any VPS: make the next one cost nothing</h2>
-    <p>Every VPS worth buying runs Ubuntu or Debian, and <code>bedrock host setup</code> takes one from bare to ready in a single command. The distribution is not the problem. The problem is everything around it.</p>
+    <p>Every VPS worth buying runs Ubuntu or Debian, and <code>helios host setup</code> takes one from bare to ready in a single command. The distribution is not the problem. The problem is everything around it.</p>
     <p>Standing up a new machine today is five steps, and three of them are typed in by hand:</p>
     <pre><code>scripts/install-release.sh 0.7.3 new-box   # get the binary there
-bedrock host setup                         # one command, fine
-bedrock integration set cloudflare         # typed in, again
-bedrock integration set storage            # typed in, again
-bedrock integration set email              # typed in, again</code></pre>
+helios host setup                         # one command, fine
+helios integration set cloudflare         # typed in, again
+helios integration set storage            # typed in, again
+helios integration set email              # typed in, again</code></pre>
     <p>The integrations are the cost. Each one is sealed on the machine it was entered on, so the same Cloudflare token, the same B2 credentials and the same SMTP details are retyped on every new VPS. That is fine twice and tiresome at nine, and retyping a credential is how a wrong one gets in.</p>
     <p>The work, in the order it is worth doing:</p>
     <ul class="rules">
       <li><strong>Integrations that carry over.</strong> <code>integration set</code> already accepts piped <code>field=value</code> lines, so the machinery is there; what is missing is a way to hand a new machine the set the other machines already use, without the values passing through a terminal or a shell history.</li>
       <li><strong>One command to bring up a machine.</strong> Install, host setup and integrations in a single step against a fresh VPS, so buying one and using one are the same act.</li>
       <li><strong>Bootstrapping a brand new machine.</strong> Self-upgrade landed in 0.7.4, so a machine already running bedrock fetches and checksums its own builds. Getting the first binary onto a VPS that has nothing is still a push from somewhere else.</li>
-      <li><strong>A test bed again.</strong> The lane is how any of this gets proven on a real machine, and it currently has none: its target became production. A second cheap VPS restores it.</li>
+      <li><strong>A maintained proving ground.</strong> Use the disposable Linux lane for runtime and migration proofs. Keep its target-safety guards intact and record any missing external prerequisites.</li>
     </ul>
     <p class="muted">Two things are deliberately not on this list. Distributions beyond Debian and Ubuntu, because nothing needs them and a second package manager is a second setup path forever. And running on a machine in a home rack: it needs an inbound path from the internet that a racked machine does not have, and it is a fun experiment rather than something a business depends on. If that changes, it changes because the rack got a public address, and this page gets revisited then.</p>
   </section>
@@ -183,7 +183,7 @@ bedrock integration set email              # typed in, again</code></pre>
     <div class="eyebrow">Not doing</div>
     <h2>The fleet view, and why it is tabled</h2>
     <p><a href="ideas.html#i32">Item 32</a> was the next large thing on the old ladder: every machine enrolled with Loom over a mutually authenticated outbound link, with Loom showing every machine, app, deploy, backup, drill, alert and log, and approvals happening there.</p>
-    <p>It is tabled for as long as the estate is two machines. A fleet view is a way to see more machines than you can hold in your head, and two is not that number. <code>bedrock status</code> over SSH answers every question it would answer. The other side of the trade is an enrollment protocol, signed and scoped commands, replay protection, a cursored event stream and a new mode in Loom, all of which then have to keep working forever.</p>
+    <p>It is tabled for as long as the estate is two machines. A fleet view is a way to see more machines than you can hold in your head, and two is not that number. <code>helios status</code> over SSH answers every question it would answer. The other side of the trade is an enrollment protocol, signed and scoped commands, replay protection, a cursored event stream and a new mode in Loom, all of which then have to keep working forever.</p>
     <p>Revisit it when there are enough machines that forgetting one is plausible, or when someone without an SSH key needs to see the estate. Everything that depended on it is tabled with it: the Core's own lifecycle from inside the app, push alerts, and approval records for agent-run operations.</p>
   </section>
 
@@ -201,7 +201,7 @@ bedrock integration set email              # typed in, again</code></pre>
   <footer>
     <div class="eyebrow">Sources</div>
     <ul>
-      <li><a href="ideas.html">Bedrock Ideas</a> (items 1 to 37), the <a href="plan.html">0.7 plan</a> and the <a href="blueprint.html">blueprint</a></li>
+      <li><a href="ideas.html">Helios Ideas</a> (items 1 to 37), the <a href="plan.html">0.7 plan</a> and the <a href="blueprint.html">blueprint</a></li>
       <li>The 0.7 delivery: both machines rebuilt, Loom Core deployed and enrolled, braintreelabs.io live</li>
     </ul>
   </footer>

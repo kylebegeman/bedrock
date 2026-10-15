@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	apps "github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	apps "github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/manifest"
 )
 
 func newMoveCapture(a *app, final bool) *cobra.Command {
@@ -94,7 +94,7 @@ func newMoveStage(a *app) *cobra.Command {
 
 func newMoveCutover(a *app) *cobra.Command {
 	var planOnly bool
-	cmd := &cobra.Command{Use: "cutover <app>", Short: "Recheck the staged target, admit its writers and move production routes and DNS.", Long: "Recheck the staged target, admit its writers and move production routes and DNS.\n\nThis is the explicit write-authority boundary. Once destination writers\nstart, source data may be stale. A failure leaves the source fenced and the\ntarget intact so the operation can be repaired and retried. Bedrock never\nautomatically points production back at a stale source.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "cutover <app>", Short: "Recheck the staged target, admit its writers and move production routes and DNS.", Long: "Recheck the staged target, admit its writers and move production routes and DNS.\n\nThis is the explicit write-authority boundary. Once destination writers\nstart, source data may be stale. A failure leaves the source fenced and the\ntarget intact so the operation can be repaired and retried. Helios never\nautomatically points production back at a stale source.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		store, err := a.openState()
 		if err != nil {
 			return err

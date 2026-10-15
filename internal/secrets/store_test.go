@@ -135,7 +135,7 @@ func TestConcurrentChangesLoseNothing(t *testing.T) {
 	}
 }
 
-func TestRemovingAnAppDropsEverySealedVersionAndSparesBedrocks(t *testing.T) {
+func TestRemovingAnAppDropsEverySealedVersionAndSparesHelioss(t *testing.T) {
 	dir := t.TempDir()
 	s := &Store{Dir: filepath.Join(dir, "secrets"), KeyPath: filepath.Join(dir, "key")}
 	if _, _, _, err := s.EnsureKey(); err != nil {
@@ -159,7 +159,7 @@ func TestRemovingAnAppDropsEverySealedVersionAndSparesBedrocks(t *testing.T) {
 		t.Fatalf("the app's directory is still there: %v", err)
 	}
 	if err := s.RemoveApp("bedrock"); err == nil {
-		t.Fatal("bedrock's own secrets were removable")
+		t.Fatal("helios's own secrets were removable")
 	}
 	if err := s.RemoveApp("never-here"); err != nil {
 		t.Fatalf("removing an app that has no secrets: %v", err)

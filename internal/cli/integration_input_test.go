@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/secrets"
 )
 
 func TestMalformedIntegrationInputNeverEchoesTheSuppliedValue(t *testing.T) {

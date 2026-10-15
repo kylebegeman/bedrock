@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/helios/internal/docker"
 )
 
 // Verdict is how a check came out.
@@ -34,7 +34,7 @@ var supportedSystems = map[string][]string{
 	"debian": {"12", "13"},
 }
 
-// Supported reports whether bedrock runs on this OS and architecture.
+// Supported reports whether helios runs on this OS and architecture.
 func Supported(f Facts) bool {
 	if f.Arch != "x86_64" && f.Arch != "aarch64" {
 		return false
@@ -58,7 +58,7 @@ func Diagnose(f Facts) []Result {
 }
 
 // runSetup is the fix for most of what setup would have done.
-const runSetup = "run bedrock host setup"
+const runSetup = "run helios host setup"
 
 // results collects verdicts in the order they are added.
 type results []Result
@@ -72,10 +72,10 @@ func diagnoseSystem(f Facts) []Result {
 	if Supported(f) {
 		r.add("system", Pass, fmt.Sprintf("%s on %s", f.OSName, f.Arch), "")
 	} else {
-		r.add("system", Fail, fmt.Sprintf("%s on %s", orUnknown(f.OSName), orUnknown(f.Arch)), "bedrock needs Ubuntu 22.04 or 24.04, or Debian 12 or 13, on x86_64 or aarch64")
+		r.add("system", Fail, fmt.Sprintf("%s on %s", orUnknown(f.OSName), orUnknown(f.Arch)), "helios needs Ubuntu 22.04 or 24.04, or Debian 12 or 13, on x86_64 or aarch64")
 	}
 	if !f.Systemd {
-		r.add("systemd", Fail, "not running", "bedrock's daemon needs systemd")
+		r.add("systemd", Fail, "not running", "helios's daemon needs systemd")
 	} else {
 		r.add("systemd", Pass, "running", "")
 	}
@@ -91,7 +91,7 @@ func diagnoseResources(f Facts) []Result {
 	var r results
 	switch {
 	case f.CPUs < 2:
-		r.add("cpu", Fail, fmt.Sprintf("%d cpu", f.CPUs), "bedrock needs at least 2")
+		r.add("cpu", Fail, fmt.Sprintf("%d cpu", f.CPUs), "helios needs at least 2")
 	case f.CPUs < 4:
 		r.add("cpu", Warn, fmt.Sprintf("%d cpus", f.CPUs), "builds are slow below 4")
 	default:
@@ -99,7 +99,7 @@ func diagnoseResources(f Facts) []Result {
 	}
 	switch {
 	case f.MemoryBytes < 2*gib:
-		r.add("memory", Fail, gigs(f.MemoryBytes), "bedrock needs at least 2 GiB")
+		r.add("memory", Fail, gigs(f.MemoryBytes), "helios needs at least 2 GiB")
 	case f.MemoryBytes < 8*gib:
 		r.add("memory", Warn, gigs(f.MemoryBytes), "apps and builds share memory; 8 GiB or more is comfortable")
 	default:
@@ -107,7 +107,7 @@ func diagnoseResources(f Facts) []Result {
 	}
 	switch {
 	case f.DiskFreeBytes < 5*gb:
-		r.add("disk", Fail, gigs(f.DiskFreeBytes)+" free", "less than 5 GB free; free space or run bedrock gc")
+		r.add("disk", Fail, gigs(f.DiskFreeBytes)+" free", "less than 5 GB free; free space or run helios gc")
 	case f.DiskFreeBytes < 20*gb:
 		r.add("disk", Warn, gigs(f.DiskFreeBytes)+" free", "less than 20 GB free; images and backups need room")
 	default:
@@ -203,7 +203,7 @@ func diagnoseAccess(f Facts) []Result {
 // diagnoseFirewall checks ufw against the profile: ssh always, and the web
 // open to anyone or only to Cloudflare, as the machine was set up.
 func diagnoseFirewall(f Facts) Result {
-	const reconcile = "bedrock host reconcile"
+	const reconcile = "helios host reconcile"
 	result := func(v Verdict, detail, fix string) Result {
 		return Result{Name: "firewall", Verdict: v, Detail: detail, Fix: fix}
 	}
@@ -219,7 +219,7 @@ func diagnoseFirewall(f Facts) Result {
 	case f.CloudflareOnly() && len(f.CloudflareSources()) == 0:
 		return result(Fail, "80 and 443 are closed to Cloudflare too", reconcile)
 	case f.CloudflareOnly() && !f.Firewall.WebGuard.InPlace():
-		return result(Fail, "Docker forwards 80 and 443 past ufw, and bedrock's guard for them is not in place, so the edge answers anyone", reconcile)
+		return result(Fail, "Docker forwards 80 and 443 past ufw, and helios's guard for them is not in place, so the edge answers anyone", reconcile)
 	case f.CloudflareOnly() && !f.Firewall.IPv6:
 		return result(Warn, "ufw leaves IPv6 alone (IPV6=no), so the web ports are not filtered there", "set IPV6=yes in "+ufwDefaults+", then "+reconcile)
 	case f.CloudflareOnly():
@@ -238,7 +238,7 @@ func diagnoseFirewall(f Facts) Result {
 // so anyone can reach it whatever ufw says; a rule open to anyone is how
 // ufw status comes to say so. A rule for only some sources reads as open
 // to them alone, which is not what happens, so it is no pass. And on a
-// machine that takes the web only from Cloudflare, bedrock's guard holds
+// machine that takes the web only from Cloudflare, helios's guard holds
 // 80 and 443 alone: a published port is outside it, and the doctor says so.
 func diagnosePublished(f Facts) []Result {
 	var r results
@@ -268,9 +268,9 @@ func diagnoseUpkeep(f Facts) []Result {
 	var r results
 	switch {
 	case f.RebootRequired:
-		r.add("updates", Warn, "a reboot is pending", "bedrock host maintain")
+		r.add("updates", Warn, "a reboot is pending", "helios host maintain")
 	case f.UpdatesPending > 0:
-		r.add("updates", Warn, fmt.Sprintf("%d package(s) can be upgraded", f.UpdatesPending), "bedrock host maintain")
+		r.add("updates", Warn, fmt.Sprintf("%d package(s) can be upgraded", f.UpdatesPending), "helios host maintain")
 	case f.UpdatesPending < 0:
 		r.add("updates", Warn, "unknown", "apt-get didn't answer")
 	default:
@@ -293,7 +293,7 @@ func diagnoseUpkeep(f Facts) []Result {
 	}
 	if f.Systemd {
 		if !f.DaemonAnswers {
-			r.add("daemon", Fail, "not answering", "bedrock daemon install")
+			r.add("daemon", Fail, "not answering", "helios daemon install")
 		} else {
 			r.add("daemon", Pass, "answering", "")
 		}

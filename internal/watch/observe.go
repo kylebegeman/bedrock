@@ -14,11 +14,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/edge"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/edge"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // What the prober considers wrong.
@@ -277,7 +277,7 @@ func (p *Prober) app(ctx context.Context, e *docker.Engine, rev state.Revision) 
 
 // dataProblems walks the volumes a running workload mounts for files and
 // directories its user can't write, at most once per DataCheckEvery for
-// each volume. Root, or a user bedrock didn't set, needs no walk; a
+// each volume. Root, or a user helios didn't set, needs no walk; a
 // volume that can't be walked says nothing rather than something wrong.
 func (p *Prober) dataProblems(appName, workload string, info *docker.Info, now time.Time) []string {
 	u, ok := docker.ParseUser(info.User)
@@ -306,7 +306,7 @@ func (p *Prober) dataProblems(appName, workload string, info *docker.Info, now t
 			p.dataMu.Unlock()
 		}
 		if scan.problem != "" {
-			out = append(out, scan.problem+"; bedrock doctor says how to give them back")
+			out = append(out, scan.problem+"; helios doctor says how to give them back")
 		}
 	}
 	return out

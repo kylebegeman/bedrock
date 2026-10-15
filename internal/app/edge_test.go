@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // The edge trusts Cloudflare to name the visitor only when the machine

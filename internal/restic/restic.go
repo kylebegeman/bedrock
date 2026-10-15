@@ -1,5 +1,5 @@
 // Package restic drives restic in a container: one repository per app in
-// its own bucket, encrypted with the machine's backup password. bedrock
+// its own bucket, encrypted with the machine's backup password. helios
 // mounts what to back up under /data and restores back into the same
 // places, so a snapshot's paths mean the same thing on every machine.
 package restic
@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/helios/internal/docker"
 )
 
 // Image is restic, pinned by digest.
@@ -29,7 +29,7 @@ const CacheVolume = "bedrock-restic-cache"
 // DataRoot is where the backed-up tree sits inside the container.
 const DataRoot = "/data"
 
-// Tag marks snapshots bedrock made.
+// Tag marks snapshots helios made.
 const Tag = "bedrock"
 
 // ReleaseCheckpointTag keeps explicit rollback points beyond ordinary retention.

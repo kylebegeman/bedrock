@@ -14,14 +14,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	apps "github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/edge"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/signals"
-	"github.com/kylebegeman/bedrock/internal/state"
-	"github.com/kylebegeman/bedrock/internal/version"
-	"github.com/kylebegeman/bedrock/internal/watch"
+	apps "github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/edge"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/signals"
+	"github.com/kylebegeman/helios/internal/state"
+	"github.com/kylebegeman/helios/internal/version"
+	"github.com/kylebegeman/helios/internal/watch"
 )
 
 // appRow is one app as ls and status see it.
@@ -171,7 +171,7 @@ func newLs(a *app) *cobra.Command {
 				fmt.Fprintln(a.stdout, "unmanaged containers: unknown (Docker inventory unavailable)")
 			} else if len(unmanaged) > 0 {
 				sort.Strings(unmanaged)
-				fmt.Fprintf(a.stdout, "not managed by bedrock: %s\n", strings.Join(unmanaged, ", "))
+				fmt.Fprintf(a.stdout, "not managed by helios: %s\n", strings.Join(unmanaged, ", "))
 			}
 			return nil
 		},
@@ -195,7 +195,7 @@ func orDash(s string) string {
 
 // machineLine says how the machine is doing, in one line.
 func machineLine(ctx context.Context, hostname string, open []state.Incident) string {
-	parts := []string{"bedrock " + version.Current().Version}
+	parts := []string{"helios " + version.Current().Version}
 	if engine, err := docker.Connect(ctx); err != nil {
 		parts = append(parts, "DOCKER NOT ANSWERING")
 	} else {
@@ -368,7 +368,7 @@ func (a *app) appStatus(ctx context.Context, store *state.Store, r appRow, sums 
 			fmt.Fprintf(a.stdout, "    last drill: %s\n", orDash(firstNonEmpty(r.LastDrill.Detail, r.LastDrill.Error)))
 		}
 	} else if r.manifest.HasData() {
-		fmt.Fprintln(a.stdout, "  backups: off in bedrock.yaml")
+		fmt.Fprintln(a.stdout, "  backups: off in helios.yaml")
 	}
 	return nil
 }

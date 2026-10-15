@@ -1,4 +1,4 @@
-module github.com/kylebegeman/bedrock
+module github.com/kylebegeman/helios
 
 go 1.26.0
 

@@ -13,10 +13,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	apps "github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/state"
+	apps "github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 func newDeploy(a *app) *cobra.Command {
@@ -36,26 +36,30 @@ func newDeploy(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			m, err := manifest.LoadFile(source, manifestName)
+			selected, err := manifest.ResolveFileName(source, manifestName)
+			if err != nil {
+				return err
+			}
+			m, err := manifest.LoadFile(source, selected)
 			if err != nil {
 				return err
 			}
 			if to != "" {
 				if planOnly || a.digest != "" {
-					return fmt.Errorf("--plan and --digest don't cross the wire; run bedrock deploy --plan on the machine, or send the tree with --to and answer there")
+					return fmt.Errorf("--plan and --digest don't cross the wire; run helios deploy --plan on the machine, or send the tree with --to and answer there")
 				}
 				if restorePostgres != "" || len(restoreVolumes) > 0 {
 					return fmt.Errorf("restores read files on the machine; run them there")
 				}
-				if manifestName != manifest.FileName {
-					return fmt.Errorf("--to sends the source with its bedrock.yaml; deploy another manifest on the machine")
+				if selected != manifest.FileName && selected != manifest.LegacyFileName {
+					return fmt.Errorf("--to sends a default manifest (helios.yaml or bedrock.yaml); deploy another manifest on the machine")
 				}
 				return deployTo(cmd.Context(), a, source, m.App, to)
 			}
 			in := apps.DeployInput{Source: source, Revision: apps.NewRevision(time.Now())}
-			if manifestName != manifest.FileName {
-				in.Manifest = manifestName
-			}
+			// Keep an explicit selection explicit, including either default filename.
+			// The implicit selection is bound by the source capture, including filenames.
+			in.Manifest = manifestName
 			if restorePostgres != "" {
 				if in.Restore.Postgres, err = filepath.Abs(restorePostgres); err != nil {
 					return err
@@ -79,7 +83,7 @@ func newDeploy(a *app) *cobra.Command {
 	cmd.Flags().StringVar(&restorePostgres, "restore-postgres", "", "a pg_dump file to load into the app's empty database first")
 	cmd.Flags().StringArrayVar(&restoreVolumes, "restore-volume", nil, "name=file.tar.gz to unpack into an empty volume first")
 	cmd.Flags().StringVar(&to, "to", "", "send the source to a machine over SSH, such as bedrock@203.0.113.7, and deploy it there ($BEDROCK_SSH replaces ssh)")
-	cmd.Flags().StringVar(&manifestName, "manifest", manifest.FileName, "the manifest at the source's root, for a source that holds several apps")
+	cmd.Flags().StringVar(&manifestName, "manifest", "", "the manifest at the source's root (default: helios.yaml, or bedrock.yaml)")
 	a.mutatingFlags(cmd, &planOnly)
 	return cmd
 }
@@ -349,7 +353,7 @@ func newPs(a *app) *cobra.Command {
 				w.Flush()
 			}
 			if unowned, err := engine.Unowned(ctx); err == nil && len(unowned) > 0 {
-				fmt.Fprintf(a.stdout, "not managed by bedrock: %d container(s)\n", len(unowned))
+				fmt.Fprintf(a.stdout, "not managed by helios: %d container(s)\n", len(unowned))
 			}
 			return nil
 		},

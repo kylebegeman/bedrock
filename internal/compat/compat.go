@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"filippo.io/age"
-	"github.com/kylebegeman/bedrock/internal/version"
+	"github.com/kylebegeman/helios/internal/version"
 )
 
 const (

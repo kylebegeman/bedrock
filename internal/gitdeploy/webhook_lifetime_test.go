@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 func TestWebhookWorkersStopAndDiscardPendingOnDaemonCancellation(t *testing.T) {
@@ -24,7 +24,7 @@ func TestWebhookWorkersStopAndDiscardPendingOnDaemonCancellation(t *testing.T) {
 	if _, _, _, err := sec.EnsureKey(); err != nil {
 		t.Fatal(err)
 	}
-	bare, _ := repoWith(t, map[string]string{"bedrock.yaml": helloYAML})
+	bare, _ := repoWith(t, map[string]string{"helios.yaml": helloYAML})
 	if _, err := Configure(context.Background(), store, sec, "hello", "file://"+bare, "main", "hello.example.com"); err != nil {
 		t.Fatal(err)
 	}

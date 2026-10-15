@@ -23,16 +23,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/edge"
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/remote"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/edge"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/remote"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
-// ValidRepo checks a repository URL bedrock can fetch.
+// ValidRepo checks a repository URL helios can fetch.
 func ValidRepo(repo string) error {
 	invalid := errors.New("repository must be a URL without embedded credentials (https://, git@host:owner/repo.git, ssh:// or file:///)")
 	if strings.ContainsAny(repo, "\x00\r\n\t ") {
@@ -108,7 +108,7 @@ type Webhook struct {
 
 // Configure sets an app's webhook up: a secret for GitHub to sign with,
 // and, for a repository reached over SSH, a deploy key of its own. Both
-// live in bedrock's own secrets; the caller shows them once.
+// live in helios's own secrets; the caller shows them once.
 func Configure(ctx context.Context, store *state.Store, sec *secrets.Store, appName, repo, branch, host string) (*Webhook, error) {
 	if !ValidApp(appName) {
 		return nil, errors.New("invalid webhook app name")
@@ -162,7 +162,7 @@ func newDeployKey(appName string) (string, string, error) {
 	defer os.RemoveAll(dir)
 	host, _ := os.Hostname()
 	path := filepath.Join(dir, "key")
-	if out, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "bedrock deploy key for "+appName+" on "+host, "-f", path).CombinedOutput(); err != nil {
+	if out, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "helios deploy key for "+appName+" on "+host, "-f", path).CombinedOutput(); err != nil {
 		return "", "", fmt.Errorf("ssh-keygen: %s", strings.TrimSpace(string(out)))
 	}
 	private, err := os.ReadFile(path)
@@ -257,7 +257,7 @@ func (r *Receiver) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	switch req.Header.Get("X-GitHub-Event") {
 	case "ping":
-		fmt.Fprintf(w, "bedrock hears %s's pushes to %s\n", appName, hook.Branch)
+		fmt.Fprintf(w, "helios hears %s's pushes to %s\n", appName, hook.Branch)
 		return
 	case "push":
 	default:
@@ -424,7 +424,7 @@ func (r *Receiver) deployOnce(ctx context.Context, appName string) {
 	r.log("webhook deploy of %s %s: %s", appName, short(commit), result)
 	if result != "deployed" && r.Notify != nil && ctx.Err() == nil {
 		r.Notify(ctx, appName+": the deploy from "+hook.Repo+" failed",
-			fmt.Sprintf("A push to %s of %s asked for a deploy, and it %s.\n\nThe running revision stays. bedrock history on the machine has the receipt.\n", hook.Branch, hook.Repo, result))
+			fmt.Sprintf("A push to %s of %s asked for a deploy, and it %s.\n\nThe running revision stays. helios history on the machine has the receipt.\n", hook.Branch, hook.Repo, result))
 	}
 }
 
@@ -474,10 +474,10 @@ func (r *Receiver) fetch(ctx context.Context, h state.GitHook) (string, string, 
 		}
 		key := values[integration.DeployKeyName(h.App)]
 		if key == "" {
-			return "", "", errors.New("no deploy key; run bedrock git webhook again")
+			return "", "", errors.New("no deploy key; run helios git webhook again")
 		}
 		// Made afresh, so the file has the mode asked for and not one an
-		// earlier bedrock left it with.
+		// earlier helios left it with.
 		keyFile := filepath.Join(sourceRoot, "."+h.App+".key")
 		_ = os.Remove(keyFile)
 		if err := os.WriteFile(keyFile, []byte(key), 0o600); err != nil {

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	apps "github.com/kylebegeman/bedrock/internal/app"
+	apps "github.com/kylebegeman/helios/internal/app"
 	"github.com/spf13/cobra"
 )
 

@@ -56,8 +56,8 @@ notes_marker() {
 
 printf '== build reviewed transfer binaries and retain exact source checkpoint\n'
 version=0.7.0-transfer
-(cd "$here/.." && go build -trimpath -ldflags "-X github.com/kylebegeman/bedrock/internal/version.number=$version" -o "$work/bedrock" ./cmd/bedrock)
-(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$source_arch" go build -trimpath -ldflags "-X github.com/kylebegeman/bedrock/internal/version.number=$version" -o "$work/bedrock-linux" ./cmd/bedrock)
+(cd "$here/.." && go build -trimpath -ldflags "-X github.com/kylebegeman/helios/internal/version.number=$version" -o "$work/bedrock" ./cmd/helios)
+(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$source_arch" go build -trimpath -ldflags "-X github.com/kylebegeman/helios/internal/version.number=$version" -o "$work/bedrock-linux" ./cmd/helios)
 checksum=$(shasum -a 256 "$work/bedrock-linux" | awk '{print $1}')
 remote_work="/var/lib/bedrock/lane-transfer/$source_id"
 source_run "install -d -m 700 '$remote_work'"
@@ -123,7 +123,7 @@ src integration export storage --to "$target_recipient" | dst integration import
 
 printf '== baseline fixture apps without external routes\n'
 mkdir "$work/hello" "$work/notes"
-cat >"$work/hello/bedrock.yaml" <<'YAML'
+cat >"$work/hello/helios.yaml" <<'YAML'
 app: hello
 workloads:
   worker:
@@ -131,7 +131,7 @@ workloads:
     image: busybox:1.37
     command: [sh, -c, 'trap "exit 0" TERM INT; while :; do sleep 10 & wait "$!"; done']
 YAML
-cat >"$work/notes/bedrock.yaml" <<'YAML'
+cat >"$work/notes/helios.yaml" <<'YAML'
 app: notes
 workloads:
   worker:

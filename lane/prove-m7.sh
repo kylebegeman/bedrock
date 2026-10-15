@@ -28,13 +28,13 @@ quiet() { grep -v '^  \.\.\.  '; }
 fail() { echo "M7 NOT proven: $*" >&2; exit 1; }
 sql() { run "bedrock psql notes -- -tAc \"$1\"" | tr -d '\r'; }
 # edit <sed expression> changes the fixture's manifest on the box.
-edit() { run "sed -i '$1' /srv/lane/notes/bedrock.yaml"; }
+edit() { run "sed -i '$1' /srv/lane/notes/helios.yaml"; }
 # worker prints the running worker container's name.
 worker() { run "docker ps --filter label=bedrock.app=notes --filter label=bedrock.workload=worker --format '{{.Names}}'"; }
 active() { run 'bedrock ps --json' | python3 -c 'import json,sys; print(next(r["revision"] for r in json.load(sys.stdin) if r["app"]=="notes" and r["workload"]=="api"))'; }
 
 echo "== build and install"
-(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -o bin/bedrock-linux-$LANE_ARCH ./cmd/bedrock && go build -trimpath -o bin/bedrock ./cmd/bedrock)
+(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -o bin/bedrock-linux-$LANE_ARCH ./cmd/helios && go build -trimpath -o bin/bedrock ./cmd/helios)
 put "$here/../bin/bedrock-linux-$LANE_ARCH" /usr/local/bin/bedrock.new
 run 'chmod 755 /usr/local/bin/bedrock.new && mv -f /usr/local/bin/bedrock.new /usr/local/bin/bedrock && bedrock daemon install >/dev/null && bedrock version'
 run 'bedrock integration list' | grep -q '^storage' || fail "run prove-m5.sh first: the backup needs the storage integration"
@@ -44,7 +44,7 @@ echo "== the first deploy makes the secrets, the data and the bucket, and runs t
 run 'bedrock remove notes --data --yes >/dev/null 2>&1 || true'
 run 'rm -rf /srv/lane/notes'
 (cd "$here/fixtures" && COPYFILE_DISABLE=1 tar czf - notes) | run 'tar xzf - -C /srv/lane 2>/dev/null'
-localize /srv/lane/notes/bedrock.yaml
+localize /srv/lane/notes/helios.yaml
 if ! out=$(run 'bedrock deploy /srv/lane/notes --yes' 2>&1 | quiet); then echo "$out"; fail "the first deploy failed"; fi
 echo "$out" | grep -E "made |derived |credentials made|postgres .* ready|object store ready|build api's image|buckets:|migrate:|Bucket created|INSERT|stopped first|running as|ready$|succeeded|failed"
 names=$(run 'bedrock secret list notes --json')
@@ -102,10 +102,10 @@ edit '/    env: {FAIL: "1"}/d'
 echo "-- $good_worker runs again; $good still serves (its releases ran: the data moves forward, as a migration does)"
 
 echo "== a release that fails starts nothing new"
-run "sed -i \"s/insert into notes (body) values ('deployed')/select 1 \\/ 0/\" /srv/lane/notes/bedrock.yaml"
+run "sed -i \"s/insert into notes (body) values ('deployed')/select 1 \\/ 0/\" /srv/lane/notes/helios.yaml"
 if out=$(run 'bedrock deploy /srv/lane/notes --yes' 2>&1 | quiet); then echo "$out"; fail "a failing release was deployed"; fi
 echo "$out" | grep -E "division by zero|nothing new started|failed" | head -3
-run "sed -i \"s/select 1 \\/ 0/insert into notes (body) values ('deployed')/\" /srv/lane/notes/bedrock.yaml"
+run "sed -i \"s/select 1 \\/ 0/insert into notes (body) values ('deployed')/\" /srv/lane/notes/helios.yaml"
 [[ "$(worker)" == "$good_worker" && "$(active)" == "$good" ]] || fail "a failing release touched the running revision"
 [[ $(run "docker ps -a --filter label=bedrock.app=notes --format '{{.Names}}'" | grep -vc "$good\|postgres\|objects" || true) == 0 ]] || fail "a failing release left containers behind"
 echo "-- the worker was never stopped, and no new container exists"

@@ -14,10 +14,10 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	apps "github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/gitdeploy"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/state"
+	apps "github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/gitdeploy"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 func newPreview(a *app) *cobra.Command {
@@ -30,12 +30,12 @@ A preview is an ordinary app with a derived name, its own containers and its
 own empty database, deployed from a branch. Pushing the same branch again
 updates it rather than making a second one.
 
-  bedrock preview up https://github.com/you/app --branch new-nav \
+  helios preview up https://github.com/you/app --branch new-nav \
       --domain preview.example.com
-  bedrock preview ls
-  bedrock preview down app --branch new-nav
-  bedrock preview pin app --branch new-nav
-  bedrock preview prune --older-than 7d --plan
+  helios preview ls
+  helios preview down app --branch new-nav
+  helios preview pin app --branch new-nav
+  helios preview prune --older-than 7d --plan
 
 Every preview route is behind the Core's sign-in and there is no way to turn
 that off, so the machine needs the loom integration before any of this works.`,
@@ -65,7 +65,7 @@ func newPreviewUp(a *app) *cobra.Command {
 		Use:   "up <repository>",
 		Short: "Deploy a branch as a preview of the app in it.",
 		Long: "Deploy a branch as a preview of the app in it.\n\n" +
-			"The branch's own bedrock.yaml says which app this is a preview of. The\n" +
+			"The branch's own helios.yaml says which app this is a preview of. The\n" +
 			"preview is derived from it: a name with the branch in it, hostnames under\n" +
 			"the preview domain, every route behind a sign-in, preserved checks and no backups.\n\n" +
 			"The database starts empty and is built by whatever the app runs to migrate\n" +
@@ -82,7 +82,7 @@ func newPreviewUp(a *app) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&p.branch, "branch", "", "the branch to preview")
 	cmd.Flags().StringVar(&p.domain, "domain", "", "the domain previews answer under, such as preview.example.com")
-	cmd.Flags().StringVar(&p.manifestName, "manifest", manifest.FileName, "the manifest at the branch's root, for a source that holds several apps")
+	cmd.Flags().StringVar(&p.manifestName, "manifest", "", "the manifest at the branch's root, for a source that holds several apps")
 	cmd.Flags().StringVar(&p.dnsMode, "dns", "", "keep the preview's records this way: direct, proxied or manual (default: as the app's routes say)")
 	cmd.Flags().BoolVar(&p.secrets, "secrets", true, "copy the parent's hand-set secrets so the preview can start")
 	cmd.Flags().BoolVar(&p.pin, "pin", false, "keep this preview out of preview prune (existing pin is preserved unless explicitly set)")
@@ -171,12 +171,16 @@ func (p *previewUp) run(ctx context.Context, repo string) error {
 	}
 	deployed = true
 	gitdeploy.PruneBuilds(root, derived.App, 3)
-	fmt.Fprintf(a.prose(), "\n%s is up. Remove it with: bedrock preview down %s\n", derived.App, derived.App)
+	fmt.Fprintf(a.prose(), "\n%s is up. Remove it with: helios preview down %s\n", derived.App, derived.App)
 	return nil
 }
 
 // derive reads the branch's app and makes the preview of it.
 func (p *previewUp) derive(ctx context.Context, dir string, mode manifest.DNSMode, override bool) (parent, derived *manifest.Manifest, err error) {
+	p.manifestName, err = manifest.ResolveFileName(dir, p.manifestName)
+	if err != nil {
+		return nil, nil, err
+	}
 	parent, err = manifest.LoadFile(dir, p.manifestName)
 	if err != nil {
 		return nil, nil, fmt.Errorf("the branch has no app to preview: %w", err)
@@ -233,7 +237,7 @@ func (p *previewUp) writeManifest(dir string, derived *manifest.Manifest) (strin
 	}
 	// Parse it back from where it will actually be read.
 	if _, err := manifest.LoadFile(dir, name); err != nil {
-		return "", fmt.Errorf("the derived manifest does not load, which is a bug in bedrock: %w", err)
+		return "", fmt.Errorf("the derived manifest does not load, which is a bug in helios: %w", err)
 	}
 	return name, nil
 }
@@ -254,8 +258,8 @@ func previewDNS(flag string) (manifest.DNSMode, bool, error) {
 }
 
 // previewManifestName is where a preview's derived manifest is written,
-// beside the one it was derived from: bedrock.preview.yaml for
-// bedrock.yaml, worker.preview.yml for worker.yml.
+// beside the one it was derived from: helios.preview.yaml for
+// helios.yaml, worker.preview.yml for worker.yml.
 func previewManifestName(name string) string {
 	ext := filepath.Ext(name)
 	return strings.TrimSuffix(name, ext) + ".preview" + ext

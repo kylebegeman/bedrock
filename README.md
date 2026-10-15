@@ -1,16 +1,16 @@
 <div align="center">
 
-<img src="./assets/bedrock.svg" alt="" width="88" height="88">
+<img src="./assets/helios.svg" alt="" width="88" height="88">
 
-# Bedrock
+# Helios
 
 **One small program that runs your machines.**
 
 Builds, certificates, secrets, backups, health checks and alerts.<br>
 Everything a server needs for the apps it hosts, from a single static binary.
 
-<a href="https://github.com/kylebegeman/bedrock/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/kylebegeman/bedrock?style=for-the-badge&color=9a3412&label=release"></a>
-<a href="https://github.com/kylebegeman/bedrock/actions/workflows/ci.yml?query=branch%3Anext"><img alt="CI status" src="https://img.shields.io/github/actions/workflow/status/kylebegeman/bedrock/ci.yml?branch=next&style=for-the-badge&label=CI"></a>
+<a href="https://github.com/kylebegeman/helios/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/kylebegeman/helios?style=for-the-badge&color=9a3412&label=release"></a>
+<a href="https://github.com/kylebegeman/helios/actions/workflows/ci.yml?query=branch%3Anext"><img alt="CI status" src="https://img.shields.io/github/actions/workflow/status/kylebegeman/helios/ci.yml?branch=next&style=for-the-badge&label=CI"></a>
 <img alt="Go 1.26 or newer" src="https://img.shields.io/badge/go-1.26-00ADD8?style=for-the-badge&logo=go&logoColor=white">
 <a href="./LICENSE"><img alt="Apache 2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-555555?style=for-the-badge"></a>
 
@@ -20,19 +20,38 @@ Everything a server needs for the apps it hosts, from a single static binary.
 
 <br>
 
-## Why Bedrock
+## Renaming to Helios
+
+Helios is the new name for Bedrock. The source module and primary command are
+now `helios`; `bedrock` remains a compatibility entrypoint. New projects use
+`helios.yaml`. Existing `bedrock.yaml` files are supported; if both defaults
+exist, select one with `--manifest` or remove the duplicate.
+
+This source rename preserves the Bedrock installation layout, service names,
+Docker resources, sealed credentials and backup identities. Both commands
+use the same state and daemon. `HELIOS_*` configuration variables are accepted
+alongside their `BEDROCK_*` aliases; conflicting values are refused unless an
+explicit corresponding flag overrides them. Workloads receive both sets of
+app, workload and revision metadata variables.
+
+The GitHub repository and live release channel still use the Bedrock URL until
+the separately planned cutover. Release builds produce Helios assets and
+identical legacy-named assets for older upgraders. See the
+[migration plan](docs/operations/helios-rename-plan.md) for the staged rollout.
+
+## Why Helios
 
 - **One binary, nothing to install underneath.** A static Go binary installs and operates the whole machine. There is no agent to babysit, no runtime to keep current, and no control plane to pay for.
-- **The manifest is the entire interface.** An app describes itself in `bedrock.yaml`. Everything else follows from that file: DNS records, certificates, secrets, data services, health, backups and alerts.
-- **Isolation you get by default, not by remembering.** Read-only root, no Linux capabilities, no privilege escalation, a non-root user, and a private network per app. The manifest holds the explicit ways out, and `bedrock exposure` shows what each container really got.
-- **Backups that are proven rather than hoped for.** Every backup is quiesced and consistent, and `bedrock drill` restores it beside the app, starts the app on it and verifies it on a schedule.
-- **No pipeline required.** `git push bedrock main` deploys and streams every step back. A push whose deploy fails is refused, so the branch on the machine is always what runs.
+- **The manifest is the entire interface.** An app describes itself in `helios.yaml`. Everything else follows from that file: DNS records, certificates, secrets, data services, health, backups and alerts.
+- **Isolation you get by default, not by remembering.** Read-only root, no Linux capabilities, no privilege escalation, a non-root user, and a private network per app. The manifest holds the explicit ways out, and `helios exposure` shows what each container really got.
+- **Backups that are proven rather than hoped for.** Every backup is quiesced and consistent, and `helios drill` restores it beside the app, starts the app on it and verifies it on a schedule.
+- **No pipeline required.** `git push helios main` deploys and streams every step back. A push whose deploy fails is refused, so the branch on the machine is always what runs.
 
 ## How a deploy works
 
 ```mermaid
 flowchart LR
-  M["bedrock.yaml"] --> DNS["confirm<br/>DNS"]
+  M["helios.yaml"] --> DNS["confirm<br/>DNS"]
   DNS --> SEC["make<br/>secrets"]
   SEC --> DATA["ready<br/>data"]
   DATA --> BUILD["build<br/>images"]
@@ -43,43 +62,43 @@ flowchart LR
   SW --> CERT["wait for<br/>certificates"]
   CERT --> CHK2["check through<br/>the edge"]
   CHK2 --> RET["retire the<br/>old revision"]
-  RET -.->|"bedrock rollback"| START
+  RET -.->|"helios rollback"| START
 ```
 
-The old revision is retained. `bedrock rollback` brings it back when the data
+The old revision is retained. `helios rollback` brings it back when the data
 compatibility contract permits it; unsafe data transitions require an explicit
-checkpoint restore. Every container receives `BEDROCK_APP`, `BEDROCK_WORKLOAD`
-and `BEDROCK_REVISION`.
+checkpoint restore. Every container receives `HELIOS_APP`, `HELIOS_WORKLOAD` and
+`HELIOS_REVISION`, along with the corresponding `BEDROCK_*` aliases.
 
 ## Quick start
 
 ```sh
-bedrock host setup                 # prepare a fresh Ubuntu or Debian machine
-bedrock integration set cloudflare # DNS records for your hosts
-bedrock integration set storage    # Backblaze B2 or any S3 store, for backups
-bedrock integration set email      # SMTP, for alerts
+helios host setup                 # prepare a fresh Ubuntu or Debian machine
+helios integration set cloudflare # DNS records for your hosts
+helios integration set storage    # Backblaze B2 or any S3 store, for backups
+helios integration set email      # SMTP, for alerts
 
 mkdir my-app && cd my-app
-bedrock init my-app --host app.example.com  # write a starting bedrock.yaml
-bedrock deploy .                   # build, check, switch the edge
-bedrock status                     # health, traffic, errors, backups
+helios init my-app --host app.example.com  # write a starting helios.yaml
+helios deploy .                   # build, check, switch the edge
+helios status                     # health, traffic, errors, backups
 
-bedrock launch https://github.com/you/site --host site.example.com  # or from a repository
+helios launch https://github.com/you/site --host site.example.com  # or from a repository
 ```
 
-Bedrock needs Ubuntu 22.04 or 24.04, or Debian 12 or 13, on x86_64 or aarch64.
+Helios needs Ubuntu 22.04 or 24.04, or Debian 12 or 13, on x86_64 or aarch64.
 
 ## An app's manifest
 
-An app describes itself in `bedrock.yaml` at the root of its source.
-`bedrock init` writes a commented one for the shape you are building, so a
+An app describes itself in `helios.yaml` at the root of its source.
+`helios init` writes a commented one for the shape you are building, so a
 new app never starts from a blank file:
 
 ```sh
-bedrock init blog --kind static --host blog.example.com
-bedrock init api --host api.example.com --postgres
-bedrock init mailer --kind worker
-bedrock init nightly --kind cron --schedule "0 4 * * *"
+helios init blog --kind static --host blog.example.com
+helios init api --host api.example.com --postgres
+helios init mailer --kind worker
+helios init nightly --kind cron --schedule "0 4 * * *"
 ```
 
 It only writes a file; nothing on a machine is touched. What it writes is
@@ -97,11 +116,11 @@ workloads:
     port: 8000
     routes:
       - host: hello.example.com
-        dns: direct        # bedrock keeps the Cloudflare record (or proxied)
+        dns: direct        # helios keeps the Cloudflare record (or proxied)
       - host: example.com
         path: /hello       # a prefix; longest wins on a host
     env: {GREETING: hello}
-    secrets: [API_KEY]     # names only; values live in bedrock's store
+    secrets: [API_KEY]     # names only; values live in helios's store
     health: {path: /healthz}
     resources: {memory: 256m, cpus: 0.5}   # memory defaults to 2g
     tmpfs: [/app/.cache]   # writable in memory; the root filesystem is read-only
@@ -196,13 +215,13 @@ A release that fails stops the deploy before anything new starts. A
 singleton that fails to come up is replaced by its predecessor again. A
 backup holds the database, every volume, the object store's files and the
 first-run scripts, so a restore on a new machine rebuilds the same roles
-before it loads the dump. `bedrock run --secret NAME` gives a one-off command
-one more secret, and `bedrock run --stdin` hands it this terminal's input
+before it loads the dump. `helios run --secret NAME` gives a one-off command
+one more secret, and `helios run --stdin` hands it this terminal's input
 without recording it anywhere.
 
 One source can hold several apps, such as a product and a worker that runs
-other people's code apart from its data: `bedrock deploy <dir> --manifest
-bedrock.worker.yaml` deploys the other one, and `bedrock secret copy <app> NAME
+other people's code apart from its data: `helios deploy <dir> --manifest
+helios.worker.yaml` deploys the other one, and `helios secret copy <app> NAME
 <other-app>` gives it a secret the first made, without showing it.
 
 </details>
@@ -247,12 +266,12 @@ ufw allow 3478/udp
 ```
 
 That rule changes nothing about what is reachable; it makes `ufw status` say
-what is open. `bedrock doctor` lists every port an app publishes on a public
+what is open. `helios doctor` lists every port an app publishes on a public
 address, and warns about one ufw has no rule for, or allows only from some
 sources, since Docker publishes it to everyone either way. To keep a port off
 the internet, give it a private `address`; ufw can't narrow it.
 
-`bedrock host setup --web-from cloudflare` does not cover published ports.
+`helios host setup --web-from cloudflare` does not cover published ports.
 Its guard holds 80 and 443 alone, so a published port still answers anyone
 who knows the machine's address, and the doctor says so beside each one.
 
@@ -290,7 +309,7 @@ is a socket only the machine reaches.
 | **Memory** | 2 GiB |
 | **Processes** | 4096 |
 
-The manifest fields above are the explicit ways out, and `bedrock exposure`
+The manifest fields above are the explicit ways out, and `helios exposure`
 shows each container as Docker runs it: its user, privileges, root filesystem,
 networks, published ports and mounts, and anything that shares a network it
 shouldn't.
@@ -298,10 +317,10 @@ shouldn't.
 ## Deploying without a pipeline
 
 A route with `dns: direct` or `dns: proxied` gets its Cloudflare record from
-the deploy, which refuses a record that points at another machine; `bedrock
+the deploy, which refuses a record that points at another machine; `helios
 dns point <host>` moves one on purpose. Retiring a route, or the app, removes
-its record. `bedrock dns` explains every host; `bedrock dns audit` finds
-records that point here with nothing routed, and `bedrock dns drop <host>`
+its record. `helios dns` explains every host; `helios dns audit` finds
+records that point here with nothing routed, and `helios dns drop <host>`
 deletes one: only the A and AAAA records at exactly that name, only when
 each points at this machine, and only when no app here routes the host. A
 wildcard goes only when it is named itself.
@@ -309,58 +328,58 @@ wildcard goes only when it is named itself.
 An app is told who its visitor is in `X-Forwarded-For` and `X-Real-IP`: one
 address each, whatever the request claimed. Behind Cloudflare's proxy that
 is the visitor Cloudflare names, believed only on connections from
-Cloudflare's own ranges, which `bedrock host setup` keeps on every machine.
+Cloudflare's own ranges, which `helios host setup` keeps on every machine.
 
 A proxied record hides the machine's address, but only until someone learns
-it. `bedrock host setup --web-from cloudflare` makes that not matter: only
+it. `helios host setup --web-from cloudflare` makes that not matter: only
 Cloudflare's proxy may reach 80 and 443, so the address answers nobody else
 on the web. Setup reads Cloudflare's published ranges and allows them in ufw
 before it removes the open rules. Docker forwards the edge's published ports
 past ufw, so setup also puts a guard in Docker's `DOCKER-USER` chain, run
 again at every boot before Docker starts. It keeps a copy of the ranges in
-`/etc/bedrock` for when the list can't be read, and `bedrock host
+`/etc/helios` for when the list can't be read, and `helios host
 reconcile` keeps it current. Every route must
 then be `dns: proxied`: setup refuses while an app routes a host any other
 way, and `deploy`, `rollback` and `dns point` refuse to add one. SSH stays
 reachable, keys only. Running setup again keeps the setting unless
 `--web-from` is given, and `--web-from anyone` opens the web again. The guard
 covers 80 and 443 only: a port an app publishes on the machine with `ports:`
-stays open to anyone, and `bedrock doctor` says so.
+stays open to anyone, and `helios doctor` says so.
 
-`bedrock git allow <app> <public key>` lets a key push that app and nothing
+`helios git allow <app> <public key>` lets a key push that app and nothing
 else. Then, from the app's checkout:
 
 ```sh
-git remote add bedrock bedrock@<machine>:<app>.git
-git push bedrock main        # deploys, and streams every step back
+git remote add helios bedrock@<machine>:<app>.git
+git push helios main        # deploys, and streams every step back
 ```
 
 A push whose deploy fails is refused, so the branch on the machine is what
-runs. `bedrock deploy . --to bedrock@<machine>` sends a working tree the same
-way, commit or not. `bedrock git webhook <app> --repo git@github.com:you/app.git`
+runs. `helios deploy . --to bedrock@<machine>` sends a working tree the same
+way, commit or not. `helios git webhook <app> --repo git@github.com:you/app.git`
 deploys when GitHub says the branch moved, with a deploy key and secret
-bedrock makes and shows once.
+helios makes and shows once.
 
-`bedrock launch <repository> --host <hostname>` takes a repository from
+`helios launch <repository> --host <hostname>` takes a repository from
 nothing to running: it fetches the branch, works out what the source is (a
 Dockerfile, or a built site), writes the manifest it is missing and deploys
 it. What it guesses is deliberately narrow; anything else is refused with a
 suggestion.
 
-`bedrock preview up <repository> --branch <branch> --domain preview.example.com`
+`helios preview up <repository> --branch <branch> --domain preview.example.com`
 runs a branch as its own app beside the one it is a branch of: a derived
 name, its own containers and an empty database, at hostnames under the
 preview domain, with every route behind a sign-in (`auth: loom`, below).
-Pushing the same branch again updates it; `bedrock preview ls` lists them,
-`bedrock preview down <preview> --data` removes one and its data.
-Use `bedrock preview pin <preview>` to retain a branch, then review
-`bedrock preview prune --older-than 7d --plan` to clean up unpinned previews.
+Pushing the same branch again updates it; `helios preview ls` lists them,
+`helios preview down <preview> --data` removes one and its data.
+Use `helios preview pin <preview>` to retain a branch, then review
+`helios preview prune --older-than 7d --plan` to clean up unpinned previews.
 Pins survive updates and rollbacks. Preview checks retain application and
 routed assertions; external checks that cannot be rewritten are reported.
 
-A staged move starts with `bedrock move rehearse <app> --to <target-hostname>`
-and `bedrock move test <source> --handoff rehearsal.json`. The final capture,
-`bedrock move final`, persistently fences source writers. `move stage` restores
+A staged move starts with `helios move rehearse <app> --to <target-hostname>`
+and `helios move test <source> --handoff rehearsal.json`. The final capture,
+`helios move final`, persistently fences source writers. `move stage` restores
 that exact capture privately, then `move cutover` deliberately admits target
 writers and traffic. The source stays stopped across restarts. Both machines
 read the same backup repository, and `move secrets` preserves app credentials.
@@ -368,10 +387,10 @@ See [safe moves](docs/features/safe-moves.md) for planning downtime, retrying
 cutover and deliberately resuming or retiring the source. The older `move out`
 and `move in` commands remain available for manual copies.
 
-`bedrock remove <app>` takes an app off the machine and keeps its volumes,
+`helios remove <app>` takes an app off the machine and keeps its volumes,
 database and sealed secrets, so it can come back with what it had. `--data`
 removes those too, and `--secrets` forgets only the secrets. An app removed
-without its data can be cleared later: `bedrock remove <app> --data` for an
+without its data can be cleared later: `helios remove <app> --data` for an
 app that is no longer on the machine finds what it left behind (its sealed
 secrets, volumes, database and networks), names each one in the plan and
 removes them. Its backups in the storage bucket are never touched, and are
@@ -383,14 +402,14 @@ Save and verify an SSH target, then select it explicitly for inspection or
 operations. Plans bind the connection, machine identity and uploaded source.
 
 ```sh
-bedrock target set staging --ssh bedrock-staging --sudo
-bedrock target verify staging
-bedrock --target staging check . --host
-bedrock --target staging deploy . --plan
+helios target set staging --ssh helios-staging --sudo
+helios target verify staging
+helios --target staging check . --host
+helios --target staging deploy . --plan
 ```
 
 Portable profiles pin the host configuration, binary version/checksum and
-integration names. `bedrock --target staging host bootstrap --profile
+integration names. `helios --target staging host bootstrap --profile
 staging.json` installs and verifies that profile with resumable client receipts.
 Selected integrations are transferred as recipient-bound age ciphertext while
 the destination keeps its own identity. See
@@ -402,35 +421,35 @@ upgrade preflight and state checkpoint guarantees.
 
 A route marked `auth: loom` is put behind a Loom Core's sign-in by the edge:
 the app behind it never sees a request from someone who is not signed in,
-and needs no auth code of its own. `bedrock integration set loom` names the
+and needs no auth code of its own. `helios integration set loom` names the
 Core's verify endpoint. A machine without that integration refuses to
 deploy a guarded route rather than serve it open, and previews rely on it.
 
-## What Bedrock keeps an eye on
+## What Helios keeps an eye on
 
 The daemon watches every app and the machine once a minute: containers
 running, health paths and checks answering through the edge, certificates
 valid and renewing, disk and memory, backups fresh and drills passing, each
 workload able to write the volumes it mounts (checked hourly), and any URL
-added with `bedrock watch add` (the other machine's sites, say). A
+added with `helios watch add` (the other machine's sites, say). A
 problem has to hold for three rounds before it becomes an alert, one alert
 per app, and you hear once when it starts, once a day while it lasts, and
 once when it recovers.
 
 | Command | Shows |
 |---|---|
-| `bedrock alerts` | what is wrong now, and what was |
-| `bedrock status` | health beside each app's requests, errors, p95, CPU, memory and disk |
-| `bedrock ls` | the registry: owner, hosts, repository, last deploy, last backup |
-| `bedrock exposure` | what each container may do and what reaches it |
-| `bedrock doctor` | what to fix on this machine; changes nothing |
+| `helios alerts` | what is wrong now, and what was |
+| `helios status` | health beside each app's requests, errors, p95, CPU, memory and disk |
+| `helios ls` | the registry: owner, hosts, repository, last deploy, last backup |
+| `helios exposure` | what each container may do and what reaches it |
+| `helios doctor` | what to fix on this machine; changes nothing |
 
 ## Backups that restore
 
 Backups go to one bucket per app with restic, encrypted with a password made
 once per storage account.
 
-App backups drain Bedrock-managed jobs, stop running workloads gracefully,
+App backups drain Helios-managed jobs, stop running workloads gracefully,
 stop the object store, dump PostgreSQL, and snapshot the unchanged volume
 files. **This is a maintenance window**: the app is unavailable for the capture
 and upload, bounded to 30 minutes. Backups then restart exactly the containers
@@ -440,13 +459,13 @@ inconsistent snapshot.
 
 | Command | What it does |
 |---|---|
-| `bedrock backup <app>` | run one now |
-| `bedrock backup bedrock` | preserve state, sealed secrets, images and pinned app recovery data |
-| `bedrock drill <app>` | restore the latest snapshot beside the app, start it, verify, clean up |
-| `bedrock restore <app>` | bring data onto a machine that doesn't run the app yet |
-| `bedrock backups` | list what happened |
+| `helios backup <app>` | run one now |
+| `helios backup helios` | preserve state, sealed secrets, images and pinned app recovery data |
+| `helios drill <app>` | restore the latest snapshot beside the app, start it, verify, clean up |
+| `helios restore <app>` | bring data onto a machine that doesn't run the app yet |
+| `helios backups` | list what happened |
 
-`bedrock drill` uses an internal network with no outbound access, starts all
+`helios drill` uses an internal network with no outbound access, starts all
 long-running workloads before probing readiness, and never runs release or cron
 jobs. Privileged workloads cannot be safely drilled, and workloads that require
 external services may fail their drill readiness check. A drill also fails when
@@ -455,21 +474,21 @@ database copied in by hand as root: that app would answer its health check and
 then fail its first save.
 
 A workload that can't write its own volume is the same problem on the live app.
-The daemon raises it as an alert, and `bedrock doctor` names the files and the
-`chown` and restart that give them back. Bedrock never changes the ownership of
+The daemon raises it as an alert, and `helios doctor` names the files and the
+`chown` and restart that give them back. Helios never changes the ownership of
 files inside a volume on its own.
 
 Restore the app's original secrets from the sealed machine backup before
-restoring data on a new machine. Bedrock refuses to generate replacement keys
+restoring data on a new machine. Helios refuses to generate replacement keys
 for restored data, which could make encrypted records unreadable.
 
 > [!IMPORTANT]
 > The pause journal survives daemon restarts: the daemon restores paused
 > containers before accepting work, and a failed restart retains the journal and
-> reports the error. Cron, `bedrock run --stdin`, `bedrock exec` and
-> `bedrock psql` share the backup lock. Direct Docker or SQL writes and external
+> reports the error. Cron, `helios run --stdin`, `helios exec` and
+> `helios psql` share the backup lock. Direct Docker or SQL writes and external
 > database writers are outside this contract: do not run them during a backup.
-> All app writers must be Bedrock-managed. Pick `backup.schedule` for an
+> All app writers must be Helios-managed. Pick `backup.schedule` for an
 > acceptable maintenance window, and note that an app must not use its own
 > paused object store as its backup destination. Offsite storage remains the
 > recovery target.
@@ -479,14 +498,14 @@ for restored data, which could make encrypted records unreadable.
 A new machine backup contains a self-contained catalog, immutable workload
 images and embedded app data from each app's last successful backup. Keep the
 source recovery identity, storage password and snapshot inventory separately.
-`bedrock recover <source-host> --snapshot <id> --identity-file <protected-file>`
+`helios recover <source-host> --snapshot <id> --identity-file <protected-file>`
 restores onto a clean target with its own identity and validates workloads
 privately. `--rehearsal` proves the restore in scratch isolation. Live traffic
 requires a separate `recover cutover`. See
 [whole-machine recovery](docs/features/machine-recovery.md) for preparation,
 reports, retries and abandonment.
 
-`bedrock rehearse ./candidate --snapshot <id>` runs candidate release jobs and
+`helios rehearse ./candidate --snapshot <id>` runs candidate release jobs and
 checks on isolated restored data, retaining a proof of the exact source,
 manifest, images and snapshot. A manifest can declare
 `release.data_compatibility: backward-compatible` or `restore-required`.
@@ -498,13 +517,13 @@ and discards writes since that checkpoint. See
 
 ## Secrets
 
-The credentials Bedrock itself uses are integrations, kept sealed like any
-secret: `bedrock integration set storage` (Backblaze B2 or any S3 store),
-`bedrock integration set email` (SMTP, for alerts),
-`bedrock integration set cloudflare` (checked against the API before it is
-kept) and `bedrock integration set loom` (a Loom Core's verify endpoint, for
+The credentials Helios itself uses are integrations, kept sealed like any
+secret: `helios integration set storage` (Backblaze B2 or any S3 store),
+`helios integration set email` (SMTP, for alerts),
+`helios integration set cloudflare` (checked against the API before it is
+kept) and `helios integration set loom` (a Loom Core's verify endpoint, for
 routes behind a sign-in). Setting one again changes only what is answered; a
-blank answer keeps the current value. `bedrock integration list` shows which
+blank answer keeps the current value. `helios integration list` shows which
 are set and when each was last used, never the values.
 
 <details>
@@ -512,25 +531,25 @@ are set and when each was last used, never the values.
 
 <br>
 
-`bedrock secret recipient` initializes the machine identity if needed and prints
+`helios secret recipient` initializes the machine identity if needed and prints
 only its public age recipient. Keep `/etc/bedrock/secrets.key` in your recovery
 process; automation never prints its private recovery key.
 
-`bedrock secret export core TOKEN runner --recipient age1...` emits only
-ciphertext. Pipe that to `bedrock secret import runner TOKEN` on the receiving
+`helios secret export core TOKEN runner --recipient age1...` emits only
+ciphertext. Pipe that to `helios secret import runner TOKEN` on the receiving
 machine through pinned SSH connections. Transfers expire after ten minutes, are
 bound to the receiving app and name, and are idempotent. Integration credentials
 use explicit `integration export` and `integration import` transfers.
-`bedrock move secrets <app> --to <age1...>` does the same
+`helios move secrets <app> --to <age1...>` does the same
 for every secret an app holds at once, which is what a move needs.
 
 </details>
 
 ## Validation and saved diagnostics
 
-`bedrock check .` validates a manifest and its source paths offline, with
+`helios check .` validates a manifest and its source paths offline, with
 field locations in errors. `--json` returns one structured report.
-`bedrock check . --host` adds deploy-plan preconditions for integrations,
+`helios check . --host` adds deploy-plan preconditions for integrations,
 secret names, and route and port ownership. Deployment verifies builds,
 runtime readiness, DNS and certificates. Use `doctor` to inspect current host
 capacity; aggregate workload capacity is not predicted by the source check. The generated
@@ -543,10 +562,10 @@ HTTP header names to app secret names, for an authenticated assertion.
 Credentials are loaded from the deployed revision and stay off logs and
 receipts; credentialed checks require HTTPS and refuse redirects to another origin.
 
-`bedrock alerts --limit N` always includes every open incident plus N resolved
+`helios alerts --limit N` always includes every open incident plus N resolved
 incidents. Use `--limit 0` for open incidents only.
-`bedrock history --app api --kind app.deploy --failed --since 24h` filters
-operations before applying the limit. `bedrock history ID --output` retrieves
+`helios history --app api --kind app.deploy --failed --since 24h` filters
+operations before applying the limit. `helios history ID --output` retrieves
 saved diagnostic tails, optionally with `--step NAME` or a one-based step
 position. Saved tails contain up to 40 lines per execution, rather than a
 complete log, and become available when an execution finishes.
@@ -561,7 +580,7 @@ complete log, and become available when an execution finishes.
 | **Access** | `secret` · `integration` · `git` · `exec` · `run` · `jobs` |
 | **Network** | `dns` · `exposure` |
 
-Run `bedrock <command> --help` for any of them.
+Run `helios <command> --help` for any of them.
 
 Every operation on the machine, from a deploy or a backup to a host setup
 or an upgrade, takes `--plan` to see it first and `--digest` to apply only
@@ -571,15 +590,15 @@ it the manifest or the machine can move, so the digest is how an agent, or a
 person, applies the plan they actually approved:
 
 ```sh
-bedrock deploy ./app --plan --json | jq -r .digest
-bedrock deploy ./app --digest <hex>
+helios deploy ./app --plan --json | jq -r .digest
+helios deploy ./app --digest <hex>
 ```
 
 A plan that has changed runs nothing and records nothing. `--digest` implies
 `--yes`, because naming the plan is the approval.
 
 Deploy approvals also bind the source bytes, file modes and safe relative links.
-Bedrock captures that source privately before initialization or builds begin,
+Helios captures that source privately before initialization or builds begin,
 so edits to the original checkout cannot change an operation already in progress.
 See [deployment sources](docs/features/deployment-sources.md) for recovery,
 cleanup and disk-space behavior.
@@ -594,8 +613,8 @@ observation can confirm recovery.
 
 ```sh
 make check   # gofmt, vet, test
-make build   # bin/bedrock for this Mac
-make linux   # bin/bedrock-linux-amd64 for the machines
+make build   # bin/helios for this Mac
+make linux   # bin/helios-linux-amd64 for the machines
 ```
 
 One static binary, no runtime to install.
@@ -606,7 +625,7 @@ One static binary, no runtime to install.
 <br>
 
 Run tests and the lane proof, commit, then run
-`scripts/build-release.sh 0.7.0 /tmp/bedrock-release-0.7.0` from a clean
+`scripts/build-release.sh 0.7.0 /tmp/helios-release-0.7.0` from a clean
 checkout. It builds static Linux and macOS binaries for amd64 and arm64 plus
 `SHA256SUMS`, stamped with the version and exact source commit. Publish those
 exact files on the matching GitHub release.
@@ -619,27 +638,27 @@ replacement needs a new reviewed pin; do not overwrite published assets.
 
 ## Status and docs
 
-0.7 is the first Go release. Bedrock is the Go rewrite of Ophelia; the Python
+0.7 is the first Go release. Helios is the Go rewrite of Ophelia; the Python
 0.6 line is archived on the `ophelia-0.6` branch and the `ophelia-0.6-final`
 tag, and stays there.
 
-Bedrock stays on 0.7.x. There is no 0.8 or 0.9: a finished feature is a patch
+Helios stays on 0.7.x. There is no 0.8 or 0.9: a finished feature is a patch
 release, cut when that feature is done rather than when a group of them is.
 
-A machine already running bedrock upgrades itself, checking the download
+A machine already running helios upgrades itself, checking the download
 against the checksums published beside it:
 
 ```sh
-bedrock upgrade --version 0.7.5
+helios upgrade --version 0.7.5
 ```
 
-`bedrock --target <name> host bootstrap --profile <file>` provisions a machine
+`helios --target <name> host bootstrap --profile <file>` provisions a machine
 from a reviewed portable profile. `scripts/install-release.sh 0.7.5 <host>...`
 remains available for initial binary installation.
 
 | Document | What it covers |
 |---|---|
-| [docs/direction.html](docs/direction.html) | what Bedrock is for, where it stands, and what is next |
+| [docs/direction.html](docs/direction.html) | what Helios is for, where it stands, and what is next |
 | [docs/ideas.html](docs/ideas.html) | the 37 ideas, and which are tabled |
 | [docs/plan.html](docs/plan.html) | the 0.7 plan, delivered and closed |
 | [docs/blueprint.html](docs/blueprint.html) | why the rewrite happened, written under an older name |

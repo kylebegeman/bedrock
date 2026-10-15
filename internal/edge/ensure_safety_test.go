@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/docker/dockertest"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/docker/dockertest"
 )
 
 func TestEdgeEnsureRefusesForeignContainersAndInspectionOutagesBeforeMutation(t *testing.T) {

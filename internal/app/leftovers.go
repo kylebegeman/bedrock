@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/edge"
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/edge"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/manifest"
 )
 
 // leftovers is what an app that is no longer on the machine left behind:
@@ -35,7 +35,7 @@ type leftovers struct {
 	dirs []string
 	// migrationFence is retained until the remaining app writers are removed.
 	migrationFence string
-	// credentials says whether the webhook secret or deploy key bedrock
+	// credentials says whether the webhook secret or deploy key helios
 	// made for it are still among the integration credentials.
 	credentials bool
 }
@@ -91,7 +91,7 @@ func (r Remove) planLeftovers(ctx context.Context, in RemoveInput, stateDir stri
 		return nil, fmt.Errorf("%s isn't on this machine, and nothing of it is left here", in.App)
 	}
 	if !in.Data {
-		return nil, fmt.Errorf("%s isn't on this machine, but it left %s behind; bedrock remove %s --data removes what is left (only a backup brings it back)", in.App, l.summary(), in.App)
+		return nil, fmt.Errorf("%s isn't on this machine, but it left %s behind; helios remove %s --data removes what is left (only a backup brings it back)", in.App, l.summary(), in.App)
 	}
 	plan := &kernel.Plan{Target: in.App, Recovery: kernel.Resume}
 	if len(l.containers) > 0 || len(l.images) > 0 {
@@ -111,7 +111,7 @@ func (r Remove) planLeftovers(ctx context.Context, in RemoveInput, stateDir stri
 }
 
 // findLeftovers looks for everything of an app on the machine. A volume
-// is the app's by bedrock's naming, bedrock-<app>-<volume>; a hyphen can
+// is the app's by helios's naming, bedrock-<app>-<volume>; a hyphen can
 // sit in an app's name too, so one that fits another app still known
 // here (loom-runner's, looking for loom's) is left to that app.
 func (r Remove) findLeftovers(ctx context.Context, app, stateDir string) (*leftovers, error) {
@@ -335,7 +335,7 @@ func (l *leftovers) networksStep() kernel.Step {
 func (l *leftovers) secretsStep(r Remove) kernel.Step {
 	return kernel.Step{
 		Name: "secrets",
-		Change: fmt.Sprintf("forget %s's sealed secrets: %s at version %d (only a machine backup made before now, bedrock backup bedrock, keeps them)",
+		Change: fmt.Sprintf("forget %s's sealed secrets: %s at version %d (only a machine backup made before now, helios backup helios, keeps them)",
 			l.app, plural(len(l.secretNames), "name"), l.secretVersion),
 		Apply: func(ctx context.Context, out io.Writer) error {
 			if err := r.Secrets.RemoveApp(l.app); err != nil {

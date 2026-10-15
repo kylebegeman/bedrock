@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/helios/internal/manifest"
 )
 
 // previewSuffix separates a parent app's name from its branch in a
@@ -147,7 +147,7 @@ func PreviewOfWithReport(parent *manifest.Manifest, branch, domain string) (*man
 		preview.Checks = append(preview.Checks, check)
 	}
 	if err := preview.Validate(); err != nil {
-		return nil, nil, fmt.Errorf("the preview derived from %s is not a valid app, which is a bug in bedrock: %w", parent.App, err)
+		return nil, nil, fmt.Errorf("the preview derived from %s is not a valid app, which is a bug in helios: %w", parent.App, err)
 	}
 	return &preview, skipped, nil
 }

@@ -7,27 +7,36 @@ import (
 	"strings"
 )
 
-//go:generate go run ../../cmd/bedrock-schema -out ../../schema/bedrock.schema.json
+//go:generate go run ../../cmd/helios-schema -out ../../schema/helios.schema.json -legacy-out ../../schema/bedrock.schema.json
 
 // SchemaVersion identifies the published editor schema contract. It does not
-// add a version field to bedrock.yaml; Parse remains the deploy authority.
+// add a version field to helios.yaml; Parse remains the deploy authority.
 const SchemaVersion = "1"
 
 // SchemaID is also the URL used by YAML editors to discover the generated file.
-const SchemaID = "https://raw.githubusercontent.com/kylebegeman/bedrock/next/schema/bedrock.schema.json"
+const SchemaID = "https://raw.githubusercontent.com/kylebegeman/helios/next/schema/helios.schema.json"
+
+// LegacySchemaID remains published for existing editor annotations.
+const LegacySchemaID = "https://raw.githubusercontent.com/kylebegeman/bedrock/next/schema/bedrock.schema.json"
 
 type schemaObject = map[string]any
 
 // JSONSchema generates the editor schema from the manifest's YAML-tagged Go
 // types, then adds constraints that describe Validate's workload semantics.
 // Cross-reference checks, cron parsing and source checks remain in CheckSource.
-func JSONSchema() ([]byte, error) {
+func JSONSchema() ([]byte, error) { return jsonSchema(SchemaID) }
+
+// LegacyJSONSchema keeps the previous editor URL usable during migration.
+func LegacyJSONSchema() ([]byte, error) { return jsonSchema(LegacySchemaID) }
+
+func jsonSchema(id string) ([]byte, error) {
 	g := schemaGenerator{defs: schemaObject{}}
 	schema := g.typeSchema(reflect.TypeFor[Manifest]())
 	schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
-	schema["$id"] = SchemaID
-	schema["title"] = "Bedrock app manifest"
-	schema["description"] = "One app's workloads, routes, data, checks, secrets and backups. Run bedrock check for complete offline validation, including cross-field references and source files."
+	schema["$id"] = id
+	schema["title"] = "Helios app manifest"
+	schema["description"] = "One app's workloads, routes, data, checks, secrets and backups. Run helios check for complete offline validation, including cross-field references and source files."
+	schema["x-helios-schema-version"] = SchemaVersion
 	schema["x-bedrock-schema-version"] = SchemaVersion
 	schema["$defs"] = g.defs
 	g.constrain()

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // Garbage collection keeps no run log of its own, so the schedule reads the

@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/kylebegeman/bedrock/internal/compat"
+	"github.com/kylebegeman/helios/internal/compat"
 )
 
 // SchemaVersion is the latest transactional on-disk migration this binary knows.

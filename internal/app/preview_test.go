@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/helios/internal/manifest"
 
 	"gopkg.in/yaml.v3"
 )

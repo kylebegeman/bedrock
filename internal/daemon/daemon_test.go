@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/api"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/api"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // TestASweepRecoversAnOperationWhoseLeaseOutlivesTheRestart is the lane's

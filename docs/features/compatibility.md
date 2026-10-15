@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-`bedrock capabilities --json` describes the invoked binary's API, manifest and
+`helios capabilities --json` describes the invoked binary's API, manifest and
 state contracts, supported state reader range, optional capability names,
 build and stable machine identity. It reads existing identity/state metadata
 without creating a secret key or database. The daemon's
@@ -28,3 +28,25 @@ API errors retain the existing human message and add stable `code`,
 compatible. Daemon and direct local fallback execution share the same machine
 operation lock, so choosing another socket cannot create a second concurrent
 writer authority.
+
+## Helios source rename
+
+The primary command is now `helios`, with a `bedrock` compatibility entrypoint.
+New manifests use `helios.yaml`. An existing sole `bedrock.yaml` still loads;
+when both files exist, select one explicitly using `--manifest` or remove the
+duplicate. A source filename change requires a new reviewed deploy digest.
+
+Named-target `deploy` and `check` forward the selected filename explicitly,
+so a supported older daemon does not choose its own default. The legacy
+`deploy --to` transport retains its existing wire request: deploying a new
+`helios.yaml` through that transport requires a daemon that understands the
+new filename. Until then, keep `bedrock.yaml` for that workflow. Older hosts
+without named-target capabilities must follow their existing deployment path.
+
+Both entrypoints still use the Bedrock state directory, socket, services,
+Docker identities and stored formats. `HELIOS_*` configuration names accept
+the corresponding `BEDROCK_*` fallback. Different nonempty values are refused;
+an explicit corresponding flag overrides its environment settings. Machine
+identity, encrypted integration state and existing backup repositories retain
+their original identities. The physical migration and live rollout are
+separate work described in the [rename plan](../operations/helios-rename-plan.md).

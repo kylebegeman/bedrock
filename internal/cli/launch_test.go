@@ -3,7 +3,7 @@ package cli
 import (
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/helios/internal/manifest"
 	"os"
 	"path/filepath"
 	"strings"

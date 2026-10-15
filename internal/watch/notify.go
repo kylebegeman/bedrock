@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/mail"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/mail"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // EmailNotifier sends notices through the email integration, reading it
@@ -27,7 +27,7 @@ func (e EmailNotifier) Notify(ctx context.Context, n Notice) error {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	err = mail.Send(ctx, mail.Server{Host: cfg.Host, Port: cfg.Port, User: cfg.User, Password: cfg.Password},
-		mail.Message{From: cfg.From, To: cfg.To, Subject: "[bedrock] " + n.Subject, Body: n.Body})
+		mail.Message{From: cfg.From, To: cfg.To, Subject: "[helios] " + n.Subject, Body: n.Body})
 	if err != nil {
 		return err
 	}
@@ -39,5 +39,5 @@ func (e EmailNotifier) Notify(ctx context.Context, n Notice) error {
 
 // Test sends a test message through the email integration.
 func (e EmailNotifier) Test(ctx context.Context, hostname string) error {
-	return e.Notify(ctx, Notice{Subject: hostname + ": test alert", Body: fmt.Sprintf("This is bedrock on %s checking that alerts reach you. Nothing is wrong.\n", hostname)})
+	return e.Notify(ctx, Notice{Subject: hostname + ": test alert", Body: fmt.Sprintf("This is helios on %s checking that alerts reach you. Nothing is wrong.\n", hostname)})
 }

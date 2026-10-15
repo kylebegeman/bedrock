@@ -23,7 +23,7 @@ import (
 // Where pushes land.
 const (
 	// User receives pushes over SSH; it has no password and every one of
-	// its keys runs bedrock and nothing else.
+	// its keys runs helios and nothing else.
 	User = "bedrock"
 	// Home holds the repositories and the build directories.
 	Home = "/var/lib/bedrock-git"
@@ -62,7 +62,7 @@ func ParseKey(text string) (Key, error) {
 	}
 	k := Key{Type: fields[0], Blob: fields[1]}
 	if !keyTypes[k.Type] {
-		return Key{}, fmt.Errorf("%q isn't an SSH public key type bedrock accepts", k.Type)
+		return Key{}, fmt.Errorf("%q isn't an SSH public key type helios accepts", k.Type)
 	}
 	raw, err := base64.StdEncoding.DecodeString(k.Blob)
 	if err != nil {

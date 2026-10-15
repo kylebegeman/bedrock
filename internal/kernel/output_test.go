@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 type diagnosticOutput struct{}

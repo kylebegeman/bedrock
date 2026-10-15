@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/docker/dockertest"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/docker/dockertest"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // appCondition is what the prober says about hello this round, or "".
@@ -100,7 +100,7 @@ func TestTheProberSeesAWorkloadThatCantWriteItsVolumeAndSeesItFixed(t *testing.T
 
 	got := appCondition(t, p)
 	want := "work runs as " + user + " and can't write 1 file or directory in volume data, such as hello.sqlite"
-	if !strings.HasPrefix(got, state.SeverityCritical) || !strings.Contains(got, want) || !strings.Contains(got, "bedrock doctor says how") {
+	if !strings.HasPrefix(got, state.SeverityCritical) || !strings.Contains(got, want) || !strings.Contains(got, "helios doctor says how") {
 		t.Fatalf("unwritable data: %q", got)
 	}
 
@@ -117,7 +117,7 @@ func TestTheProberSeesAWorkloadThatCantWriteItsVolumeAndSeesItFixed(t *testing.T
 		t.Fatalf("fixed and walked again: %q", got)
 	}
 
-	// Root, and a user bedrock didn't set, need no walk.
+	// Root, and a user helios didn't set, need no walk.
 	for _, u := range []string{"0:0", ""} {
 		fake.Update("bedrock-hello-work-r1", func(c *dockertest.Container) { c.User = u })
 		if err := os.Chmod(db, 0o644); err != nil {

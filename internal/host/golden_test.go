@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/helios/internal/kernel"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files from what the code does now")

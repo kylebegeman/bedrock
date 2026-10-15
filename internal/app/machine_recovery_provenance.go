@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 const appBackupProvenanceFile = "backup-revision.json"
@@ -43,7 +43,7 @@ func newAppBackupProvenance(rev state.Revision, captured time.Time) appBackupPro
 }
 
 func freshRecoveryBackupRequired(rev state.Revision) error {
-	return fmt.Errorf("%s's data backup does not prove compatibility with active revision %s and secret version %d; run bedrock backup %s before backing up the whole machine", rev.App, rev.ID, rev.SecretsVersion, rev.App)
+	return fmt.Errorf("%s's data backup does not prove compatibility with active revision %s and secret version %d; run helios backup %s before backing up the whole machine", rev.App, rev.ID, rev.SecretsVersion, rev.App)
 }
 
 func validateAppBackupProvenance(rev state.Revision, p appBackupProvenance) error {

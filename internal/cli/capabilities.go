@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/kylebegeman/bedrock/internal/compat"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/compat"
+	"github.com/kylebegeman/helios/internal/state"
 	"github.com/spf13/cobra"
 )
 

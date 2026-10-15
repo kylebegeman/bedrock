@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/docker/dockertest"
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/docker/dockertest"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 func seedApp(t *testing.T, store *state.Store, app string) {
@@ -187,7 +187,7 @@ func TestWhatARemovedAppLeftCanGoWithItsData(t *testing.T) {
 		return r.Plan(ctx, json.RawMessage(in))
 	}
 
-	if _, err := plan(`{"app":"loom"}`); err == nil || !strings.Contains(err.Error(), "sealed secrets (2 names)") || !strings.Contains(err.Error(), "bedrock remove loom --data") {
+	if _, err := plan(`{"app":"loom"}`); err == nil || !strings.Contains(err.Error(), "sealed secrets (2 names)") || !strings.Contains(err.Error(), "helios remove loom --data") {
 		t.Fatalf("without --data: %v", err)
 	}
 	if _, err := plan(`{"app":"loom","secrets":true}`); err == nil || !strings.Contains(err.Error(), "--data") {

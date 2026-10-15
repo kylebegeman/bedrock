@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker/dockertest"
+	"github.com/kylebegeman/helios/internal/docker/dockertest"
 )
 
 func connect(t *testing.T) (*Engine, *dockertest.Server) {
@@ -75,7 +75,7 @@ func TestRunStartsAStoppedContainerRatherThanMakingAnother(t *testing.T) {
 	}
 }
 
-func TestOnlyWhatBedrockMadeIsItsOwn(t *testing.T) {
+func TestOnlyWhatHeliosMadeIsItsOwn(t *testing.T) {
 	e, fake := connect(t)
 	fake.Add(dockertest.Container{Name: "bedrock-a-web-r1", Running: true, Labels: map[string]string{LabelOwner: OwnerValue, LabelApp: "a"}})
 	fake.Add(dockertest.Container{Name: "someone-elses", Running: true, Labels: map[string]string{}})

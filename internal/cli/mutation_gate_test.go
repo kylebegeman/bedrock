@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 func TestDirectSecretAndIntegrationWritesRespectRecoveryReservation(t *testing.T) {

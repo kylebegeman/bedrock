@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/secrets"
 )
 
 func TestRecoveryIdentityFileMustBePrivateAndCannotBeASymlink(t *testing.T) {

@@ -48,7 +48,7 @@ func (s Scaffold) Check() error {
 		return fmt.Errorf("the app name %q must be lowercase letters, digits and hyphens, up to 40 characters", s.App)
 	}
 	if reservedApps[s.App] {
-		return fmt.Errorf("%q is a name bedrock uses for itself; pick another", s.App)
+		return fmt.Errorf("%q is a name helios uses for itself; pick another", s.App)
 	}
 	switch s.Kind {
 	case Web, Static:
@@ -114,7 +114,7 @@ func (s Scaffold) Render() ([]byte, error) {
 	}
 	out := []byte(r.b.String())
 	if _, err := Parse(out); err != nil {
-		return nil, fmt.Errorf("the generated manifest is not valid, which is a bug in bedrock: %w", err)
+		return nil, fmt.Errorf("the generated manifest is not valid, which is a bug in helios: %w", err)
 	}
 	return out, nil
 }
@@ -128,11 +128,11 @@ type rendering struct {
 func (r *rendering) w(format string, args ...any) { fmt.Fprintf(&r.b, format, args...) }
 
 func (r *rendering) header() {
-	r.w("# %s, as bedrock deploys it.\n", r.s.App)
+	r.w("# %s, as helios deploys it.\n", r.s.App)
 	r.w("#\n")
 	r.w("# Anything left out takes its default, and the defaults are the safe\n")
 	r.w("# ones: a read-only root, no capabilities, a non-root user. Run\n")
-	r.w("# `bedrock deploy` from the directory holding this file.\n")
+	r.w("# `helios deploy` from the directory holding this file.\n")
 	r.w("app: %s\n", r.s.App)
 	r.w("description: What this app is\n")
 	r.w("owner: personal\n")
@@ -232,7 +232,7 @@ func (r *rendering) data() {
 	r.w("\n")
 	r.w("data:\n")
 	r.w("  # Every workload above is given DATABASE_URL pointing here, so\n")
-	r.w("  # nothing else needs declaring to use it. bedrock generates the\n")
+	r.w("  # nothing else needs declaring to use it. helios generates the\n")
 	r.w("  # password, seals it, and never writes it to a log or a receipt.\n")
 	r.w("  postgres:\n")
 	r.w("    version: \"17\"\n")
@@ -275,10 +275,10 @@ func (s Scaffold) Next() []string {
 		next = append(next, fmt.Sprintf("serve /healthz, or drop the health block from %s", FileName))
 	}
 	if s.Postgres {
-		next = append(next, "read DATABASE_URL from the environment; bedrock sets it")
+		next = append(next, "read DATABASE_URL from the environment; helios sets it")
 	}
 	if s.Host != "" {
-		next = append(next, fmt.Sprintf("point %s at this machine, or let bedrock write the DNS record", s.Host))
+		next = append(next, fmt.Sprintf("point %s at this machine, or let helios write the DNS record", s.Host))
 	}
 	return next
 }

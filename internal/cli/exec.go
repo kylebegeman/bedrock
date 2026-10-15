@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	apps "github.com/kylebegeman/bedrock/internal/app"
+	apps "github.com/kylebegeman/helios/internal/app"
 )
 
 func newExec(a *app) *cobra.Command {
