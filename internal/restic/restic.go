@@ -55,6 +55,70 @@ type Runner struct {
 	BackupTags []string
 	// Log receives restic's lines, when set.
 	Log func(line string)
+	// Deadlines bound the calls a backup makes; a zero field takes its
+	// default.
+	Deadlines Deadlines
+}
+
+// Default deadlines for the repository calls a backup makes while it holds
+// the machine's operation lock. They are generous for real data and slow
+// links, but finite: a call that outlives one is stopped, so a repository
+// or network that stops answering cannot hold every later backup and deploy.
+const (
+	// EnsureTimeout bounds init, which fails at once on an existing
+	// repository and otherwise only creates a bucket and a few files.
+	EnsureTimeout = 5 * time.Minute
+	// UnlockTimeout bounds clearing stale locks, a list and a few deletes.
+	UnlockTimeout = 5 * time.Minute
+	// BackupTimeout bounds one upload. An app's capture is also inside its
+	// 30 minute maintenance window, whichever ends first.
+	BackupTimeout = 2 * time.Hour
+	// ForgetTimeout bounds retention and the prune that follows it. A
+	// deferred prune keeps the snapshot and is retried by the next backup.
+	ForgetTimeout = time.Hour
+)
+
+// Deadlines bound individual repository calls. Tests shorten them.
+type Deadlines struct {
+	Ensure, Unlock, Backup, Forget time.Duration
+}
+
+func orDefault(d, def time.Duration) time.Duration {
+	if d > 0 {
+		return d
+	}
+	return def
+}
+
+// DeadlineError is a repository call that ran out of time and was stopped.
+// It matches context.DeadlineExceeded with errors.Is.
+type DeadlineError struct {
+	Action string
+	Limit  time.Duration
+	// Err is what the stopped run returned, including any cleanup failure.
+	Err error
+}
+
+func (e *DeadlineError) Error() string {
+	msg := fmt.Sprintf("restic %s did not finish within %s and was stopped", e.Action, e.Limit)
+	if e.Err != nil && e.Err.Error() != context.DeadlineExceeded.Error() {
+		msg += ": " + e.Err.Error()
+	}
+	return msg
+}
+
+func (e *DeadlineError) Unwrap() []error { return []error{context.DeadlineExceeded, e.Err} }
+
+// bounded runs restic under its own deadline. Running out of that deadline
+// is reported as a DeadlineError; the caller's own cancellation is not.
+func (r Runner) bounded(ctx context.Context, limit time.Duration, mounts []string, args ...string) ([]string, error) {
+	callCtx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	lines, err := r.run(callCtx, mounts, args...)
+	if err != nil && ctx.Err() == nil && errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+		return lines, &DeadlineError{Action: args[0], Limit: limit, Err: err}
+	}
+	return lines, err
 }
 
 // Summary is what restic reports after a backup.
@@ -195,6 +259,13 @@ type commandError struct {
 
 func (e *commandError) Error() string { return fmt.Sprintf("restic %s: %s", e.action, e.reason) }
 
+// stopGrace is how long a restic helper that is still running, because its
+// deadline or its caller's context ended, has to stop before it is killed.
+// restic treats SIGTERM as an interruption: it cancels its work and then
+// spends up to a minute of its own removing its repository lock. A helper
+// that already exited is removed at once.
+const stopGrace = time.Minute
+
 // finish reads the helper's output and removes only that helper. Logging
 // and cleanup have separate budgets, so a slow log endpoint cannot spend
 // the time needed to stop a writer and remove the container.
@@ -216,8 +287,8 @@ func finish(e *docker.Engine, spec docker.Spec) ([]string, error) {
 	var buf bytes.Buffer
 	logErr := e.Logs(ctx, spec.Name, false, "all", &buf)
 	cancel()
-	cleanup, stop := context.WithTimeout(context.Background(), 30*time.Second)
-	removeErr := e.Remove(cleanup, info.ID, 5*time.Second)
+	cleanup, stop := context.WithTimeout(context.Background(), stopGrace+30*time.Second)
+	removeErr := e.Remove(cleanup, info.ID, stopGrace)
 	stop()
 	var errs []error
 	if logErr != nil {
@@ -265,7 +336,7 @@ func explain(lines []string) string {
 // once. (Asking restic to read a missing bucket instead would retry for
 // a quarter of an hour, because it treats "no such bucket" as transient.)
 func (r Runner) Ensure(ctx context.Context) (bool, error) {
-	lines, err := r.run(ctx, nil, "init", "--json")
+	lines, err := r.bounded(ctx, orDefault(r.Deadlines.Ensure, EnsureTimeout), nil, "init", "--json")
 	if err == nil {
 		return true, nil
 	}
@@ -289,7 +360,7 @@ func (r Runner) Backup(ctx context.Context, host string, mounts []string, paths 
 		args = append(args, "--tag", tag)
 	}
 	args = append(args, paths...)
-	lines, err := r.run(ctx, mounts, args...)
+	lines, err := r.bounded(ctx, orDefault(r.Deadlines.Backup, BackupTimeout), mounts, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -341,6 +412,16 @@ func (r Runner) Latest(ctx context.Context, host string) (*Snapshot, error) {
 	return &snaps[0], nil
 }
 
+// Unlock removes the repository's stale locks: those whose holder restic
+// can tell is gone, or that nobody refreshed for 30 minutes. It never
+// removes a live lock, so it is safe beside another restic; a prune killed
+// at its deadline leaves an exclusive lock that every later backup would
+// otherwise trip over, because restic does not skip stale locks on its own.
+func (r Runner) Unlock(ctx context.Context) error {
+	_, err := r.bounded(ctx, orDefault(r.Deadlines.Unlock, UnlockTimeout), nil, "unlock")
+	return err
+}
+
 // Forget applies the retention policy and prunes what it freed. It
 // returns how many snapshots were removed.
 func (r Runner) Forget(ctx context.Context, host string, keep Keep) (int, error) {
@@ -354,7 +435,7 @@ func (r Runner) Forget(ctx context.Context, host string, keep Keep) (int, error)
 	if keep.Monthly > 0 {
 		args = append(args, "--keep-monthly", fmt.Sprint(keep.Monthly))
 	}
-	lines, err := r.run(ctx, nil, args...)
+	lines, err := r.bounded(ctx, orDefault(r.Deadlines.Forget, ForgetTimeout), nil, args...)
 	if err != nil {
 		return 0, err
 	}

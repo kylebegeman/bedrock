@@ -38,7 +38,14 @@ type Backup struct {
 	// Profile is the machine's profile file, kept in its own backup when
 	// there is one.
 	Profile string
+	// Deadlines bound the repository calls; zero fields take restic's
+	// defaults. Tests shorten them.
+	Deadlines restic.Deadlines
 }
+
+// retentionDeferred marks a run whose snapshot was kept while retention
+// failed or ran out of time. The next backup applies retention again.
+const retentionDeferred = "retention deferred"
 
 // BackupInput says what to back up: an app, or helios's own name for the
 // machine's state.
@@ -427,10 +434,15 @@ func (x *backingUp) repo(ctx context.Context) (*docker.Engine, restic.Runner, er
 		e.Close()
 		return nil, restic.Runner{}, err
 	}
+	r.Deadlines = x.b.Deadlines
 	return e, r, nil
 }
 
-// ensure makes the bucket and its repository the first time.
+// ensure makes the bucket and its repository the first time. On an existing
+// repository it clears stale locks, such as the exclusive lock of a prune
+// stopped at its deadline or killed by hand, which would otherwise refuse
+// this backup. restic's plain unlock removes only locks nobody holds; a
+// failure is reported and the backup goes on to say what it finds.
 func (x *backingUp) ensure(ctx context.Context, r restic.Runner, out io.Writer) error {
 	created, err := r.Ensure(ctx)
 	if err != nil {
@@ -438,6 +450,13 @@ func (x *backingUp) ensure(ctx context.Context, r restic.Runner, out io.Writer) 
 	}
 	if created {
 		fmt.Fprintf(out, "made bucket %s and its repository\n", x.bucket)
+		return nil
+	}
+	if err := r.Unlock(ctx); err != nil {
+		if ctx.Err() != nil {
+			return err
+		}
+		fmt.Fprintf(out, "could not clear stale repository locks: %v\n", err)
 	}
 	return nil
 }
@@ -663,9 +682,16 @@ func (x *backingUp) machineSnapshotStep() kernel.Step {
 }
 
 // retentionStep forgets snapshots the policy no longer keeps, then closes
-// the run record with the snapshot this backup took.
+// the run record with the snapshot this backup took. The snapshot already
+// exists, so retention that fails or runs out of time is deferred rather
+// than failing the backup: the run is recorded with its snapshot and a
+// note, the operation lock is released, and the next backup applies the
+// policy again. Only the operation's own interruption leaves the step to
+// be resumed.
 func (x *backingUp) retentionStep() kernel.Step {
 	return kernel.Step{
+		// Change is part of the plan digest, which recovery compares: an
+		// operation interrupted under an older release must still resume.
 		Name: "retention", Change: fmt.Sprintf("keep %d daily, %d weekly and %d monthly snapshots", x.keep.Daily, x.keep.Weekly, x.keep.Monthly),
 		Apply: func(ctx context.Context, out io.Writer) error {
 			complete, err := x.resumeBackup(ctx)
@@ -675,30 +701,48 @@ func (x *backingUp) retentionStep() kernel.Step {
 			if complete {
 				return x.discardStaging(ctx)
 			}
-			e, r, err := x.repo(ctx)
+			removed, err := x.forget(ctx)
+			detail := x.detail()
 			if err != nil {
-				return x.run.fail(err)
-			}
-			defer e.Close()
-			removed, err := r.Forget(ctx, x.target, x.keep)
-			if err != nil {
-				return x.run.fail(err)
+				if ctx.Err() != nil {
+					return x.run.fail(err)
+				}
+				reason := firstLine(err.Error())
+				detail += "; " + retentionDeferred + ": " + reason
+				fmt.Fprintf(out, "%s: %s\nthe snapshot is kept, and the next backup applies retention again\n", retentionDeferred, reason)
 			}
 			s := x.summary
-			if err := x.run.done(ctx, state.BackupRun{Snapshot: s.SnapshotID, SnapshotAt: s.BackupStart, Files: s.TotalFiles, Bytes: s.TotalBytes, Detail: x.detail()}); err != nil {
+			if err := x.run.done(ctx, state.BackupRun{Snapshot: s.SnapshotID, SnapshotAt: s.BackupStart, Files: s.TotalFiles, Bytes: s.TotalBytes, Detail: detail}); err != nil {
 				return err
 			}
 			if err := x.discardStaging(ctx); err != nil {
 				return err
 			}
-			if removed > 0 {
+			switch {
+			case err != nil:
+			case removed > 0:
 				fmt.Fprintf(out, "removed %d old snapshot(s)\n", removed)
-			} else {
+			default:
 				fmt.Fprintln(out, "nothing old enough to remove")
 			}
 			return nil
 		},
 	}
+}
+
+// forget applies the retention policy to this backup's repository.
+func (x *backingUp) forget(ctx context.Context) (int, error) {
+	e, r, err := x.repo(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer e.Close()
+	return r.Forget(ctx, x.target, x.keep)
+}
+
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return line
 }
 
 // dumpDatabase writes an app's database as a pg_dump custom-format file.
