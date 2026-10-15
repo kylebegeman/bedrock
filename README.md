@@ -430,8 +430,10 @@ deploy a guarded route rather than serve it open, and previews rely on it.
 The daemon watches every app and the machine once a minute: containers
 running, health paths and checks answering through the edge, certificates
 valid and renewing, disk and memory, backups fresh and drills passing, each
-workload able to write the volumes it mounts (checked hourly), and any URL
-added with `helios watch add` (the other machine's sites, say). A
+workload able to write the volumes it mounts (checked hourly), an operation
+holding the machine's operation lock for over 4 hours (backups, drills and
+deploys wait behind it), backup retention deferred for over 3 days, and any
+URL added with `helios watch add` (the other machine's sites, say). A
 problem has to hold for three rounds before it becomes an alert, one alert
 per app, and you hear once when it starts, once a day while it lasts, and
 once when it recovers.
@@ -456,6 +458,25 @@ and upload, bounded to 30 minutes. Backups then restart exactly the containers
 that were running, with the object store first. Retention runs after service is
 restored. A forced shutdown aborts the capture instead of certifying an
 inconsistent snapshot.
+
+Every restic call a backup makes has a limit, so one stuck call can't hold the
+machine's operations: opening the repository and clearing stale locks 5
+minutes each, a machine backup's upload 2 hours, forgetting old snapshots 15
+minutes and the prune that follows 1 hour. A machine backup also copies each
+data app's pinned snapshot in with a 2 hour limit per app and archives the
+workload images with a 1 hour limit. A call that runs out of time is stopped,
+and restic gets a minute to release its repository lock. When retention fails
+or runs out of time after a snapshot was taken, the snapshot is kept and the
+backup still counts as good: `helios backups` shows "retention deferred" with
+the reason (so does `helios status <app>` for an app's last good backup), and
+the next backup applies retention again. Every backup prunes, even when it
+forgot nothing, and one prune rewrites at most 2 GB, so a repository with a lot
+to reclaim catches up over several backups. Retention deferred on every backup
+for over 3 days raises an alert. Before each backup Helios runs `restic
+unlock`, which removes only locks restic considers stale (not refreshed for 30
+minutes). It never removes a live lock, so if a stopped call couldn't release
+its lock, a backup started within the next 30 minutes can still find the
+repository locked and fail; the next scheduled run goes through.
 
 | Command | What it does |
 |---|---|

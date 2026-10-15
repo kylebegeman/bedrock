@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -125,21 +126,67 @@ func TestListenReplacesAStaleSocket(t *testing.T) {
 
 func TestOnlyOneLocalOperationRunsAtATime(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
-	unlock, err := lockOperations(context.Background(), path)
+	unlock, err := LockOperations(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	if _, err := lockOperations(ctx, path); err == nil || !strings.Contains(err.Error(), "another helios operation is running on this machine") {
+	if _, err := LockOperations(ctx, path); err == nil || !strings.Contains(err.Error(), "another helios operation is running on this machine") {
 		t.Fatalf("a second operation got the lock: %v", err)
 	}
 	unlock()
-	again, err := lockOperations(context.Background(), path)
+	again, err := LockOperations(context.Background(), path)
 	if err != nil {
 		t.Fatalf("the lock was not let go: %v", err)
 	}
 	again()
+}
+
+func TestHeldOperationLockSaysSinceWhen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	if _, held, err := HeldOperationLock(path); err != nil || held {
+		t.Fatalf("a machine that never ran an operation holds no lock: %v %v", held, err)
+	}
+	before := time.Now().UTC().Add(-time.Second)
+	unlock, err := LockOperations(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, held, err := HeldOperationLock(path)
+	if err != nil || !held || lock.PID != os.Getpid() || lock.AcquiredAt.Before(before) || lock.AcquiredAt.After(time.Now().Add(time.Second)) {
+		t.Fatalf("held lock: %+v %v %v", lock, held, err)
+	}
+	// Looking must not get in the way of whoever takes the lock next.
+	unlock()
+	if _, held, err := HeldOperationLock(path); err != nil || held {
+		t.Fatalf("a released lock still reads as held: %v %v", held, err)
+	}
+	again, err := LockOperations(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again()
+}
+
+func TestHeldOperationLockFromAnOlderReleaseHasNoTime(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	if err := os.MkdirAll(filepath.Join(filepath.Dir(path), "locks"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Releases before 0.7.11 lock the file without writing to it.
+	f, err := os.OpenFile(operationLockPath(path), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	lock, held, err := HeldOperationLock(path)
+	if err != nil || !held || !lock.AcquiredAt.IsZero() {
+		t.Fatalf("undated lock: %+v %v %v", lock, held, err)
+	}
 }
 
 type lifecycleDefinition struct {

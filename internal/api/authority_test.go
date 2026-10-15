@@ -22,7 +22,7 @@ func TestDaemonAndFallbackShareMachineOperationLock(t *testing.T) {
 	reg.Add(kernel.Exercise{})
 	engine := kernel.New(store, reg, "daemon")
 	server := &Server{Store: store, Engine: engine}
-	unlock, err := lockOperations(context.Background(), store.Path())
+	unlock, err := LockOperations(context.Background(), store.Path())
 	if err != nil {
 		t.Fatal(err)
 	}

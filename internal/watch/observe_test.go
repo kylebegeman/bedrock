@@ -11,9 +11,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/kylebegeman/helios/internal/api"
+	"github.com/kylebegeman/helios/internal/app"
 	"github.com/kylebegeman/helios/internal/docker"
 	"github.com/kylebegeman/helios/internal/docker/dockertest"
 	"github.com/kylebegeman/helios/internal/manifest"
@@ -207,5 +210,171 @@ func TestDockerOutageCannotCertifyAppOrEdgeRecovery(t *testing.T) {
 		if open, err := w.Store.OpenIncidentByKey(ctx, key); err != nil || open == nil {
 			t.Fatalf("unobserved %s was reported recovered: %+v, %v", key, open, err)
 		}
+	}
+}
+
+func TestAnOperationLockHeldTooLongRaisesAnAlertUntilReleased(t *testing.T) {
+	ctx := context.Background()
+	notifier := &fakeNotifier{}
+	w, now := newWatcher(t, notifier)
+	unlock, err := api.LockOperations(ctx, w.Store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	released := false
+	defer func() {
+		if !released {
+			unlock()
+		}
+	}()
+	if err := w.Store.CreateOperation(ctx, state.NewOperation{ID: "op-backup", Kind: "backup", Target: "bedrock", Input: json.RawMessage(`{}`), Plan: json.RawMessage(`[]`), CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	lock, held, err := api.HeldOperationLock(w.Store.Path())
+	if err != nil || !held {
+		t.Fatalf("lock: %v %v", held, err)
+	}
+	*now = lock.AcquiredAt.Add(time.Hour)
+	p := NewProber(w.Store)
+	p.Root = t.TempDir()
+	p.Now = func() time.Time { return *now }
+	p.Connect = func(context.Context) (*docker.Engine, error) { return nil, errors.New("Docker unavailable") }
+	p.OperationLockStale = 2 * time.Hour
+	lockConditions := func() []Condition {
+		var out []Condition
+		for _, c := range p.Observe(ctx) {
+			if c.Key == "host:operations" {
+				out = append(out, c)
+			}
+		}
+		return out
+	}
+	if found := lockConditions(); len(found) != 0 {
+		t.Fatalf("an operation inside the limit is not a problem: %+v", found)
+	}
+
+	*now = lock.AcquiredAt.Add(3 * time.Hour)
+	for range DefaultOpenAfter {
+		*now = now.Add(time.Minute)
+		if err := w.Round(ctx, p.Observe(ctx)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	open, err := w.Store.OpenIncidentByKey(ctx, "host:operations")
+	if err != nil || open == nil {
+		t.Fatalf("a stuck operation lock raised no incident: %v", err)
+	}
+	if !strings.Contains(open.Message, "held for 3.0 h") || !strings.Contains(open.Message, "backup bedrock (op-backup)") || !strings.Contains(open.Message, "wait until it is released") {
+		t.Fatalf("the alert must say how long and by what: %q", open.Message)
+	}
+	sent := false
+	for _, n := range notifier.sent {
+		if strings.Contains(n.Subject, "machine operations has a problem") {
+			sent = true
+		}
+	}
+	if !sent {
+		t.Fatalf("no one was told: %+v", notifier.sent)
+	}
+
+	unlock()
+	released = true
+	if found := lockConditions(); len(found) != 0 {
+		t.Fatalf("a released lock is still reported: %+v", found)
+	}
+	for range DefaultResolveAfter {
+		*now = now.Add(time.Minute)
+		if err := w.Round(ctx, p.Observe(ctx)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if open, err := w.Store.OpenIncidentByKey(ctx, "host:operations"); err != nil || open != nil {
+		t.Fatalf("the incident did not resolve after the lock was released: %+v %v", open, err)
+	}
+}
+
+func TestAnUndatedOperationLockIsNeverJudged(t *testing.T) {
+	ctx := context.Background()
+	w, _ := newWatcher(t, &fakeNotifier{})
+	if err := os.MkdirAll(filepath.Join(filepath.Dir(w.Store.Path()), "locks"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Releases before 0.7.11 lock the file without saying since when, as
+	// does a holder between taking the lock and writing its record.
+	f, err := os.OpenFile(filepath.Join(filepath.Dir(w.Store.Path()), "locks", "operations.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	p := NewProber(w.Store)
+	p.Root = t.TempDir()
+	p.Now = func() time.Time { return time.Now().Add(100 * OperationLockStale) }
+	p.Connect = func(context.Context) (*docker.Engine, error) { return nil, errors.New("Docker unavailable") }
+	for _, c := range p.Observe(ctx) {
+		if c.Key == "host:operations" {
+			t.Fatalf("an undated lock was judged: %+v", c)
+		}
+	}
+}
+
+func TestRetentionDeferredOnEveryBackupForTooLongIsAProblem(t *testing.T) {
+	ctx := context.Background()
+	w, _ := newWatcher(t, &fakeNotifier{})
+	start := time.Date(2026, 10, 10, 3, 0, 0, 0, time.UTC)
+	record := func(day int, detail string, ok bool) {
+		t.Helper()
+		at := start.Add(time.Duration(day) * 24 * time.Hour)
+		id, err := w.Store.StartBackupRun(ctx, manifest.ReservedApp, state.BackupRunBackup, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		run := state.BackupRun{FinishedAt: at.Add(time.Hour), OK: ok, Snapshot: strings.Repeat("a", 64), Detail: detail}
+		if !ok {
+			run.Error = "upload failed"
+		}
+		if err := w.Store.FinishBackupRun(ctx, id, run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deferred := func(why string) string { return "3 files; " + app.RetentionDeferred + ": " + why }
+	record(0, "3 files", true)
+	record(1, deferred("restic prune did not finish within 1h0m0s and was stopped"), true)
+	record(2, "", false)
+	record(3, deferred("restic prune did not finish within 1h0m0s and was stopped"), true)
+	record(4, deferred("repository is already locked exclusively"), true)
+
+	p := NewProber(w.Store)
+	p.Root = t.TempDir()
+	p.Connect = func(context.Context) (*docker.Engine, error) { return nil, errors.New("Docker unavailable") }
+	retention := func(now time.Time) []Condition {
+		p.Now = func() time.Time { return now }
+		var out []Condition
+		for _, c := range p.Observe(ctx) {
+			if c.Key == "host:backup-retention" {
+				out = append(out, c)
+			}
+		}
+		return out
+	}
+	// The streak began on day 1; a failed run in between neither ends nor
+	// restarts it.
+	if found := retention(start.Add(24*time.Hour + RetentionDeferredStale - time.Minute)); len(found) != 0 {
+		t.Fatalf("a short run of deferrals is not yet a problem: %+v", found)
+	}
+	found := retention(start.Add(24*time.Hour + RetentionDeferredStale + time.Minute))
+	if len(found) != 1 || found[0].Subject != "machine backups" || !strings.Contains(found[0].Message, "since 2026-10-11 03:00") || !strings.Contains(found[0].Message, "already locked exclusively") {
+		t.Fatalf("retention deferred for days must be reported with its last reason: %+v", found)
+	}
+	if why := p.retentionProblem(ctx, "elsewhere", start.Add(30*24*time.Hour)); why != "" {
+		t.Fatalf("another app's deferrals were counted: %q", why)
+	}
+
+	// Retention that completes clears it.
+	record(5, "3 files", true)
+	if found := retention(start.Add(30 * 24 * time.Hour)); len(found) != 0 {
+		t.Fatalf("completed retention is still reported: %+v", found)
 	}
 }

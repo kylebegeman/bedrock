@@ -84,8 +84,13 @@ func TestResticRunsAgainstARealRepository(t *testing.T) {
 	if err != nil || !contains(snaps, summary.SnapshotID) {
 		t.Fatalf("snapshots: %v %v", err, snaps)
 	}
-	if _, err := r.run(ctx, withRepo(), "forget", "--json", "--host", "box", "--tag", Tag, "--keep-daily", "7", "--prune"); err != nil {
+	// Forget and its prune run through run directly for the same reason,
+	// with the arguments Forget gives them.
+	if _, err := r.run(ctx, withRepo(), "forget", "--json", "--host", "box", "--tag", Tag, "--keep-tag", ReleaseCheckpointTag, "--keep-daily", "7"); err != nil {
 		t.Fatalf("forget: %v", err)
+	}
+	if _, err := r.run(ctx, withRepo(), "prune", "--max-repack-size", PruneMaxRepack); err != nil {
+		t.Fatalf("prune: %v", err)
 	}
 	if _, err := r.Restore(ctx, summary.SnapshotID, "box", withRepo(DirMount(restored, false))); err != nil {
 		t.Fatalf("restore: %v", err)

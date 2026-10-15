@@ -184,7 +184,7 @@ func TestReleaseCheckpointTagsAreCapturedAndKeptByRetention(t *testing.T) {
 	if _, err := r.Forget(context.Background(), "site", Keep{Daily: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if len(commands) != 2 {
+	if len(commands) != 3 {
 		t.Fatalf("%v", commands)
 	}
 	hasPair := func(command []string, key, value string) bool {

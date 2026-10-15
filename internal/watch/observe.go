@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kylebegeman/helios/internal/api"
 	"github.com/kylebegeman/helios/internal/app"
 	"github.com/kylebegeman/helios/internal/docker"
 	"github.com/kylebegeman/helios/internal/edge"
@@ -40,6 +41,18 @@ const (
 	DataCheckEvery = time.Hour
 	// EdgeAddress is where the machine's own edge answers TLS.
 	EdgeAddress = "127.0.0.1:443"
+	// OperationLockStale is how long one operation may hold the machine's
+	// operation lock before it is a problem. It is a heuristic, not an upper
+	// bound on healthy work: an app backup's bounded repository calls add
+	// up to about 3 h 25 min, plus up to two minutes of cleanup for each
+	// call that is stopped, while a machine backup also copies each data
+	// app's pinned snapshot in (up to 2 h each) and archives the workload
+	// images (up to 1 h). A slow machine backup on a host with several
+	// data apps can cross it.
+	OperationLockStale = 4 * time.Hour
+	// RetentionDeferredStale is how long every backup of a repository may
+	// defer its retention before the growing repository is a problem.
+	RetentionDeferredStale = 72 * time.Hour
 )
 
 // Prober looks at the machine and its apps and reports what is wrong.
@@ -52,6 +65,9 @@ type Prober struct {
 	Root string
 	// CheckSecrets loads only the revision-bound credentials used by checks.
 	CheckSecrets func(app string, version int) (map[string]string, error)
+	// OperationLockStale overrides how long the operation lock may be
+	// held; zero means OperationLockStale.
+	OperationLockStale time.Duration
 
 	// mu keeps rounds from overlapping.
 	mu sync.Mutex
@@ -87,6 +103,10 @@ func (p *Prober) Observe(ctx context.Context) []Condition {
 	p.forgetOldScans(p.Now())
 	var conditions []Condition
 	conditions = append(conditions, p.host()...)
+	conditions = append(conditions, p.operationLock(ctx)...)
+	if why := p.retentionProblem(ctx, manifest.ReservedApp, p.Now()); why != "" {
+		conditions = append(conditions, Condition{Key: "host:backup-retention", Subject: "machine backups", Severity: state.SeverityWarning, Message: why})
+	}
 
 	e, err := p.Connect(ctx)
 	if err != nil {
@@ -267,6 +287,10 @@ func (p *Prober) app(ctx context.Context, e *docker.Engine, rev state.Revision) 
 			problems = append(problems, why)
 			worse(state.SeverityWarning)
 		}
+		if why := p.retentionProblem(ctx, rev.App, now); why != "" {
+			problems = append(problems, why)
+			worse(state.SeverityWarning)
+		}
 		if last, err := p.Store.LastBackupRun(ctx, rev.App, state.BackupRunDrill); err == nil && last != nil && last.Finished() && !last.OK {
 			problems = append(problems, "the last restore drill failed: "+last.Error)
 			worse(state.SeverityWarning)
@@ -363,6 +387,36 @@ func (p *Prober) backupProblem(ctx context.Context, appName string, now time.Tim
 	return ""
 }
 
+// retentionProblem says when every good backup of a repository has
+// deferred its retention for too long. Each deferral still keeps a good
+// snapshot, so backups look fresh while old snapshots stay and the
+// repository grows.
+func (p *Prober) retentionProblem(ctx context.Context, appName string, now time.Time) string {
+	runs, err := p.Store.BackupRuns(ctx, appName, state.BackupRunBackup, 50)
+	if err != nil {
+		return ""
+	}
+	var since time.Time
+	var reason string
+	for _, run := range runs {
+		if !run.OK {
+			continue
+		}
+		_, why, deferred := strings.Cut(run.Detail, app.RetentionDeferred+": ")
+		if !deferred {
+			break
+		}
+		if reason == "" {
+			reason = why
+		}
+		since = run.StartedAt
+	}
+	if since.IsZero() || now.Sub(since) < RetentionDeferredStale {
+		return ""
+	}
+	return fmt.Sprintf("every backup since %s (%s ago) deferred retention, so old snapshots stay and the repository keeps growing; the last said: %s", since.Format("2006-01-02 15:04"), ago(since, now), reason)
+}
+
 // healthProblem asks a workload's health path directly.
 func healthProblem(ctx context.Context, info *docker.Info, w manifest.Workload) string {
 	ip := info.IPs[docker.EdgeNetwork]
@@ -443,6 +497,37 @@ func (p *Prober) host() []Condition {
 		}
 	}
 	return out
+}
+
+// operationLock reports the machine's operation lock when one operation has
+// held it too long. Everything else that changes the machine waits behind
+// it, so a stuck holder silently stops backups and deploys.
+func (p *Prober) operationLock(ctx context.Context) []Condition {
+	limit := p.OperationLockStale
+	if limit <= 0 {
+		limit = OperationLockStale
+	}
+	lock, held, err := api.HeldOperationLock(p.Store.Path())
+	now := p.Now()
+	// An undated lock comes from a release that didn't record when it
+	// took it; it can't be judged, and is gone after the upgrade.
+	if err != nil || !held || lock.AcquiredAt.IsZero() || now.Sub(lock.AcquiredAt) < limit {
+		return nil
+	}
+	msg := fmt.Sprintf("the machine's operation lock has been held for %s, since %s", ago(lock.AcquiredAt, now), lock.AcquiredAt.UTC().Format("2006-01-02 15:04 UTC"))
+	if ops, err := p.Store.ListFiltered(ctx, state.OperationFilter{Limit: 20}); err == nil {
+		var running []string
+		for _, op := range ops {
+			if !op.Status.Final() {
+				running = append(running, fmt.Sprintf("%s %s (%s)", op.Kind, op.Target, op.ID))
+			}
+		}
+		if len(running) > 0 {
+			msg += " by " + strings.Join(running, ", ")
+		}
+	}
+	msg += "; scheduled backups, drills and deploys wait until it is released"
+	return []Condition{{Key: "host:operations", Subject: "machine operations", Severity: state.SeverityWarning, Message: msg}}
 }
 
 // DiskFree reports free and total bytes on a filesystem.
