@@ -1,6 +1,6 @@
 # Code Of Conduct
 
-Bedrock should be a practical, respectful, and technically serious project.
+Helios should be a practical, respectful, and technically serious project.
 This code applies to project spaces including issues, discussions, pull
 requests, reviews, documentation, and community chat.
 

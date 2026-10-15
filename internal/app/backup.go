@@ -14,14 +14,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/restic"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/state"
-	"github.com/kylebegeman/bedrock/internal/version"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/restic"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/state"
+	"github.com/kylebegeman/helios/internal/version"
 )
 
 // BackupKind snapshots an app's data into its own bucket: a database
@@ -40,7 +40,7 @@ type Backup struct {
 	Profile string
 }
 
-// BackupInput says what to back up: an app, or bedrock's own name for the
+// BackupInput says what to back up: an app, or helios's own name for the
 // machine's state.
 type BackupInput struct {
 	App string `json:"app"`
@@ -145,7 +145,7 @@ func (b Backup) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, er
 		return nil, fmt.Errorf("%s keeps no data; there is nothing to back up", in.App)
 	}
 	if m.Backup != nil && m.Backup.Off {
-		return nil, fmt.Errorf("backups are off for %s in its bedrock.yaml", in.App)
+		return nil, fmt.Errorf("backups are off for %s in its helios.yaml", in.App)
 	}
 	return b.appPlan(st, rev, &m)
 }

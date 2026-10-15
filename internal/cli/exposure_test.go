@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
+	"github.com/kylebegeman/helios/internal/docker"
 )
 
 func workload(name, app, wl string, nets ...string) docker.Exposure {
@@ -53,7 +53,7 @@ func TestOldContainersAndOpenings(t *testing.T) {
 		"bedrock-b-web-1 keeps NET_BIND_SERVICE",
 		"bedrock-b-web-1 mounts a path from the machine: /var/run/docker.sock",
 		"bedrock-c-runner-1 is privileged",
-		"lane-minio isn't managed by bedrock and publishes 127.0.0.1:9000/tcp",
+		"lane-minio isn't managed by helios and publishes 127.0.0.1:9000/tcp",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("findings lack %q:\n%s", want, joined)

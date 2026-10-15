@@ -12,7 +12,7 @@ import (
 	"github.com/moby/moby/client"
 )
 
-// Image is an image bedrock built.
+// Image is an image helios built.
 type Image struct {
 	ID      string
 	Tags    []string
@@ -30,7 +30,7 @@ func (i Image) Describe() string {
 	return id[:min(12, len(id))]
 }
 
-// OwnedImages lists the images bedrock built.
+// OwnedImages lists the images helios built.
 func (e *Engine) OwnedImages(ctx context.Context) ([]Image, error) {
 	res, err := e.cli.ImageList(ctx, client.ImageListOptions{})
 	if err != nil {

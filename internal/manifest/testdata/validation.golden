@@ -44,7 +44,7 @@ workloads.web.health.path: must start with /
 workloads.what: kind "blob" isn't one of web, static, worker, cron, release
 routes: a.com has dns "" on one route and "direct" on another; use one
 data.volumes: "Bad" must be lowercase letters, digits and hyphens
-data.volumes: "postgres" is bedrock's own volume for the database; pick another name
+data.volumes: "postgres" is helios's own volume for the database; pick another name
 data.postgres.version: "9" isn't a supported major version (15 to 18)
 data.postgres.user: "Bad User" must be lowercase letters, digits and underscores
 data.postgres.init: must be inside the source

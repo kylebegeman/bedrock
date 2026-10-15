@@ -15,11 +15,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/restic"
-	"github.com/kylebegeman/bedrock/internal/state"
-	"github.com/kylebegeman/bedrock/internal/version"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/restic"
+	"github.com/kylebegeman/helios/internal/state"
+	"github.com/kylebegeman/helios/internal/version"
 )
 
 const machineRecoveryFormat = 1
@@ -103,7 +103,7 @@ func checkMachineRecoveryCompatibility(c machineRecoveryCatalog, target version.
 	}
 	for i := range source {
 		if source[i] > current[i] {
-			return fmt.Errorf("machine snapshot was made by newer bedrock %s; upgrade the target before recovery", c.Version)
+			return fmt.Errorf("machine snapshot was made by newer helios %s; upgrade the target before recovery", c.Version)
 		}
 		if source[i] < current[i] {
 			break
@@ -267,7 +267,7 @@ func (b Backup) prepareMachineRecoveryCatalog(ctx context.Context, hostname, sta
 			return err
 		}
 		if last == nil || last.Snapshot == "" {
-			return fmt.Errorf("%s has no successful data backup; run bedrock backup %s before backing up the whole machine", rev.App, rev.App)
+			return fmt.Errorf("%s has no successful data backup; run helios backup %s before backing up the whole machine", rev.App, rev.App)
 		}
 		if e == nil {
 			e, err = docker.Connect(ctx)

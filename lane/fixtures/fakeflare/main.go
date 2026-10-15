@@ -13,7 +13,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kylebegeman/bedrock/internal/cloudflare/cloudflaretest"
+	"github.com/kylebegeman/helios/internal/cloudflare/cloudflaretest"
 )
 
 func main() {

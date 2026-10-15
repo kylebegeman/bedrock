@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/cloudflare"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/cloudflare"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // Two of Cloudflare's published ranges stand for the list.
@@ -41,13 +41,13 @@ const statusOpen = `Status: active
 [ 1] OpenSSH                    ALLOW IN    Anywhere
 [ 2] 80/tcp                     ALLOW IN    Anywhere
 [ 3] 443/tcp                    ALLOW IN    Anywhere
-[ 4] 80,443/tcp                 ALLOW IN    173.245.48.0/20            # bedrock: cloudflare
-[ 5] 80,443/tcp                 ALLOW IN    103.21.244.0/22            # bedrock: cloudflare
-[ 6] 80,443/tcp                 ALLOW IN    198.51.100.0/24            # bedrock: cloudflare
+[ 4] 80,443/tcp                 ALLOW IN    173.245.48.0/20            # helios: cloudflare
+[ 5] 80,443/tcp                 ALLOW IN    103.21.244.0/22            # helios: cloudflare
+[ 6] 80,443/tcp                 ALLOW IN    198.51.100.0/24            # helios: cloudflare
 [ 7] OpenSSH (v6)               ALLOW IN    Anywhere (v6)
 [ 8] 80/tcp (v6)                ALLOW IN    Anywhere (v6)
 [ 9] 443/tcp (v6)               ALLOW IN    Anywhere (v6)
-[10] 80,443/tcp                 ALLOW IN    2400:cb00::/32             # bedrock: cloudflare
+[10] 80,443/tcp                 ALLOW IN    2400:cb00::/32             # helios: cloudflare
 `
 
 func TestUFWRulesAreReadWithTheirSources(t *testing.T) {
@@ -57,9 +57,9 @@ func TestUFWRulesAreReadWithTheirSources(t *testing.T) {
 	}
 	for i, want := range []FirewallRule{
 		{Num: 1, To: "OpenSSH", Action: "ALLOW", From: "Anywhere"},
-		{Num: 4, To: "80,443/tcp", Action: "ALLOW", From: "173.245.48.0/20", Comment: "bedrock: cloudflare"},
+		{Num: 4, To: "80,443/tcp", Action: "ALLOW", From: "173.245.48.0/20", Comment: "helios: cloudflare"},
 		{Num: 8, To: "80/tcp", Action: "ALLOW", From: "Anywhere", V6: true},
-		{Num: 10, To: "80,443/tcp", Action: "ALLOW", From: "2400:cb00::/32", V6: true, Comment: "bedrock: cloudflare"},
+		{Num: 10, To: "80,443/tcp", Action: "ALLOW", From: "2400:cb00::/32", V6: true, Comment: "helios: cloudflare"},
 		{To: "Nginx Full", Action: "ALLOW", From: "Anywhere"},
 		{To: "22/tcp", Action: "LIMIT", From: "Anywhere"},
 		{To: "5432/tcp", Action: "DENY", From: "10.0.0.0/8"},
@@ -141,8 +141,8 @@ func TestSetupLetsOnlyCloudflareReachTheWebWithoutEverClosingIt(t *testing.T) {
 		}
 		return i
 	}
-	allow := at("ufw allow proto tcp from 173.245.48.0/20 to any port 80,443 comment bedrock: cloudflare")
-	at("ufw allow proto tcp from 2400:cb00::/32 to any port 80,443 comment bedrock: cloudflare")
+	allow := at("ufw allow proto tcp from 173.245.48.0/20 to any port 80,443 comment helios: cloudflare")
+	at("ufw allow proto tcp from 2400:cb00::/32 to any port 80,443 comment helios: cloudflare")
 	// SSH first; Cloudflare in before the open rules go; the open rules
 	// and the range Cloudflare dropped go last-first, so numbers hold.
 	if at("ufw allow OpenSSH") > allow || allow > at("ufw --force enable") {
@@ -186,9 +186,9 @@ func TestSetupLetsOnlyCloudflareReachTheWebWithoutEverClosingIt(t *testing.T) {
 // rules are right but whose guard is missing or stale is not done.
 func TestSetupIsNotDoneUntilDockersPortsAreGuarded(t *testing.T) {
 	onlyCloudflare := "Status: active\n\nOpenSSH ALLOW Anywhere\n" +
-		"80,443/tcp ALLOW 173.245.48.0/20 # bedrock: cloudflare\n" +
-		"80,443/tcp ALLOW 103.21.244.0/22 # bedrock: cloudflare\n" +
-		"80,443/tcp ALLOW 2400:cb00::/32 # bedrock: cloudflare\n"
+		"80,443/tcp ALLOW 173.245.48.0/20 # helios: cloudflare\n" +
+		"80,443/tcp ALLOW 103.21.244.0/22 # helios: cloudflare\n" +
+		"80,443/tcp ALLOW 2400:cb00::/32 # helios: cloudflare\n"
 	guard := "-N BEDROCK-WEB\n"
 	for _, s := range append(append([]string{}, privateV4...), testRanges.IPv4...) {
 		guard += "-A BEDROCK-WEB -s " + s + " -j RETURN\n"
@@ -259,7 +259,7 @@ func TestSetupRefusesRangesWiderThanCloudflares(t *testing.T) {
 	}
 }
 
-// Taking the web from anyone again removes the rules bedrock made for
+// Taking the web from anyone again removes the rules helios made for
 // Cloudflare, so a machine does not keep a list nobody refreshes.
 func TestSetupOpensTheWebAgainAndForgetsCloudflaresRules(t *testing.T) {
 	m := setUpBox(t)
@@ -323,8 +323,8 @@ func TestTheDoctorHoldsTheFirewallToTheProfile(t *testing.T) {
 	onlyCloudflare := strings.Join([]string{
 		"Status: active", "",
 		"OpenSSH                    ALLOW       Anywhere",
-		"80,443/tcp                 ALLOW       173.245.48.0/20            # bedrock: cloudflare",
-		"80,443/tcp                 ALLOW       2400:cb00::/32             # bedrock: cloudflare",
+		"80,443/tcp                 ALLOW       173.245.48.0/20            # helios: cloudflare",
+		"80,443/tcp                 ALLOW       2400:cb00::/32             # helios: cloudflare",
 	}, "\n")
 	for _, c := range []struct {
 		name, status, ufwDefaults string
@@ -332,7 +332,7 @@ func TestTheDoctorHoldsTheFirewallToTheProfile(t *testing.T) {
 		detail                    string
 	}{
 		{"closed to all but cloudflare", onlyCloudflare, "IPV6=yes", Pass, "active: ssh; 80 and 443 only from Cloudflare (2 ranges)"},
-		{"docker's ports unguarded", onlyCloudflare + "\nunguarded", "IPV6=yes", Fail, "Docker forwards 80 and 443 past ufw, and bedrock's guard for them is not in place, so the edge answers anyone"},
+		{"docker's ports unguarded", onlyCloudflare + "\nunguarded", "IPV6=yes", Fail, "Docker forwards 80 and 443 past ufw, and helios's guard for them is not in place, so the edge answers anyone"},
 		{"open to anyone", statusOpen, "IPV6=yes", Fail, "the web is open to anyone, though this machine takes it only from Cloudflare"},
 		{"closed to cloudflare too", "Status: active\n\nOpenSSH ALLOW Anywhere\n", "IPV6=yes", Fail, "80 and 443 are closed to Cloudflare too"},
 		{"ipv6 unfiltered", onlyCloudflare, "IPV6=no", Warn, "ufw leaves IPv6 alone (IPV6=no), so the web ports are not filtered there"},

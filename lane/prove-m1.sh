@@ -12,7 +12,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 run() { ssh "${ssh_opts[@]}" "$box" "$@"; }
 
 echo "== build and copy"
-(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -o bin/bedrock-linux-$LANE_ARCH ./cmd/bedrock)
+(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -o bin/bedrock-linux-$LANE_ARCH ./cmd/helios)
 # A running daemon keeps the old binary busy, so copy beside it and rename
 # over it: the running process keeps its inode, the next start gets the new one.
 scp -q "${scp_opts[@]}" "$here/../bin/bedrock-linux-$LANE_ARCH" "$box:/usr/local/bin/bedrock.new"

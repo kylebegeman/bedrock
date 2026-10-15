@@ -13,13 +13,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/edge"
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/edge"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // RemoveKind takes an app off the machine: its routes, containers, images
@@ -31,7 +31,7 @@ type Remove struct {
 	Store     *state.Store
 	Secrets   *secrets.Store
 	Addresses func(ctx context.Context) []string
-	// StateDir is bedrock's state directory; empty means /var/lib/bedrock.
+	// StateDir is helios's state directory; empty means /var/lib/bedrock.
 	StateDir string
 }
 
@@ -186,7 +186,7 @@ func (x *removal) unrouteStep() kernel.Step {
 
 func (x *removal) dnsStep() kernel.Step {
 	return kernel.Step{
-		Name: "dns", Change: "remove the DNS records bedrock keeps for the app" + recordsNote(x.m),
+		Name: "dns", Change: "remove the DNS records helios keeps for the app" + recordsNote(x.m),
 		Apply: func(ctx context.Context, out io.Writer) error {
 			managed := x.m.ManagedHosts()
 			if len(managed) == 0 {
@@ -307,7 +307,7 @@ func (x *removal) forgetStep() kernel.Step {
 	case x.secrets && x.m.Preview != nil:
 		change += ", and the secrets it was given as a preview"
 	case x.secrets:
-		change += ", and its sealed secrets (only a machine backup made before now, bedrock backup bedrock, keeps them)"
+		change += ", and its sealed secrets (only a machine backup made before now, helios backup helios, keeps them)"
 	}
 	return kernel.Step{
 		Name: "forget", Change: change,
@@ -334,7 +334,7 @@ func (x *removal) forgetStep() kernel.Step {
 
 // forgetApp drops what the machine keeps about an app beside its
 // containers: its rows, its staging directories, the webhook credentials
-// bedrock made for it and, when asked, its sealed secrets. Its backup runs
+// helios made for it and, when asked, its sealed secrets. Its backup runs
 // stay, because they say where its data went.
 func forgetApp(ctx context.Context, store *state.Store, sec *secrets.Store, stateDir, app string, secretsToo bool, out io.Writer) error {
 	// Keep revision rows until every fallible cleanup finishes. Otherwise a

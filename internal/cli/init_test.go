@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/helios/internal/manifest"
 )
 
 func TestInitWritesAManifestThatLoads(t *testing.T) {
@@ -23,7 +23,7 @@ func TestInitWritesAManifestThatLoads(t *testing.T) {
 	if m.App != "acme" || !m.HasData() {
 		t.Fatalf("got %+v", m)
 	}
-	for _, want := range []string{"Wrote ", "Still to do:", "bedrock deploy " + dir} {
+	for _, want := range []string{"Wrote ", "Still to do:", "helios deploy " + dir} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output never says %q: %q", want, out)
 		}

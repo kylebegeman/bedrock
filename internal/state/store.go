@@ -1,4 +1,4 @@
-// Package state is bedrock's one store: a SQLite file that journals every
+// Package state is helios's one store: a SQLite file that journals every
 // operation and its steps, so a crash can be resumed or undone and every
 // change leaves a receipt.
 package state
@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/compat"
+	"github.com/kylebegeman/helios/internal/compat"
 
 	_ "modernc.org/sqlite" // the pure-Go driver keeps the binary static
 )

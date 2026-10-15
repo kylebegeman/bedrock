@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 func sign(secret string, body []byte) string {
@@ -46,7 +46,7 @@ func TestAWebhookFetchesTheBranchAndDeploysIt(t *testing.T) {
 	if err := store.Activate(ctx, "hello", "r1", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	bare, commit := repoWith(t, map[string]string{"bedrock.yaml": helloYAML, "main.go": "package main"})
+	bare, commit := repoWith(t, map[string]string{"helios.yaml": helloYAML, "main.go": "package main"})
 	hook, err := Configure(ctx, store, sec, "hello", "file://"+bare, "main", "hello.example.com")
 	if err != nil {
 		t.Fatal(err)

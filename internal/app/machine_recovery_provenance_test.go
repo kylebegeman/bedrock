@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 func provenanceFixture(t *testing.T) (state.Revision, appBackupProvenance) {
@@ -46,7 +46,7 @@ func TestRecoveryProvenanceRejectsOldCodeEvenWhenLayoutIsIdentical(t *testing.T)
 	for name, p := range cases {
 		t.Run(name, func(t *testing.T) {
 			catalog := machineRecoveryCatalog{Revisions: []state.Revision{rev}, AppSnapshots: map[string]string{rev.App: strings.Repeat("c", 64)}, AppData: map[string]appBackupProvenance{rev.App: p}}
-			if err := validateRecoveryCatalog(catalog); err == nil || !strings.Contains(err.Error(), "bedrock backup hello") {
+			if err := validateRecoveryCatalog(catalog); err == nil || !strings.Contains(err.Error(), "helios backup hello") {
 				t.Fatalf("unproven data recovery point accepted: %v", err)
 			}
 		})

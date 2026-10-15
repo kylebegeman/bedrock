@@ -4,8 +4,8 @@ import (
 	"context"
 	"io"
 
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // A checkpoint fence may appear after an operation was reviewed. Recheck

@@ -43,7 +43,7 @@ func (e Entry) String() string {
 }
 
 // ParseUser reads a container's user as Docker keeps it: uid, or uid:gid,
-// numeric. Bedrock always sets it that way; anything else, including an
+// numeric. Helios always sets it that way; anything else, including an
 // empty user, which means the image's, is not known here.
 func ParseUser(spec string) (User, bool) {
 	who, group, hasGroup := strings.Cut(strings.TrimSpace(spec), ":")

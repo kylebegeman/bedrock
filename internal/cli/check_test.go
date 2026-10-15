@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 func TestCheckIsOfflineAndDoesNotCreateState(t *testing.T) {
 	dir := t.TempDir()
-	name := "bedrock.worker.yaml"
+	name := "helios.worker.yaml"
 	if err := os.WriteFile(filepath.Join(dir, name), []byte("app: mailer\nworkloads: {worker: {kind: worker, image: alpine}}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

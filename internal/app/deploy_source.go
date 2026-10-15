@@ -17,9 +17,9 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // The reservation survives source cleanup and binds recovery to this kernel
@@ -117,7 +117,7 @@ func refuseRecursiveDeployCapture(source, stateDir string) error {
 		return err
 	}
 	if sourceWithin(root, capture) {
-		return errors.New("deploy source includes bedrock's build captures; choose a source outside the state directory")
+		return errors.New("deploy source includes helios's build captures; choose a source outside the state directory")
 	}
 	return nil
 }
@@ -404,7 +404,7 @@ func deploySourceStorage(ctx context.Context, source string, block uint64) (uint
 
 func deployCaptureBudget(required, available uint64) error {
 	if available < deployCaptureFreeMin || required > available-deployCaptureFreeMin {
-		return fmt.Errorf("capturing deploy source needs %s while preserving 5 GiB free; free disk space or run bedrock gc", HumanBytes(int64(min(required, math.MaxInt64))))
+		return fmt.Errorf("capturing deploy source needs %s while preserving 5 GiB free; free disk space or run helios gc", HumanBytes(int64(min(required, math.MaxInt64))))
 	}
 	return nil
 }
@@ -504,9 +504,7 @@ func deployCapturePlan(ctx context.Context, d Deploy, in DeployInput, m *manifes
 			return errors.New("deploy source changed while it was captured; review deployment again")
 		}
 		name := in.Manifest
-		if name == "" {
-			name = manifest.FileName
-		}
+
 		capturedManifest, err := manifest.LoadFile(captured, name)
 		if err != nil {
 			return err

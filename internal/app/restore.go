@@ -10,12 +10,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/restic"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/restic"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // RestoreKind brings an app's data back from its bucket onto this
@@ -61,7 +61,7 @@ func (r RestoreDef) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 		return nil, errors.New("which app?")
 	}
 	if in.App == manifest.ReservedApp {
-		return nil, errors.New("recover the machine with bedrock recover <source-machine> --snapshot <machine-snapshot> --identity-file <protected-file>; use --rehearsal to test privately")
+		return nil, errors.New("recover the machine with helios recover <source-machine> --snapshot <machine-snapshot> --identity-file <protected-file>; use --rehearsal to test privately")
 	}
 	if err := checkReleaseStoreAccess(ctx, r.Store, in.App); err != nil {
 		return nil, err
@@ -75,7 +75,7 @@ func (r RestoreDef) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan
 	if rev, err := r.Store.RevisionWithStatus(ctx, in.App, state.RevisionActive); err != nil {
 		return nil, err
 	} else if rev != nil {
-		return nil, fmt.Errorf("%s is deployed on this machine; a restore is for a machine that doesn't run it yet (bedrock remove %s --data first), or run bedrock drill %s to test the backup", in.App, in.App, in.App)
+		return nil, fmt.Errorf("%s is deployed on this machine; a restore is for a machine that doesn't run it yet (helios remove %s --data first), or run helios drill %s to test the backup", in.App, in.App, in.App)
 	}
 	x := &restoring{r: r, app: in.App, asked: in.Snapshot, staging: filepath.Join(r.StateDir, "restore", in.App),
 		run: &backupRun{store: r.Store, app: in.App, kind: state.BackupRunRestore}}
@@ -304,7 +304,7 @@ func (x *restoring) doneStep() kernel.Step {
 			if err := os.RemoveAll(x.staging); err != nil {
 				fmt.Fprintf(out, "the staged snapshot at %s stays: %v\n", x.staging, err)
 			}
-			fmt.Fprintf(out, "%s's data is on this machine; deploy it with bedrock deploy <its source directory>\n", x.app)
+			fmt.Fprintf(out, "%s's data is on this machine; deploy it with helios deploy <its source directory>\n", x.app)
 			return nil
 		},
 	}

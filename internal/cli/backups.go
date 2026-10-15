@@ -8,17 +8,18 @@ import (
 
 	"github.com/spf13/cobra"
 
-	apps "github.com/kylebegeman/bedrock/internal/app"
+	apps "github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/manifest"
 )
 
 func newBackup(a *app) *cobra.Command {
 	var planOnly bool
 	cmd := &cobra.Command{
 		Use:   "backup <app>",
-		Short: "Back the app's data up to its bucket now. \"bedrock\" backs up the machine's own state.",
+		Short: "Back the app's data up to its bucket now. \"helios\" backs up the machine's own state.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.operate(cmd.Context(), apps.BackupKind, apps.BackupInput{App: args[0]}, planOnly)
+			return a.operate(cmd.Context(), apps.BackupKind, apps.BackupInput{App: backupAppName(args[0])}, planOnly)
 		},
 	}
 	a.mutatingFlags(cmd, &planOnly)
@@ -73,7 +74,7 @@ func newBackups(a *app) *cobra.Command {
 				return err
 			}
 			defer store.Close()
-			runs, err := store.BackupRuns(cmd.Context(), optional(args, 0), "", limit)
+			runs, err := store.BackupRuns(cmd.Context(), backupAppName(optional(args, 0)), "", limit)
 			if err != nil {
 				return err
 			}
@@ -103,4 +104,12 @@ func newBackups(a *app) *cobra.Command {
 	}
 	cmd.Flags().IntVar(&limit, "limit", 20, "how many to list")
 	return cmd
+}
+
+// The machine backup keeps its existing sealed namespace and repository.
+func backupAppName(name string) string {
+	if name == "helios" {
+		return manifest.ReservedApp
+	}
+	return name
 }

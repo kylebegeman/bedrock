@@ -60,10 +60,12 @@ func CheckSource(dir, name string) CheckReport {
 		return r
 	}
 	r.Source = root
-	if err := CheckFileName(name); err != nil {
+	name, err = ResolveFileName(root, name)
+	if err != nil {
 		add("manifest.filename", "", err.Error())
 		return r
 	}
+	r.Manifest = name
 	manifestPath := filepath.Join(root, name)
 	info, err := os.Lstat(manifestPath)
 	if err != nil {
@@ -95,7 +97,7 @@ func CheckSource(dir, name string) CheckReport {
 			return r
 		}
 	}
-	m, err := Parse(body)
+	m, err := parseNamed(body, name)
 	if err != nil {
 		var typeErr *yaml.TypeError
 		if errors.As(err, &typeErr) {

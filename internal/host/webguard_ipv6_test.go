@@ -37,9 +37,9 @@ func TestFirewallReconcileChecksAvailableIPv6Guard(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := setUpBox(t)
 			m.answers["ufw status"] = "Status: active\nOpenSSH ALLOW Anywhere\n" +
-				"80,443/tcp ALLOW 173.245.48.0/20 # bedrock: cloudflare\n" +
-				"80,443/tcp ALLOW 103.21.244.0/22 # bedrock: cloudflare\n" +
-				"80,443/tcp ALLOW 2400:cb00::/32 # bedrock: cloudflare\n"
+				"80,443/tcp ALLOW 173.245.48.0/20 # helios: cloudflare\n" +
+				"80,443/tcp ALLOW 103.21.244.0/22 # helios: cloudflare\n" +
+				"80,443/tcp ALLOW 2400:cb00::/32 # helios: cloudflare\n"
 			m.answers["iptables -S BEDROCK-WEB"] = v4
 			m.answers["iptables -S DOCKER-USER"] = hooks.String()
 			m.answers["ip6tables -S"] = ""

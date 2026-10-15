@@ -10,18 +10,18 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/edge"
-	"github.com/kylebegeman/bedrock/internal/host"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/edge"
+	"github.com/kylebegeman/helios/internal/host"
 )
 
-// exposureReport is what bedrock exposure prints.
+// exposureReport is what helios exposure prints.
 type exposureReport struct {
 	Containers []exposureRow `json:"containers"`
 	// Shared lists networks more than one app is on, besides the edge.
 	Shared []string `json:"shared_networks"`
 	// Findings are the lines worth a look: privileges, root, writable
-	// roots, published ports, containers bedrock doesn't manage.
+	// roots, published ports, containers helios doesn't manage.
 	Findings []string `json:"findings"`
 }
 
@@ -33,11 +33,11 @@ type exposureRow struct {
 }
 
 // roleOf says what a container is: an app's workload, its database, one
-// of bedrock's own, or something bedrock doesn't manage.
+// of helios's own, or something helios doesn't manage.
 func roleOf(x docker.Exposure) (role, workload string) {
 	switch {
 	case x.Labels[docker.LabelOwner] != docker.OwnerValue:
-		return "not managed by bedrock", ""
+		return "not managed by helios", ""
 	case x.Name == edge.Container:
 		return "the edge", ""
 	case x.Name == host.RegistryContainer:
@@ -51,7 +51,7 @@ func roleOf(x docker.Exposure) (role, workload string) {
 	case x.Labels[docker.LabelWorkload] != "":
 		return "workload", x.Labels[docker.LabelWorkload]
 	}
-	return "bedrock's", ""
+	return "helios's", ""
 }
 
 // networkRole names a network the way the report reads.
@@ -87,11 +87,11 @@ func buildExposure(xs []docker.Exposure) exposureReport {
 			continue
 		}
 		switch role {
-		case "not managed by bedrock":
+		case "not managed by helios":
 			if len(x.Ports) > 0 {
-				r.Findings = append(r.Findings, fmt.Sprintf("%s isn't managed by bedrock and publishes %s", x.Name, strings.Join(x.Ports, ", ")))
+				r.Findings = append(r.Findings, fmt.Sprintf("%s isn't managed by helios and publishes %s", x.Name, strings.Join(x.Ports, ", ")))
 			} else {
-				r.Findings = append(r.Findings, fmt.Sprintf("%s isn't managed by bedrock", x.Name))
+				r.Findings = append(r.Findings, fmt.Sprintf("%s isn't managed by helios", x.Name))
 			}
 		case "workload":
 			who := x.Name
@@ -201,7 +201,7 @@ func newExposure(a *app) *cobra.Command {
 				fmt.Fprintf(a.stdout, "  %s\n", f)
 			}
 			if len(report.Shared) > 0 {
-				return errors.New("apps share a network; redeploy them with this bedrock")
+				return errors.New("apps share a network; redeploy them with this helios")
 			}
 			return nil
 		},

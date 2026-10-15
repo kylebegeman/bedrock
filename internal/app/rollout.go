@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/edge"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/edge"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // rollout is one revision of an app being brought up: what its steps
@@ -93,7 +93,7 @@ func (d Deploy) rollout(ctx context.Context, m *manifest.Manifest, revision stri
 	if from != nil && from.secretsFrom != "" {
 		add(r.inheritStep())
 	}
-	// Secrets the manifest asks bedrock to make come before the data: the
+	// Secrets the manifest asks helios to make come before the data: the
 	// database starts with its password, and derived values name it.
 	if from != nil && (m.PostgresVersion() != "" || m.HasObjects() || m.Secrets != nil) {
 		add(r.secretsStep())

@@ -1,5 +1,5 @@
 // Package manifest is the one file an app needs: what it runs, where it is
-// reached, how it is checked, and what it may use. bedrock.yaml lives in the
+// reached, how it is checked, and what it may use. helios.yaml lives in the
 // app's repository.
 package manifest
 
@@ -26,7 +26,10 @@ import (
 )
 
 // FileName is the manifest's name in an app's repository.
-const FileName = "bedrock.yaml"
+const FileName = "helios.yaml"
+
+// LegacyFileName remains readable while consuming repositories migrate.
+const LegacyFileName = "bedrock.yaml"
 
 // Manifest describes one app.
 type Manifest struct {
@@ -49,11 +52,11 @@ type Manifest struct {
 	Backup *Backup `yaml:"backup,omitempty" json:"backup,omitempty"`
 	// Release states whether older code may use data changed by release jobs.
 	Release *ReleasePolicy `yaml:"release,omitempty" json:"release,omitempty"`
-	// Secrets are the ones bedrock makes for the app, so nobody has to type
+	// Secrets are the ones helios makes for the app, so nobody has to type
 	// them in: generated once and kept, or derived from others at every
 	// deploy.
 	Secrets *Secrets `yaml:"secrets,omitempty" json:"secrets,omitempty"`
-	// Preview marks the app as a branch's preview of another app. bedrock
+	// Preview marks the app as a branch's preview of another app. helios
 	// preview up writes it into the manifest it derives; nobody writes it
 	// by hand. It is how a preview is known, whatever its name.
 	Preview *Preview `yaml:"preview,omitempty" json:"preview,omitempty"`
@@ -86,7 +89,7 @@ type Preview struct {
 	Pinned bool `yaml:"pinned,omitempty" json:"pinned,omitempty"`
 }
 
-// Secrets bedrock makes for an app.
+// Secrets helios makes for an app.
 type Secrets struct {
 	// Generate makes each named secret once, when it doesn't exist yet,
 	// in a format: hex:N or base64:N or base64url:N for N random bytes,
@@ -143,8 +146,8 @@ var DefaultKeep = Keep{Daily: 7, Weekly: 4, Monthly: 6}
 const ReservedApp = "bedrock"
 
 // reservedApps are names whose containers, networks or volumes would
-// collide with bedrock's own: bedrock-edge, bedrock-registry, bedrock-restic-cache.
-var reservedApps = map[string]bool{ReservedApp: true, "edge": true, "registry": true, "restic": true}
+// collide with helios's own: bedrock-edge, bedrock-registry, bedrock-restic-cache.
+var reservedApps = map[string]bool{ReservedApp: true, "helios": true, "edge": true, "registry": true, "restic": true}
 
 // DatabaseVolume and ObjectsVolume are the volumes that hold an app's
 // database and object store; no declared volume may take their names.
@@ -162,13 +165,13 @@ type Data struct {
 	Volumes map[string]Volume `yaml:"volumes,omitempty" json:"volumes,omitempty"`
 	// Objects gives the app its own S3-compatible object store (MinIO),
 	// reachable at {objects}:9000 with the MINIO_ROOT_USER and
-	// MINIO_ROOT_PASSWORD secrets bedrock makes.
+	// MINIO_ROOT_PASSWORD secrets helios makes.
 	Objects *Objects `yaml:"objects,omitempty" json:"objects,omitempty"`
 }
 
 // Objects configures the app's object store.
 type Objects struct {
-	// Image replaces bedrock's pinned MinIO image.
+	// Image replaces helios's pinned MinIO image.
 	Image string `yaml:"image,omitempty" json:"image,omitempty"`
 }
 
@@ -189,7 +192,7 @@ type Postgres struct {
 	// Env and Secrets reach the database container, for init scripts.
 	Env     map[string]string `yaml:"env,omitempty" json:"env,omitempty"`
 	Secrets []string          `yaml:"secrets,omitempty" json:"secrets,omitempty"`
-	// DatabaseURL false keeps bedrock from giving every workload
+	// DatabaseURL false keeps helios from giving every workload
 	// DATABASE_URL, the superuser's address: for an app whose workloads
 	// each get a role of their own through derived secrets.
 	DatabaseURL *bool `yaml:"database_url,omitempty" json:"database_url,omitempty"`
@@ -243,7 +246,7 @@ type Workload struct {
 	Secrets []string `yaml:"secrets,omitempty" json:"secrets,omitempty"`
 	// Command replaces the image's command.
 	Command []string `yaml:"command,omitempty" json:"command,omitempty"`
-	// Health is how bedrock knows the workload is ready.
+	// Health is how helios knows the workload is ready.
 	Health *Health `yaml:"health,omitempty" json:"health,omitempty"`
 	// Resources bound what the workload may use.
 	Resources Resources `yaml:"resources,omitempty" json:"resources,omitempty"`
@@ -350,7 +353,7 @@ func (p PublishedPort) Overlaps(o PublishedPort) bool {
 // reservedHostPorts are the machine's own: ssh, the edge on 80 and 443
 // (443 over UDP too, for HTTP/3), and the image registry on 5000, which
 // is docker.Registry.
-var reservedHostPorts = map[int]string{22: "ssh", 80: "the edge", 443: "the edge", 5000: "bedrock's image registry"}
+var reservedHostPorts = map[int]string{22: "ssh", 80: "the edge", 443: "the edge", 5000: "helios's image registry"}
 
 // Build says how to build a workload's image.
 type Build struct {
@@ -373,7 +376,7 @@ type Route struct {
 	// Port sends the route to another port of the workload than its own,
 	// for a workload that listens on two.
 	Port int `yaml:"port,omitempty" json:"port,omitempty"`
-	// DNS says whether bedrock keeps the host's record in Cloudflare:
+	// DNS says whether helios keeps the host's record in Cloudflare:
 	// "direct" makes a record that names this machine, "proxied" one
 	// behind Cloudflare's proxy. Empty leaves the record alone and only
 	// checks that it points here.
@@ -411,7 +414,7 @@ const (
 	DNSProxied DNSMode = "proxied"
 )
 
-// Managed reports whether bedrock keeps the record.
+// Managed reports whether helios keeps the record.
 func (m DNSMode) Managed() bool { return m == DNSDirect || m == DNSProxied }
 
 // Health is how a workload says it is ready.
@@ -491,15 +494,19 @@ var (
 
 // Parse reads a manifest from YAML and validates it.
 func Parse(data []byte) (*Manifest, error) {
+	return parseNamed(data, FileName)
+}
+
+func parseNamed(data []byte, name string) (*Manifest, error) {
 	var m Manifest
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&m); err != nil {
-		return nil, fmt.Errorf("%s: %w", FileName, err)
+		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	var extra yaml.Node
 	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("%s must contain exactly one YAML document", FileName)
+		return nil, fmt.Errorf("%s must contain exactly one YAML document", name)
 	}
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -507,9 +514,9 @@ func Parse(data []byte) (*Manifest, error) {
 	return &m, nil
 }
 
-// Load reads dir/bedrock.yaml.
+// Load reads dir/helios.yaml.
 func Load(dir string) (*Manifest, error) {
-	return LoadFile(dir, FileName)
+	return LoadFile(dir, "")
 }
 
 // LoadFile reads a manifest by name from a source directory, for a source
@@ -517,7 +524,9 @@ func Load(dir string) (*Manifest, error) {
 // The name is a plain YAML file at the source's root; it is read as root, so
 // it must be the source's own file, never a link out of it.
 func LoadFile(dir, name string) (*Manifest, error) {
-	if err := CheckFileName(name); err != nil {
+	var err error
+	name, err = ResolveFileName(dir, name)
+	if err != nil {
 		return nil, err
 	}
 	path := filepath.Join(dir, name)
@@ -532,7 +541,32 @@ func LoadFile(dir, name string) (*Manifest, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Parse(data)
+	return parseNamed(data, name)
+}
+
+// ResolveFileName selects the sole default manifest, or preserves an explicit
+// filename. Lstat counts links and directories as present so an unsafe default
+// cannot be silently bypassed in favor of the other name. The reader validates
+// the selected file before reading it. An empty source selects the new name.
+func ResolveFileName(dir, name string) (string, error) {
+	if name != "" {
+		return name, CheckFileName(name)
+	}
+	var found string
+	for _, candidate := range []string{FileName, LegacyFileName} {
+		if _, err := os.Lstat(filepath.Join(dir, candidate)); err == nil {
+			if found != "" {
+				return "", fmt.Errorf("both %s and %s exist; select one explicitly with --manifest", FileName, LegacyFileName)
+			}
+			found = candidate
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+	}
+	if found == "" {
+		found = FileName
+	}
+	return found, nil
 }
 
 // CheckFileName refuses a manifest name that isn't a plain .yaml or .yml
@@ -540,7 +574,7 @@ func LoadFile(dir, name string) (*Manifest, error) {
 func CheckFileName(name string) error {
 	if name == "" || name != filepath.Base(name) || strings.HasPrefix(name, ".") ||
 		!(strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml")) {
-		return fmt.Errorf("%q must name a .yaml file at the source's root, such as bedrock.worker.yaml", name)
+		return fmt.Errorf("%q must name a .yaml file at the source's root, such as helios.worker.yaml", name)
 	}
 	return nil
 }
@@ -553,7 +587,7 @@ func (m *Manifest) Validate() error {
 	if !namePattern.MatchString(m.App) {
 		fail("app: %q must be lowercase letters, digits and hyphens, up to 40 characters", m.App)
 	} else if reservedApps[m.App] {
-		fail("app: %q is a name bedrock uses for itself", m.App)
+		fail("app: %q is a name helios uses for itself", m.App)
 	}
 	if len(m.Workloads) == 0 {
 		fail("workloads: an app needs at least one")
@@ -879,7 +913,7 @@ func (m *Manifest) validateData(fail func(format string, args ...any)) {
 				fail("data.volumes: %q must be lowercase letters, digits and hyphens", name)
 			}
 			if name == DatabaseVolume || name == ObjectsVolume {
-				fail("data.volumes: %q is bedrock's own volume for the %s; pick another name", name, map[string]string{DatabaseVolume: "database", ObjectsVolume: "object store"}[name])
+				fail("data.volumes: %q is helios's own volume for the %s; pick another name", name, map[string]string{DatabaseVolume: "database", ObjectsVolume: "object store"}[name])
 			}
 		}
 		if pg := m.Data.Postgres; pg != nil {
@@ -910,7 +944,7 @@ func (m *Manifest) validateData(fail func(format string, args ...any)) {
 	}
 }
 
-// validateSecrets checks the secrets bedrock makes and derives.
+// validateSecrets checks the secrets helios makes and derives.
 func (m *Manifest) validateSecrets(fail func(format string, args ...any)) {
 	if sec := m.Secrets; sec != nil {
 		for _, name := range sortedKeys(sec.Generate) {
@@ -1265,7 +1299,7 @@ func (m *Manifest) VerifyQuery() (string, int) {
 	return m.Backup.Verify.SQL, atLeast
 }
 
-// ManagedHosts returns the hosts whose records bedrock keeps, with their
+// ManagedHosts returns the hosts whose records helios keeps, with their
 // mode, in host order. A host routed twice with different modes is an
 // error at validation time, so the first wins here.
 func (m *Manifest) ManagedHosts() map[string]DNSMode {
@@ -1283,7 +1317,7 @@ func (m *Manifest) ManagedHosts() map[string]DNSMode {
 }
 
 // ValidApp reports whether a string could name an app: the manifest's
-// rule for a name, and not one bedrock keeps for itself.
+// rule for a name, and not one helios keeps for itself.
 func ValidApp(name string) bool { return namePattern.MatchString(name) && !reservedApps[name] }
 
 // ValidHost reports whether a string is a hostname a route can use, by the

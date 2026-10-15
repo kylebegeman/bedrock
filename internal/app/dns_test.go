@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/cloudflare/cloudflaretest"
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/cloudflare/cloudflaretest"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // The production machine after loom was removed by hand: its records
-// still point here, and bedrock dns audit says nothing answers for them.
+// still point here, and helios dns audit says nothing answers for them.
 func TestDroppingARecordNoRouteHereKeeps(t *testing.T) {
 	ctx := context.Background()
 	const here = "187.127.249.208"
@@ -28,7 +28,7 @@ func TestDroppingARecordNoRouteHereKeeps(t *testing.T) {
 	fake.Seed(cloudflaretest.Record{Type: "A", Name: "*.pr.begam.in", Content: here})
 	fake.Seed(cloudflaretest.Record{Type: "A", Name: "hello.begam.in", Content: here})
 	fake.Seed(cloudflaretest.Record{Type: "A", Name: "old.begam.in", Content: here})
-	fake.Seed(cloudflaretest.Record{Type: "A", Name: "site.begam.in", Content: "198.51.100.20", Comment: "bedrock: site on " + here})
+	fake.Seed(cloudflaretest.Record{Type: "A", Name: "site.begam.in", Content: "198.51.100.20", Comment: "helios: site on " + here})
 
 	store, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {

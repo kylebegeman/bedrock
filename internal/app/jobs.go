@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // RunKind runs a one-off command in a workload's environment.
@@ -190,7 +190,7 @@ func (j *Jobs) execute(ctx context.Context, e *docker.Engine, spec docker.Spec, 
 	return code, err
 }
 
-var errJobOwnershipUnknown = errors.New("the job container could not be identified; inspect bedrock jobs before rerunning")
+var errJobOwnershipUnknown = errors.New("the job container could not be identified; inspect helios jobs before rerunning")
 
 func (j *Jobs) executeOwned(ctx context.Context, e *docker.Engine, spec docker.Spec, out io.Writer) (int, string, error) {
 	runErr := e.Run(ctx, spec)
@@ -389,7 +389,7 @@ func (r RunDefinition) Plan(ctx context.Context, raw json.RawMessage) (*kernel.P
 			// Reconciliation adopts the existing job; recovery must not create
 			// a second job when the previous outcome is uncertain.
 			if kernel.Attempt(ctx) > 1 {
-				return errors.New("the one-off command was interrupted and is not replayed automatically; inspect bedrock jobs before deliberately running it again")
+				return errors.New("the one-off command was interrupted and is not replayed automatically; inspect helios jobs before deliberately running it again")
 			}
 			_, err := r.Jobs.RunWith(ctx, rev, workload, in.Command, JobRun, JobOptions{Secrets: in.Secrets}, out)
 			return err

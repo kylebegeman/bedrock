@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/state"
-	"github.com/kylebegeman/bedrock/internal/version"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/state"
+	"github.com/kylebegeman/helios/internal/version"
 	"os"
 	"path/filepath"
 )
@@ -191,8 +191,8 @@ func TestUpgradeRefusesWrongBinaries(t *testing.T) {
 	store := openStore(t)
 	reg.Add(Upgrade{Env: m.env(), Store: store})
 	engine := kernel.New(store, reg, "test")
-	if _, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/not-bedrock")); err == nil || !strings.Contains(err.Error(), "doesn't run as bedrock") {
-		t.Fatalf("not bedrock: %v", err)
+	if _, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/not-bedrock")); err == nil || !strings.Contains(err.Error(), "doesn't run as helios") {
+		t.Fatalf("not helios: %v", err)
 	}
 	m.answers["/tmp/bedrock-mac version --json"] = `{"version":"0.7.1","commit":"bbbbbbbbbbbb","go":"go1.26","os":"darwin","arch":"arm64"}`
 	if _, err := engine.PlanOnly(context.Background(), UpgradeKind, upgradeInput(t, "/tmp/bedrock-mac")); err == nil || !strings.Contains(err.Error(), "built for darwin/arm64") {

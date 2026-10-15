@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/helios/internal/manifest"
 )
 
 func tree(t *testing.T, files map[string]string) string {
@@ -80,7 +80,7 @@ func TestASourceThatSaysNothingIsRefused(t *testing.T) {
 	if err == nil {
 		t.Fatal("an unrecognisable source must be refused")
 	}
-	for _, want := range []string{"Dockerfile", "bedrock init"} {
+	for _, want := range []string{"Dockerfile", "helios init"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("the error should suggest %q: %v", want, err)
 		}

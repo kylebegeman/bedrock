@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/secrets"
 )
 
 func TestSecretPreflightAcceptsGeneratableNamesWithoutWritingSecrets(t *testing.T) {

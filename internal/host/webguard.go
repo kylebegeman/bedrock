@@ -14,7 +14,7 @@ import (
 // and forwarded packets never meet the input rules ufw keeps: a ufw rule
 // cannot say who reaches a published port. Docker does send every
 // forwarded packet through its DOCKER-USER chain first, so that is where
-// bedrock says it. The guard is a chain of its own, jumped to from
+// helios says it. The guard is a chain of its own, jumped to from
 // DOCKER-USER for the edge's ports, that lets Cloudflare's ranges and
 // private networks through and drops everything else.
 const (
@@ -209,7 +209,7 @@ func gatherWebGuardFamily(ctx context.Context, env Env, ipt string) WebGuard {
 			}
 			g.Drops = true
 		default:
-			// Bedrock owns this chain completely. An ignored ACCEPT or RETURN
+			// Helios owns this chain completely. An ignored ACCEPT or RETURN
 			// could bypass the final DROP while all expected sources remain.
 			g.Malformed = true
 		}

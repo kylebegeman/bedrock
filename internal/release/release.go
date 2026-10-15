@@ -1,4 +1,4 @@
-// Package release fetches a published bedrock build for this machine.
+// Package release fetches a published helios build for this machine.
 //
 // A machine that can upgrade itself is a machine that downloads something
 // and then executes it, so nothing here is trusted on the strength of where
@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,8 +22,8 @@ import (
 	"time"
 )
 
-// Repo is where releases are published.
-const Repo = "https://github.com/kylebegeman/bedrock"
+// Repo is the canonical release channel. Historical Bedrock URLs redirect here.
+const Repo = "https://github.com/kylebegeman/helios"
 
 // repo is Repo, except in tests, which serve a release of their own.
 var repo = Repo
@@ -45,7 +46,7 @@ func CheckVersion(version string) error {
 // AssetName is what a release calls the build for an operating system and
 // architecture, as build-release.sh names it.
 func AssetName(version, goos, goarch string) string {
-	return fmt.Sprintf("bedrock_%s_%s_%s", version, goos, goarch)
+	return fmt.Sprintf("helios_%s_%s_%s", version, goos, goarch)
 }
 
 // Fetch downloads the given version's build for this machine into dir and
@@ -68,22 +69,36 @@ func FetchPlatform(ctx context.Context, version, dir, sha256Hex, goos, goarch st
 		return "", err
 	}
 	asset := AssetName(version, goos, goarch)
+	legacy := fmt.Sprintf("bedrock_%s_%s_%s", version, goos, goarch)
 	base := fmt.Sprintf("%s/releases/download/v%s", repo, version)
-
 	want := strings.ToLower(strings.TrimSpace(sha256Hex))
 	if want == "" {
 		sums, err := get(ctx, base+"/SHA256SUMS", 1<<20)
 		if err != nil {
 			return "", fmt.Errorf("SHA256SUMS for %s: %w", version, err)
 		}
-		if want, err = sumFor(string(sums), asset); err != nil {
-			return "", err
+		want, err = sumFor(string(sums), asset)
+		if err != nil {
+			want, err = sumFor(string(sums), legacy)
+			if err != nil {
+				return "", err
+			}
+			asset = legacy
 		}
 	}
 	if decoded, err := hex.DecodeString(want); err != nil || len(decoded) != sha256.Size {
 		return "", fmt.Errorf("%q isn't a sha256 checksum", want)
 	}
+	path, err := fetchAsset(ctx, base, asset, dir, want)
+	// Pinned callers need no published checksum file. A 404 for the new name
+	// alone permits trying the historical filename with the identical pin.
+	if sha256Hex != "" && errors.Is(err, errNotPublished) && asset != legacy {
+		return fetchAsset(ctx, base, legacy, dir, want)
+	}
+	return path, err
+}
 
+func fetchAsset(ctx context.Context, base, asset, dir, want string) (string, error) {
 	// Not executable yet: a file that has not been checked must not be
 	// runnable, even for the moment between writing and verifying it.
 	path := filepath.Join(dir, asset)
@@ -134,6 +149,8 @@ func sumFor(sums, asset string) (string, error) {
 	return "", fmt.Errorf("SHA256SUMS lists no %s; this release may not build for %s/%s", asset, runtime.GOOS, runtime.GOARCH)
 }
 
+var errNotPublished = errors.New("not published")
+
 func open(ctx context.Context, url string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -146,7 +163,7 @@ func open(ctx context.Context, url string) (io.ReadCloser, error) {
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
 		if resp.StatusCode == http.StatusNotFound {
-			return nil, fmt.Errorf("not published at %s", url)
+			return nil, fmt.Errorf("%w at %s", errNotPublished, url)
 		}
 		return nil, fmt.Errorf("%s answered %s", url, resp.Status)
 	}

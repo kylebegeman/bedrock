@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/helios/internal/secrets"
 )
 
 func transferStores(t *testing.T) (*secrets.Store, *secrets.Store, string) {

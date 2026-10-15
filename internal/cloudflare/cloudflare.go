@@ -1,4 +1,4 @@
-// Package cloudflare is the little of Cloudflare's API bedrock needs: find
+// Package cloudflare is the little of Cloudflare's API helios needs: find
 // a zone, list, make, change and remove DNS records in it, and read the
 // address ranges Cloudflare's proxy connects from.
 package cloudflare
@@ -228,7 +228,7 @@ func (r Ranges) All() []string {
 	return append(append([]string(nil), r.IPv4...), r.IPv6...)
 }
 
-// RangesFile is where a machine keeps the ranges bedrock last read: host
+// RangesFile is where a machine keeps the ranges helios last read: host
 // setup writes it, and the edge trusts what it lists to say who a visitor
 // behind the proxy is.
 const RangesFile = "/etc/bedrock/cloudflare-ranges.json"
@@ -264,7 +264,7 @@ func (r Ranges) Check() error {
 				return fmt.Errorf("%q is not an address range", s)
 			}
 			if p.Addr().Is4() != list.v4 || p != p.Masked() || p.Bits() < list.widest {
-				return fmt.Errorf("%q is not a range bedrock will trust as Cloudflare's", s)
+				return fmt.Errorf("%q is not a range helios will trust as Cloudflare's", s)
 			}
 		}
 	}

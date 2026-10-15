@@ -10,13 +10,13 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/api"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/state"
-	"github.com/kylebegeman/bedrock/internal/version"
+	"github.com/kylebegeman/helios/internal/api"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/state"
+	"github.com/kylebegeman/helios/internal/version"
 )
 
-// UpgradeKind replaces the bedrock binary with a staged one and restarts the
+// UpgradeKind replaces the helios binary with a staged one and restarts the
 // daemon. If the new daemon can't start, systemd runs the rollback unit,
 // which puts the previous binary back; the resumed operation then reports
 // that.
@@ -44,7 +44,7 @@ type Upgrade struct {
 	DaemonVersion func(ctx context.Context) (version.Info, bool)
 }
 
-// running is the build this machine runs bedrock as: the daemon's answer
+// running is the build this machine runs helios as: the daemon's answer
 // when one answers, else this process's own. A resumed upgrade runs inside
 // the new daemon before it listens, and the command line's local kernel
 // runs beside the daemon it restarts; each is right about itself.
@@ -75,7 +75,7 @@ func askDaemon(socket string) func(context.Context) (version.Info, bool) {
 
 // UpgradeInput says which binary to install.
 type UpgradeInput struct {
-	// Path is a bedrock binary already on this machine.
+	// Path is a helios binary already on this machine.
 	Path string `json:"path"`
 }
 
@@ -208,15 +208,15 @@ func (u Upgrade) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, e
 func identity(v version.Info) string { return v.Version + "@" + v.Commit }
 
 // probeVersion runs a candidate binary's version command and checks that
-// it is a bedrock build for this machine.
+// it is a helios build for this machine.
 func probeVersion(ctx context.Context, env Env, path string) (version.Info, error) {
 	out, err := env.Run(ctx, path, "version", "--json")
 	if err != nil {
-		return version.Info{}, fmt.Errorf("%s doesn't run as bedrock: %w", path, err)
+		return version.Info{}, fmt.Errorf("%s doesn't run as helios: %w", path, err)
 	}
 	var info version.Info
 	if err := json.Unmarshal([]byte(lastLine(out)), &info); err != nil || info.Version == "" {
-		return version.Info{}, fmt.Errorf("%s doesn't report a bedrock version", path)
+		return version.Info{}, fmt.Errorf("%s doesn't report a helios version", path)
 	}
 	running := env.RunningVersion()
 	if info.OS != running.OS || info.Arch != running.Arch {
@@ -244,7 +244,7 @@ func copyFile(from, to string) error {
 // puts the previous binary back only when an upgrade staged the running
 // one within the last ten minutes: a daemon that crashes long after its
 // upgrade verified is restarted, never downgraded. It must not depend on
-// the bedrock binary, which may be the thing that's broken.
+// the helios binary, which may be the thing that's broken.
 const RollbackScriptContent = `#!/bin/sh
 # Installed by bedrock. Runs when bedrock.service fails.
 set -eu

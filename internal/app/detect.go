@@ -1,11 +1,12 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/helios/internal/manifest"
 )
 
 // Detected is what a source tree looks like it wants to be.
@@ -35,8 +36,14 @@ var staticDirs = []string{"public", "dist", "build", "site", "_site"}
 // files, or an index.html at the root, means a static site. Anything else
 // is not guessed at.
 func Detect(dir string) (*Detected, error) {
-	if regular(filepath.Join(dir, manifest.FileName)) {
-		return nil, fmt.Errorf("this source already has a %s; deploy it rather than starting it", manifest.FileName)
+	name, err := manifest.ResolveFileName(dir, "")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := os.Lstat(filepath.Join(dir, name)); err == nil {
+		return nil, fmt.Errorf("this source already has a %s; deploy it rather than starting it", name)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
 	}
 	if regular(filepath.Join(dir, "Dockerfile")) {
 		return &Detected{Kind: manifest.Web, Why: "Dockerfile"}, nil
@@ -49,7 +56,7 @@ func Detect(dir string) (*Detected, error) {
 	if regular(filepath.Join(dir, "index.html")) {
 		return &Detected{Kind: manifest.Static, Dir: ".", Why: "index.html"}, nil
 	}
-	return nil, fmt.Errorf("this source says nothing about how to run it: add a Dockerfile, or a %s of your own with bedrock init",
+	return nil, fmt.Errorf("this source says nothing about how to run it: add a Dockerfile, or a %s of your own with helios init",
 		manifest.FileName)
 }
 

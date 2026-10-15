@@ -9,14 +9,14 @@ import (
 	"sort"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
-// GCKind removes what bedrock created and no longer needs: containers and
+// GCKind removes what helios created and no longer needs: containers and
 // images of revisions that are neither active nor kept for rollback, and
-// the build cache. It never touches anything without bedrock's label.
+// the build cache. It never touches anything without helios's label.
 const GCKind = "app.gc"
 
 // DefaultBuildCacheMax is how much build cache a machine keeps.
@@ -286,7 +286,7 @@ func gcResourcesToKeep(ctx context.Context, store *state.Store) (*gcRetention, e
 	return keep, nil
 }
 
-// staleContainers are bedrock's containers that belong to a revision nobody
+// staleContainers are helios's containers that belong to a revision nobody
 // keeps. Containers without a revision label (the edge, the registry) stay.
 func staleContainers(ctx context.Context, e *docker.Engine, keep *gcRetention) ([]docker.Info, error) {
 	owned, err := e.Owned(ctx)
@@ -305,7 +305,7 @@ func staleContainers(ctx context.Context, e *docker.Engine, keep *gcRetention) (
 	return stale, nil
 }
 
-// staleImages are images bedrock built for revisions nobody keeps.
+// staleImages are images helios built for revisions nobody keeps.
 func staleImages(ctx context.Context, e *docker.Engine, keep *gcRetention) ([]docker.Image, error) {
 	images, err := e.OwnedImages(ctx)
 	if err != nil {

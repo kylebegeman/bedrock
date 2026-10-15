@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/remote"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/remote"
 )
 
 func targetFixture(t *testing.T) (string, string) {
@@ -137,7 +137,7 @@ func TestTargetConfigurationAndVerification(t *testing.T) {
 }
 func TestSourceSnapshotChangesApproval(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "bedrock.yaml")
+	path := filepath.Join(dir, "helios.yaml")
 	if err := os.WriteFile(path, []byte("app: fixture\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

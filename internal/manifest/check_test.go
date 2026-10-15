@@ -65,7 +65,7 @@ func TestOfflineCheckUsesTheDeployValidatorAndLocatesUnknownFields(t *testing.T)
 
 func TestOfflineCheckReadsAnAlternateManifestAndRejectsLinks(t *testing.T) {
 	dir := t.TempDir()
-	name := "bedrock.worker.yaml"
+	name := "helios.worker.yaml"
 	body := []byte("app: mailer\nworkloads: {worker: {kind: worker, image: alpine}}\n")
 	if err := os.WriteFile(filepath.Join(dir, name), body, 0o644); err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func TestOfflineCheckReadsAnAlternateManifestAndRejectsLinks(t *testing.T) {
 	if report := CheckSource(dir, FileName); report.Valid || report.Diagnostics[0].Code != "manifest.file" {
 		t.Fatalf("%+v", report)
 	}
-	if report := CheckSource(dir, "../bedrock.worker.yaml"); report.Valid || report.Diagnostics[0].Code != "manifest.filename" {
+	if report := CheckSource(dir, "../helios.worker.yaml"); report.Valid || report.Diagnostics[0].Code != "manifest.filename" {
 		t.Fatalf("%+v", report)
 	}
 }

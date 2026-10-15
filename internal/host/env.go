@@ -1,6 +1,6 @@
-// Package host inspects and prepares the machine bedrock runs on: facts about
+// Package host inspects and prepares the machine helios runs on: facts about
 // it, the doctor's verdicts, and the operations that set it up, maintain it
-// and upgrade bedrock itself.
+// and upgrade helios itself.
 package host
 
 import (
@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/version"
+	"github.com/kylebegeman/helios/internal/version"
 )
 
 // Env is how the host package touches the machine, so tests can hand it a

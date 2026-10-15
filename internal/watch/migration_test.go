@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker/dockertest"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/docker/dockertest"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 func TestIntentionalMigrationFenceSuppressesAppDowntimeButNotHostFailures(t *testing.T) {

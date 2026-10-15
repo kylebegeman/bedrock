@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/kylebegeman/bedrock/internal/integration"
+	"github.com/kylebegeman/helios/internal/integration"
 	"github.com/spf13/cobra"
 )
 

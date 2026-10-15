@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker/dockertest"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/restic"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/docker/dockertest"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/restic"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // coreYAML is shaped like Loom's Core: one image for several workloads, a
@@ -376,7 +376,7 @@ func TestAFailedContainerIsExplainedByItsErrorNotItsLastBrace(t *testing.T) {
 	if got := lastWords("listening on 8000\n}\n"); got != "listening on 8000" {
 		t.Fatalf("got %q", got)
 	}
-	if got := lastWords("\n\n"); got != "it wrote nothing; see bedrock logs" {
+	if got := lastWords("\n\n"); got != "it wrote nothing; see helios logs" {
 		t.Fatalf("got %q", got)
 	}
 }

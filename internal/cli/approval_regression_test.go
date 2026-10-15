@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/api"
-	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/helios/internal/api"
+	"github.com/kylebegeman/helios/internal/kernel"
 )
 
 type approvalRunner struct {

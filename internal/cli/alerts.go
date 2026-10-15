@@ -10,9 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/state"
-	"github.com/kylebegeman/bedrock/internal/watch"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/state"
+	"github.com/kylebegeman/helios/internal/watch"
 )
 
 func newAlerts(a *app) *cobra.Command {
@@ -108,7 +108,7 @@ func newWatch(a *app) *cobra.Command {
 				return json.NewEncoder(a.stdout).Encode(ws)
 			}
 			if len(ws) == 0 {
-				fmt.Fprintln(a.stdout, "watching nothing; add a URL with bedrock watch add https://...")
+				fmt.Fprintln(a.stdout, "watching nothing; add a URL with helios watch add https://...")
 			}
 			for _, w := range ws {
 				fmt.Fprintf(a.stdout, "%s (since %s)\n", w.URL, w.AddedAt.Local().Format("2006-01-02"))

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/remote"
+	"github.com/kylebegeman/helios/internal/remote"
 )
 
 type credentialPromptOutput struct {

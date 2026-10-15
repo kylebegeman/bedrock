@@ -64,7 +64,7 @@ func LoadProfile(env Env) (Profile, error) {
 }
 
 // ErrNoProfile means the machine was never set up.
-var ErrNoProfile = errors.New("this machine has no profile yet: run bedrock host setup")
+var ErrNoProfile = errors.New("this machine has no profile yet: run helios host setup")
 
 // SaveProfile writes the profile where reconcile finds it.
 func SaveProfile(env Env, p Profile) error {

@@ -19,11 +19,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/compat"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/state"
-	"github.com/kylebegeman/bedrock/internal/version"
+	"github.com/kylebegeman/helios/internal/compat"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/state"
+	"github.com/kylebegeman/helios/internal/version"
 )
 
 // Summary is one operation as history lists it.
@@ -455,7 +455,7 @@ func lockOperations(ctx context.Context, statePath string) (func(), error) {
 		select {
 		case <-ctx.Done():
 			_ = f.Close()
-			return nil, fmt.Errorf("another bedrock operation is running on this machine: %w", ctx.Err())
+			return nil, fmt.Errorf("another helios operation is running on this machine: %w", ctx.Err())
 		case <-time.After(100 * time.Millisecond):
 		}
 	}

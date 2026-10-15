@@ -27,14 +27,14 @@ localize() { run "sed -i 's/lane\\.example\\.com/$LANE_DOMAIN/g' $*"; }
 quiet() { grep -v '^  \.\.\.  ' ; }
 
 echo "== build and install"
-(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -o bin/bedrock-linux-$LANE_ARCH ./cmd/bedrock)
+(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -o bin/bedrock-linux-$LANE_ARCH ./cmd/helios)
 put "$here/../bin/bedrock-linux-$LANE_ARCH" /usr/local/bin/bedrock.new
 run 'chmod 755 /usr/local/bin/bedrock.new && mv -f /usr/local/bin/bedrock.new /usr/local/bin/bedrock && bedrock daemon install >/dev/null && bedrock version'
 
 echo "== copy the fixtures, the sources and the archives"
 run 'mkdir -p /srv/lane/archives'
 (cd "$here/fixtures" && COPYFILE_DISABLE=1 tar czf - hello) | run 'rm -rf /srv/lane/hello && tar xzf - -C /srv/lane 2>/dev/null'
-localize /srv/lane/hello/bedrock.yaml
+localize /srv/lane/hello/helios.yaml
 (cd "$stage/src" && COPYFILE_DISABLE=1 tar czf - dragon-writer begamin) | run 'rm -rf /srv/lane/dragon-writer /srv/lane/begamin && tar xzf - -C /srv/lane 2>/dev/null'
 for f in "$stage"/archives/*; do put "$f" "/srv/lane/archives/$(basename "$f")"; done
 dump=$(cd "$stage/archives" && ls dragon_writer_*.dump | head -1)
@@ -66,7 +66,7 @@ echo "-- from the outside: $third"
 case "$third" in *"secret alpha"*) ;; *) echo "M4 NOT proven: the rollback didn't restore the secrets version" >&2; exit 1 ;; esac
 
 echo "== begamin from its archive"
-run "cat > /srv/lane/begamin/bedrock.yaml <<'EOF'
+run "cat > /srv/lane/begamin/helios.yaml <<'EOF'
 app: begamin
 description: A private API
 owner: personal
@@ -102,7 +102,7 @@ run 'bedrock deploy /srv/lane/begamin --yes --restore-volume data=/srv/lane/arch
 echo "-- from the outside: $(fetch -o /dev/null -w '%{http_code}' https://api.$LANE_DOMAIN/healthz) at https://api.$LANE_DOMAIN/healthz"
 
 echo "== Dragon Writer from its backup"
-run "cat > /srv/lane/dragon-writer/bedrock.yaml <<'EOF'
+run "cat > /srv/lane/dragon-writer/helios.yaml <<'EOF'
 app: dragon-writer
 description: A writing app
 owner: personal

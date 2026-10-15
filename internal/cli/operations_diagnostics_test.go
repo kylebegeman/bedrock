@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/api"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/version"
+	"github.com/kylebegeman/helios/internal/api"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/version"
 )
 
 func TestFailedOperationOffersSavedDiagnosticsFromTheSameState(t *testing.T) {
@@ -26,7 +26,7 @@ func TestFailedOperationOffersSavedDiagnosticsFromTheSameState(t *testing.T) {
 	if json.Unmarshal([]byte(lines[len(lines)-1]), &last) != nil || last.Receipt == nil {
 		t.Fatalf("missing failure receipt: %q", out)
 	}
-	if code != 1 || !strings.Contains(errOut, "bedrock history "+last.Receipt.ID+" --output") || !strings.Contains(errOut, "--state-dir '") || !strings.Contains(errOut, "'\"'\"'") {
+	if code != 1 || !strings.Contains(errOut, "helios history "+last.Receipt.ID+" --output") || !strings.Contains(errOut, "--state-dir '") || !strings.Contains(errOut, "'\"'\"'") {
 		t.Fatalf("missing correctly quoted recovery command: code %d, stderr %q", code, errOut)
 	}
 	// The follow-up is read-only and shows the completed step's diagnostic.
@@ -72,7 +72,7 @@ func TestDisconnectedOperationOffersSavedDiagnosticsOnTheSameSocket(t *testing.T
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err = a.operate(ctx, kernel.ExerciseKind, kernel.ExerciseInput{Dir: "fixture", Steps: 1}, false)
-	if !errors.Is(err, api.ErrDisconnected) || !strings.Contains(err.Error(), "bedrock history op-disconnected --output") || !strings.Contains(err.Error(), "--socket "+socket) || !strings.Contains(err.Error(), "--state-dir "+a.stateDir) {
+	if !errors.Is(err, api.ErrDisconnected) || !strings.Contains(err.Error(), "helios history op-disconnected --output") || !strings.Contains(err.Error(), "--socket "+socket) || !strings.Contains(err.Error(), "--state-dir "+a.stateDir) {
 		t.Fatalf("disconnection lost operation or connection context: %v", err)
 	}
 }

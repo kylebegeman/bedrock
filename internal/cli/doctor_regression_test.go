@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/host"
+	"github.com/kylebegeman/helios/internal/host"
 )
 
 func TestDoctorJSONPreservesFailureExitStatus(t *testing.T) {

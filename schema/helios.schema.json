@@ -1,0 +1,1306 @@
+{
+  "$defs": {
+    "Backup": {
+      "additionalProperties": false,
+      "properties": {
+        "drill": {
+          "description": "Five-field cron schedule in UTC. Default 0 4 * * 0",
+          "type": "string"
+        },
+        "keep": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Keep"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "off": {
+          "description": "Opt out of backups when the app's data is disposable.",
+          "type": "boolean"
+        },
+        "schedule": {
+          "description": "Five-field cron schedule in UTC. Default 0 3 * * *",
+          "type": "string"
+        },
+        "verify": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Verify"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Build": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "object"
+        },
+        "context": {
+          "description": "Build directory inside the source. Default .",
+          "pattern": "^(?!/)(?!.*\\.\\.).*$",
+          "type": "string"
+        },
+        "dockerfile": {
+          "description": "Dockerfile relative to the build context. Default Dockerfile.",
+          "type": "string"
+        },
+        "target": {
+          "description": "A named stage of a multi-stage Dockerfile.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Check": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "headers_from_secrets": {
+                "minProperties": 1
+              }
+            },
+            "required": [
+              "headers_from_secrets"
+            ]
+          },
+          "then": {
+            "properties": {
+              "context": {
+                "const": "edge"
+              },
+              "url": {
+                "pattern": "^https://"
+              }
+            },
+            "required": [
+              "context"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "contains": {
+          "type": "string"
+        },
+        "context": {
+          "description": "application probes the candidate container; edge probes the public route. Omitted runs the applicable checks in both phases.",
+          "enum": [
+            "",
+            "application",
+            "edge"
+          ],
+          "type": "string"
+        },
+        "headers_from_secrets": {
+          "additionalProperties": {
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "type": "string"
+          },
+          "description": "Request header names mapped to existing UPPER_CASE app secret names. Requires context: edge and an HTTPS URL; values never enter the manifest.",
+          "propertyNames": {
+            "allOf": [
+              {
+                "pattern": "^[!#$%\u0026'*+.^_`|~0-9A-Za-z-]+$",
+                "type": "string"
+              },
+              {
+                "not": {
+                  "pattern": "^(?:[hH][oO][sS][tT]|[cC][oO][nN][tT][eE][nN][tT]-[lL][eE][nN][gG][tT][hH]|[cC][oO][nN][nN][eE][cC][tT][iI][oO][nN]|[tT][rR][aA][nN][sS][fF][eE][rR]-[eE][nN][cC][oO][dD][iI][nN][gG]|[pP][rR][oO][xX][yY]-[aA][uU][tT][hH][oO][rR][iI][zZ][aA][tT][iI][oO][nN]|[pP][rR][oO][xX][yY]-[aA][uU][tT][hH][eE][nN][tT][iI][cC][aA][tT][eE]|[kK][eE][eE][pP]-[aA][lL][iI][vV][eE]|[tT][eE]|[tT][rR][aA][iI][lL][eE][rR]|[uU][pP][gG][rR][aA][dD][eE]|[fF][oO][rR][wW][aA][rR][dD][eE][dD]|[xX]-[fF][oO][rR][wW][aA][rR][dD][eE][dD]-[hH][oO][sS][tT]|[xX]-[fF][oO][rR][wW][aA][rR][dD][eE][dD]-[pP][rR][oO][tT][oO]|[xX]-[fF][oO][rR][wW][aA][rR][dD][eE][dD]-[fF][oO][rR]|[xX]-[fF][oO][rR][wW][aA][rR][dD][eE][dD]-[uU][rR][iI]|[xX]-[fF][oO][rR][wW][aA][rR][dD][eE][dD]-[mM][eE][tT][hH][oO][dD]|[xX]-[rR][eE][aA][lL]-[iI][pP])$"
+                }
+              }
+            ]
+          },
+          "type": "object"
+        },
+        "status": {
+          "maximum": 599,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "url": {
+          "pattern": "^https?://[^/?#@]+(?:[/?#]|$)",
+          "type": "string"
+        },
+        "within": {
+          "description": "Positive Go duration such as 5s, limiting acceptable response time.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "Data": {
+      "additionalProperties": false,
+      "properties": {
+        "objects": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Objects"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "postgres": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Postgres"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "volumes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Volume"
+          },
+          "propertyNames": {
+            "allOf": [
+              {
+                "pattern": "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$",
+                "type": "string"
+              },
+              {
+                "not": {
+                  "enum": [
+                    "postgres",
+                    "objects"
+                  ]
+                }
+              }
+            ]
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "Health": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "command": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "command"
+            ]
+          },
+          "then": {
+            "properties": {
+              "path": {
+                "const": ""
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "command": {
+          "items": {
+            "minLength": 1,
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "path": {
+          "pattern": "^(?:/.*|)$",
+          "type": "string"
+        },
+        "timeout": {
+          "description": "Positive Go duration such as 90s. Default 60s.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Keep": {
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "properties": {
+            "daily": {
+              "minimum": 1
+            }
+          },
+          "required": [
+            "daily"
+          ]
+        },
+        {
+          "properties": {
+            "weekly": {
+              "minimum": 1
+            }
+          },
+          "required": [
+            "weekly"
+          ]
+        },
+        {
+          "properties": {
+            "monthly": {
+              "minimum": 1
+            }
+          },
+          "required": [
+            "monthly"
+          ]
+        }
+      ],
+      "properties": {
+        "daily": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "monthly": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "weekly": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "Manifest": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "release": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "release"
+            ]
+          },
+          "then": {
+            "properties": {
+              "workloads": {
+                "not": {
+                  "additionalProperties": {
+                    "properties": {
+                      "kind": {
+                        "not": {
+                          "const": "release"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "preview": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "preview"
+            ]
+          },
+          "then": {
+            "properties": {
+              "workloads": {
+                "additionalProperties": {
+                  "properties": {
+                    "ports": {
+                      "maxItems": 0
+                    },
+                    "routes": {
+                      "items": {
+                        "properties": {
+                          "auth": {
+                            "const": "loom"
+                          }
+                        },
+                        "required": [
+                          "auth"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "app": {
+          "not": {
+            "enum": [
+              "bedrock",
+              "edge",
+              "helios",
+              "registry",
+              "restic"
+            ]
+          },
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$",
+          "type": "string"
+        },
+        "backup": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Backup"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/Check"
+          },
+          "type": "array"
+        },
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Data"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "description": "One line about what this app is for.",
+          "type": "string"
+        },
+        "owner": {
+          "description": "Who owns the app, such as personal or a business name.",
+          "type": "string"
+        },
+        "preview": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Preview"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "release": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReleasePolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "repo": {
+          "description": "Where the app's source lives.",
+          "type": "string"
+        },
+        "secrets": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Secrets"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workloads": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Workload"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$",
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "app",
+        "workloads"
+      ],
+      "type": "object"
+    },
+    "Mount": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "pattern": "^/",
+          "type": "string"
+        },
+        "volume": {
+          "description": "A volume declared under this app's data.volumes.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "volume",
+        "path"
+      ],
+      "type": "object"
+    },
+    "Objects": {
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Postgres": {
+      "additionalProperties": false,
+      "properties": {
+        "database": {
+          "pattern": "^(?:[a-z_][a-z0-9_]{0,62}|)$",
+          "type": "string"
+        },
+        "database_url": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "env": {
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "propertyNames": {
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "image": {
+          "type": "string"
+        },
+        "init": {
+          "description": "File or directory of .sql, .sql.gz or .sh first-run scripts inside the source.",
+          "pattern": "^(?!/)(?!.*\\.\\.).*$",
+          "type": "string"
+        },
+        "secrets": {
+          "items": {
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "user": {
+          "pattern": "^(?:[a-z_][a-z0-9_]{0,62}|)$",
+          "type": "string"
+        },
+        "version": {
+          "description": "Supported major version, 15 through 18. Default 16.",
+          "enum": [
+            "",
+            "15",
+            "16",
+            "17",
+            "18",
+            15,
+            16,
+            17,
+            18
+          ],
+          "type": [
+            "string",
+            "integer"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Preview": {
+      "additionalProperties": false,
+      "properties": {
+        "branch": {
+          "pattern": "^[^\\r\\n]*\\S[^\\r\\n]*$",
+          "type": "string"
+        },
+        "of": {
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$",
+          "type": "string"
+        },
+        "pinned": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "of",
+        "branch"
+      ],
+      "type": "object"
+    },
+    "PublishedPort": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "description": "Machine IP to bind; omitted means every address. Docker publishes past ufw.",
+          "type": "string"
+        },
+        "host_port": {
+          "anyOf": [
+            {
+              "maximum": 65535,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "const": 0
+            }
+          ],
+          "type": "integer"
+        },
+        "port": {
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "protocol": {
+          "enum": [
+            "",
+            "tcp",
+            "udp"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "port"
+      ],
+      "type": "object"
+    },
+    "ReleasePolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "data_compatibility": {
+          "description": "Whether older code can use data changed by release jobs; restore-required blocks rollback until a compatible checkpoint is restored.",
+          "enum": [
+            "backward-compatible",
+            "restore-required"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "data_compatibility"
+      ],
+      "type": "object"
+    },
+    "Resources": {
+      "additionalProperties": false,
+      "properties": {
+        "cpus": {
+          "maximum": 64,
+          "minimum": 0,
+          "type": "number"
+        },
+        "memory": {
+          "description": "Positive container memory ceiling in binary k, m or g units, such as 512m or 2g, within signed 64-bit bytes. Default 2g.",
+          "pattern": "^(?:0*[1-9][0-9]*[kmg]|)$",
+          "type": "string"
+        },
+        "pids": {
+          "anyOf": [
+            {
+              "const": 0
+            },
+            {
+              "maximum": 1048576,
+              "minimum": 16
+            }
+          ],
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "Route": {
+      "additionalProperties": false,
+      "properties": {
+        "auth": {
+          "description": "loom requires a signed-in Loom session; omitted leaves the route open.",
+          "enum": [
+            "",
+            "loom"
+          ],
+          "type": "string"
+        },
+        "dns": {
+          "description": "direct or proxied manages Cloudflare DNS; omitted leaves DNS alone.",
+          "enum": [
+            "",
+            "direct",
+            "proxied"
+          ],
+          "type": "string"
+        },
+        "host": {
+          "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,}$",
+          "type": "string"
+        },
+        "path": {
+          "pattern": "^(?:/[^*]*|)$",
+          "type": "string"
+        },
+        "port": {
+          "anyOf": [
+            {
+              "maximum": 65535,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "const": 0
+            }
+          ],
+          "type": "integer"
+        }
+      },
+      "required": [
+        "host"
+      ],
+      "type": "object"
+    },
+    "Secrets": {
+      "additionalProperties": false,
+      "properties": {
+        "derive": {
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "description": "Templates may refer to {NAME}, {sha256:NAME}, {postgres} and {objects}.",
+          "propertyNames": {
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "generate": {
+          "additionalProperties": {
+            "pattern": "^(?:(?:hex|base64|base64url):(?:[89]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-6])|value:[^\\r\\n\\u0000]+)$",
+            "type": "string"
+          },
+          "propertyNames": {
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "Verify": {
+      "additionalProperties": false,
+      "properties": {
+        "at_least": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sql": {
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sql"
+      ],
+      "type": "object"
+    },
+    "Volume": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Workload": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "web",
+                  "worker",
+                  "cron",
+                  "release"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "oneOf": [
+              {
+                "properties": {
+                  "build": {
+                    "type": "null"
+                  },
+                  "image": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "image"
+                ]
+              },
+              {
+                "properties": {
+                  "build": {
+                    "type": "object"
+                  },
+                  "image": {
+                    "const": ""
+                  }
+                },
+                "required": [
+                  "build"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "web"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "port": {
+                "maximum": 65535,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "routes": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "port",
+              "routes"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "static"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "build": {
+                "type": "null"
+              },
+              "dir": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "image": {
+                "const": ""
+              },
+              "port": {
+                "const": 0
+              },
+              "routes": {
+                "items": {
+                  "properties": {
+                    "port": {
+                      "const": 0
+                    }
+                  }
+                },
+                "minItems": 1
+              }
+            },
+            "required": [
+              "dir",
+              "routes"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "web",
+                  "worker",
+                  "cron",
+                  "release"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "dir": {
+                "const": ""
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "worker",
+                  "cron",
+                  "release"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "routes": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "cron"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "port": {
+                "const": 0
+              },
+              "schedule": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "schedule"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "release"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "port": {
+                "const": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "web",
+                  "static",
+                  "worker",
+                  "release"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "schedule": {
+                "const": ""
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "web",
+                  "static",
+                  "worker"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "timeout": {
+                "const": ""
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "web",
+                  "static",
+                  "worker",
+                  "cron"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "order": {
+                "const": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "static",
+                  "cron",
+                  "release"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "singleton": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "ports": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "ports"
+            ]
+          },
+          "then": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "web",
+                  "worker"
+                ]
+              },
+              "singleton": {
+                "const": true
+              }
+            },
+            "required": [
+              "singleton"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "privileged": {
+                "const": true
+              }
+            },
+            "required": [
+              "privileged"
+            ]
+          },
+          "then": {
+            "properties": {
+              "capabilities": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "aliases": {
+          "items": {
+            "pattern": "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "build": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Build"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Build an image from the source; image and build are alternatives."
+        },
+        "capabilities": {
+          "items": {
+            "pattern": "^(?:[Cc][Aa][Pp]_)?[A-Za-z][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "type": "array"
+        },
+        "dir": {
+          "description": "A static workload's directory inside the source.",
+          "pattern": "^(?!/)(?!.*\\.\\.).*$",
+          "type": "string"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "propertyNames": {
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "grace": {
+          "description": "Graceful stop duration, from 1s to 10m. Default 10s.",
+          "type": "string"
+        },
+        "health": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Health"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "image": {
+          "description": "An existing container image; give image or build for non-static workloads.",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "web",
+            "static",
+            "worker",
+            "cron",
+            "release"
+          ],
+          "type": "string"
+        },
+        "mounts": {
+          "items": {
+            "$ref": "#/$defs/Mount"
+          },
+          "type": "array"
+        },
+        "order": {
+          "type": "integer"
+        },
+        "port": {
+          "description": "The container port a web workload listens on.",
+          "type": "integer"
+        },
+        "ports": {
+          "items": {
+            "$ref": "#/$defs/PublishedPort"
+          },
+          "type": "array"
+        },
+        "privileged": {
+          "type": "boolean"
+        },
+        "resources": {
+          "$ref": "#/$defs/Resources"
+        },
+        "routes": {
+          "items": {
+            "$ref": "#/$defs/Route"
+          },
+          "type": "array"
+        },
+        "schedule": {
+          "description": "Five-field cron schedule in UTC; only cron workloads use it.",
+          "type": "string"
+        },
+        "secrets": {
+          "items": {
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "singleton": {
+          "description": "Stop the old container before starting the new one; required for published ports.",
+          "type": "boolean"
+        },
+        "timeout": {
+          "description": "Go duration such as 10m; only cron and release workloads use it.",
+          "type": "string"
+        },
+        "tmpfs": {
+          "items": {
+            "pattern": "^/",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "user": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9_][a-z0-9_-]*(:[a-z0-9_][a-z0-9_-]*)?$",
+              "type": "string"
+            },
+            {
+              "const": ""
+            }
+          ]
+        },
+        "writable_root": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/kylebegeman/helios/next/schema/helios.schema.json",
+  "$ref": "#/$defs/Manifest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "One app's workloads, routes, data, checks, secrets and backups. Run helios check for complete offline validation, including cross-field references and source files.",
+  "title": "Helios app manifest",
+  "x-bedrock-schema-version": "1",
+  "x-helios-schema-version": "1"
+}

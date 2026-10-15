@@ -11,8 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/kylebegeman/bedrock/internal/host"
-	"github.com/kylebegeman/bedrock/internal/release"
+	"github.com/kylebegeman/helios/internal/host"
+	"github.com/kylebegeman/helios/internal/release"
 )
 
 func newDoctor(a *app) *cobra.Command {
@@ -70,7 +70,7 @@ func newHost(a *app) *cobra.Command {
 	)
 	setup := &cobra.Command{
 		Use:   "setup",
-		Short: "Turn this machine into a bedrock host: Docker, firewall, key-only SSH, updates, swap, registry.",
+		Short: "Turn this machine into a helios host: Docker, firewall, key-only SSH, updates, swap, registry.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if profile.Hostname == "" {
@@ -138,15 +138,15 @@ func newUpgrade(a *app) *cobra.Command {
 		sha256Hex string
 	)
 	cmd := &cobra.Command{
-		Use:   "upgrade [path-to-new-bedrock]",
-		Short: "Replace bedrock with a new build and restart the daemon; systemd rolls back if it can't start.",
-		Long: "Replace bedrock with a new build and restart the daemon; systemd rolls back if it can't start.\n\n" +
+		Use:   "upgrade [path-to-new-helios]",
+		Short: "Replace helios with a new build and restart the daemon; systemd rolls back if it can't start.",
+		Long: "Replace helios with a new build and restart the daemon; systemd rolls back if it can't start.\n\n" +
 			"With --version the build is downloaded from the published release and checked\n" +
 			"against the SHA256SUMS beside it. That proves the two agree and nothing more,\n" +
 			"since whoever can replace one can replace both; pass --sha256 with a checksum\n" +
 			"from reviewed source to pin it.\n\n" +
-			"  bedrock upgrade --version 0.7.4\n" +
-			"  bedrock upgrade /tmp/bedrock-new",
+			"  helios upgrade --version 0.7.4\n" +
+			"  helios upgrade /tmp/helios-new",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch {
@@ -169,13 +169,13 @@ func newUpgrade(a *app) *cobra.Command {
 				if err := release.CheckVersion(toVersion); err != nil {
 					return err
 				}
-				// Into bedrock's own directory, not a temporary one: the
+				// Into helios's own directory, not a temporary one: the
 				// daemon restarts mid-upgrade and the plan is rebuilt when
 				// the operation resumes, which reads this path again.
 				if err := os.MkdirAll(host.LibDir, 0o755); err != nil {
 					return err
 				}
-				fmt.Fprintf(a.stderr, "fetching bedrock %s\n", toVersion)
+				fmt.Fprintf(a.stderr, "fetching helios %s\n", toVersion)
 				got, err := release.Fetch(cmd.Context(), toVersion, host.LibDir, sha256Hex)
 				if err != nil {
 					return err

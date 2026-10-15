@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/integration"
+	"github.com/kylebegeman/helios/internal/integration"
 )
 
 // The mismatched bucket is the whole reason Check exists. Two machines set

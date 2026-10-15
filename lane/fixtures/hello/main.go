@@ -24,7 +24,7 @@ func main() {
 	}
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprintln(w, "ok") })
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "%s from bedrock, revision %s, secret %s, path %s\n", greeting, revision, secret, r.URL.Path)
+		fmt.Fprintf(w, "%s from helios, revision %s, secret %s, path %s\n", greeting, revision, secret, r.URL.Path)
 	})
 	if err := http.ListenAndServe(":8000", nil); err != nil {
 		fmt.Fprintln(os.Stderr, err)

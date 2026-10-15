@@ -1,4 +1,4 @@
-// Package cli builds the bedrock command tree.
+// Package cli builds the helios command tree.
 package cli
 
 import (
@@ -10,16 +10,17 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
 
-	"github.com/kylebegeman/bedrock/internal/api"
-	"github.com/kylebegeman/bedrock/internal/daemon"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/state"
-	"github.com/kylebegeman/bedrock/internal/ui"
-	"github.com/kylebegeman/bedrock/internal/version"
+	"github.com/kylebegeman/helios/internal/api"
+	"github.com/kylebegeman/helios/internal/daemon"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/state"
+	"github.com/kylebegeman/helios/internal/ui"
+	"github.com/kylebegeman/helios/internal/version"
 )
 
 // Main runs the command line with the given arguments and returns the
@@ -34,7 +35,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		if errors.As(err, &quiet) {
 			return quiet.code
 		}
-		fmt.Fprintln(stderr, "bedrock:", err)
+		fmt.Fprintln(stderr, "helios:", err)
 		return 1
 	}
 	return 0
@@ -100,14 +101,14 @@ func newRoot(stdout, stderr io.Writer) *cobra.Command {
 		a.tty = ui.IsTerminal(f)
 	}
 	root := &cobra.Command{
-		Use:           "bedrock",
+		Use:           "helios",
 		Short:         "One small program that runs your machines.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	root.PersistentFlags().StringVar(&a.stateDir, "state-dir", envOr("BEDROCK_STATE_DIR", defaultStateDir()), "where bedrock keeps its state")
+	root.PersistentFlags().StringVar(&a.stateDir, "state-dir", envOr("BEDROCK_STATE_DIR", defaultStateDir()), "where helios keeps its state")
 	root.PersistentFlags().StringVar(&a.socket, "socket", envOr("BEDROCK_SOCKET", daemon.DefaultSocket), "the daemon's socket; the local kernel is used when nothing answers")
 	root.PersistentFlags().BoolVar(&a.json, "json", false, "print JSON, one object per line")
 	root.AddCommand(newVersion(a), newCapabilities(a), newInit(a), newCheck(a), newDoctor(a), newHost(a), newUpgrade(a), newDeploy(a), newRollback(a), newLs(a), newStatus(a), newExposure(a), newDNS(a), newPs(a), newLogs(a), newExec(a), newGC(a), newLaunch(a), newMove(a), newPreview(a), newSecret(a), newIntegration(a), newRun(a), newJobs(a), newPsql(a), newBackup(a), newBackups(a), newDrill(a), newRestore(a), newRecover(a), newRehearse(a), newAlerts(a), newWatch(a), newRemove(a), newGit(a), newReceive(a), newHistory(a), newKernel(a), newDaemon(a))
@@ -120,11 +121,34 @@ type quietError struct{ code int }
 
 func (q quietError) Error() string { return fmt.Sprintf("exit %d", q.code) }
 
+// Helios and the compatibility entrypoint share the legacy storage layout.
+// Prefer the new environment spelling; conflicts are rejected before execution.
 func envOr(name, fallback string) string {
+	if strings.HasPrefix(name, "BEDROCK_") {
+		if v := os.Getenv("HELIOS_" + strings.TrimPrefix(name, "BEDROCK_")); v != "" {
+			return v
+		}
+	}
 	if v := os.Getenv(name); v != "" {
 		return v
 	}
 	return fallback
+}
+
+func validateEnvironmentAliases(cmd *cobra.Command) error {
+	for _, setting := range []struct{ suffix, flag string }{
+		{"STATE_DIR", "state-dir"}, {"SOCKET", "socket"}, {"TARGETS_FILE", "targets-file"}, {"BOOTSTRAP_DIR", "journal-dir"}, {"SSH", ""},
+	} {
+		if setting.flag != "" && cmd.Flags().Changed(setting.flag) {
+			continue
+		}
+		current, legacy := "HELIOS_"+setting.suffix, "BEDROCK_"+setting.suffix
+		a, b := os.Getenv(current), os.Getenv(legacy)
+		if a != "" && b != "" && a != b {
+			return fmt.Errorf("%s and %s conflict; set only one or give both the same value", current, legacy)
+		}
+	}
+	return nil
 }
 
 // defaultStateDir is /var/lib/bedrock for root on Linux (the machines) and

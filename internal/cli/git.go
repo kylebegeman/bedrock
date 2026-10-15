@@ -23,13 +23,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	apps "github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/gitdeploy"
-	"github.com/kylebegeman/bedrock/internal/host"
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/remote"
-	"github.com/kylebegeman/bedrock/internal/state"
+	apps "github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/gitdeploy"
+	"github.com/kylebegeman/helios/internal/host"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/remote"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 func newGit(a *app) *cobra.Command {
@@ -41,11 +41,11 @@ func newGit(a *app) *cobra.Command {
 	return cmd
 }
 
-// newGitAllow is bedrock git allow.
+// newGitAllow is helios git allow.
 func newGitAllow(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "allow <app> [public key]",
-		Short: "Let an SSH key deploy an app with git push or bedrock deploy --to. The key comes from the argument or stdin.",
+		Short: "Let an SSH key deploy an app with git push or helios deploy --to. The key comes from the argument or stdin.",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			appName := args[0]
@@ -72,14 +72,14 @@ func newGitAllow(a *app) *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(a.stdout, "%s may deploy %s\n", key.Fingerprint(), strings.Join(key.Apps, ", "))
-			fmt.Fprintf(a.stdout, "from its machine: git remote add bedrock %s && git push bedrock main\n", remoteFor(cmd.Context(), appName))
+			fmt.Fprintf(a.stdout, "from its machine: git remote add helios %s && git push helios main\n", remoteFor(cmd.Context(), appName))
 			return nil
 		},
 	}
 	return cmd
 }
 
-// newGitDeny is bedrock git deny.
+// newGitDeny is helios git deny.
 func newGitDeny(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "deny <app> <fingerprint or public key>",
@@ -101,7 +101,7 @@ func newGitDeny(a *app) *cobra.Command {
 	return cmd
 }
 
-// newGitKeys is bedrock git keys.
+// newGitKeys is helios git keys.
 func newGitKeys(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "keys",
@@ -125,7 +125,7 @@ func newGitKeys(a *app) *cobra.Command {
 				return json.NewEncoder(a.stdout).Encode(rows)
 			}
 			if len(kf.Keys) == 0 {
-				fmt.Fprintln(a.stdout, "no key may push yet; bedrock git allow <app> <public key> adds one")
+				fmt.Fprintln(a.stdout, "no key may push yet; helios git allow <app> <public key> adds one")
 				return nil
 			}
 			w := tabwriter.NewWriter(a.stdout, 0, 4, 2, ' ', 0)
@@ -139,7 +139,7 @@ func newGitKeys(a *app) *cobra.Command {
 	return cmd
 }
 
-// newGitRemote is bedrock git remote.
+// newGitRemote is helios git remote.
 func newGitRemote(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "remote <app>",
@@ -153,7 +153,7 @@ func newGitRemote(a *app) *cobra.Command {
 	return cmd
 }
 
-// newGitBranch is bedrock git branch.
+// newGitBranch is helios git branch.
 func newGitBranch(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "branch <app> <branch>",
@@ -177,7 +177,7 @@ func newGitBranch(a *app) *cobra.Command {
 	return cmd
 }
 
-// newGitWebhook is bedrock git webhook.
+// newGitWebhook is helios git webhook.
 func newGitWebhook(a *app) *cobra.Command {
 	var (
 		repo, hookBranch string
@@ -251,7 +251,7 @@ func newGitWebhook(a *app) *cobra.Command {
 	return cmd
 }
 
-// newGitWebhooks is bedrock git webhooks.
+// newGitWebhooks is helios git webhooks.
 func newGitWebhooks(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "webhooks",
@@ -289,7 +289,7 @@ func newGitWebhooks(a *app) *cobra.Command {
 	return cmd
 }
 
-// newGitServe is bedrock git serve, what a push key runs.
+// newGitServe is helios git serve, what a push key runs.
 func newGitServe(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:    "serve <apps...>",
@@ -328,7 +328,7 @@ func newGitServe(a *app) *cobra.Command {
 	return cmd
 }
 
-// newGitHook is bedrock git hook, an app repository's pre-receive hook.
+// newGitHook is helios git hook, an app repository's pre-receive hook.
 func newGitHook(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:    "hook <app>",
@@ -345,13 +345,13 @@ func newGitHook(a *app) *cobra.Command {
 	return cmd
 }
 
-// newReceive deploys a source tree sent on stdin, for bedrock deploy --to
+// newReceive deploys a source tree sent on stdin, for helios deploy --to
 // over a root login; the bedrock user's keys reach the same code through
 // git serve.
 func newReceive(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:    "receive <app>",
-		Short:  "Deploy the source tree on stdin (what bedrock deploy --to sends).",
+		Short:  "Deploy the source tree on stdin (what helios deploy --to sends).",
 		Hidden: true,
 		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -396,7 +396,7 @@ func updateKeys(change func(*gitdeploy.KeyFile) error) error {
 func chownToPushUser(path string) error {
 	u, err := user.Lookup(gitdeploy.User)
 	if err != nil {
-		return fmt.Errorf("the %s user doesn't exist; run bedrock host reconcile", gitdeploy.User)
+		return fmt.Errorf("the %s user doesn't exist; run helios host reconcile", gitdeploy.User)
 	}
 	uid, _ := strconv.Atoi(u.Uid)
 	gid, _ := strconv.Atoi(u.Gid)

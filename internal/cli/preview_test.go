@@ -9,17 +9,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/state"
 
-	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/helios/internal/secrets"
 )
 
 const siteYAML = "app: site\nworkloads:\n  web:\n    kind: web\n    image: alpine:3.21\n    port: 80\n    routes: [{host: site.example.com}]\n"
 
 func TestAPlannedPreviewCopiesNoSecrets(t *testing.T) {
 	stateDir := t.TempDir()
-	repo := bareRepo(t, map[string]string{"bedrock.yaml": siteYAML})
+	repo := bareRepo(t, map[string]string{"helios.yaml": siteYAML})
 	if _, errOut, code := withStdin(t, "verify_url=https://loom.example.com/api/cloud/auth/verify\n", stateDir, "integration", "set", "loom"); code != 0 {
 		t.Fatalf("loom: %d %q", code, errOut)
 	}
@@ -138,7 +138,7 @@ func TestPreviewCleanupRefusesAnOrdinaryAppWithAPreviewLookingName(t *testing.T)
 func TestPreviewRedeployPreservesPinAndReportsIndividualUnsupportedChecks(t *testing.T) {
 	stateDir := t.TempDir()
 	saveCLIPreview(t, stateDir, "site-pr-main", "site", "main", true, time.Now())
-	repo := bareRepo(t, map[string]string{"bedrock.yaml": siteYAML + "checks:\n  - url: https://site.example.com/\n    contains: expected content\n  - url: https://external.example.com/\n    context: edge\n"})
+	repo := bareRepo(t, map[string]string{"helios.yaml": siteYAML + "checks:\n  - url: https://site.example.com/\n    contains: expected content\n  - url: https://external.example.com/\n    context: edge\n"})
 	if _, errOut, code := withStdin(t, "verify_url=https://loom.example.com/api/cloud/auth/verify\n", stateDir, "integration", "set", "loom"); code != 0 {
 		t.Fatalf("loom: %d %s", code, errOut)
 	}

@@ -6,13 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/api"
-	"github.com/kylebegeman/bedrock/internal/app"
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/api"
+	"github.com/kylebegeman/helios/internal/app"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // MachineBackupSchedule is when the machine's own state is backed up.
@@ -73,7 +73,7 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) {
 		// hour, only when there is something that wants backing up.
 		if len(active) > 0 && now.Sub(s.warnedAt) >= time.Hour {
 			s.warnedAt = now
-			s.Log("schedule: no backups run until storage is set: bedrock integration set storage")
+			s.Log("schedule: no backups run until storage is set: helios integration set storage")
 		}
 		return
 	}

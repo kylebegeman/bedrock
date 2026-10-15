@@ -1,4 +1,4 @@
-// Package docker is bedrock's view of the Docker Engine: containers,
+// Package docker is helios's view of the Docker Engine: containers,
 // networks and images it owns, named readably and labeled so nothing else
 // is ever touched. Builds go through the docker CLI, everything else
 // through the Engine API.
@@ -22,7 +22,7 @@ import (
 	"github.com/moby/moby/client"
 )
 
-// Labels bedrock puts on everything it creates.
+// Labels helios puts on everything it creates.
 const (
 	LabelOwner    = "bedrock.owner"
 	LabelApp      = "bedrock.app"
@@ -135,7 +135,7 @@ func (e *Engine) DisconnectNetwork(ctx context.Context, containerName, networkNa
 	return nil
 }
 
-// Networks lists the networks bedrock made whose names start with prefix.
+// Networks lists the networks helios made whose names start with prefix.
 func (e *Engine) Networks(ctx context.Context, prefix string) ([]string, error) {
 	res, err := e.cli.NetworkList(ctx, client.NetworkListOptions{})
 	if err != nil {
@@ -150,7 +150,7 @@ func (e *Engine) Networks(ctx context.Context, prefix string) ([]string, error) 
 	return out, nil
 }
 
-// Spec is a container bedrock wants running.
+// Spec is a container helios wants running.
 type Spec struct {
 	Name  string
 	Image string
@@ -192,7 +192,7 @@ type Spec struct {
 	// is closed at its end.
 	Stdin io.Reader
 	// NoHealthcheck turns off the image's own HEALTHCHECK, for a container
-	// whose health bedrock checks its own way.
+	// whose health helios checks its own way.
 	NoHealthcheck bool
 }
 
@@ -394,7 +394,7 @@ func parsePublish(spec string) (network.Port, network.PortBinding, error) {
 	return port, binding, nil
 }
 
-// Info is what bedrock needs to know about a container.
+// Info is what helios needs to know about a container.
 type Info struct {
 	ID      string
 	Name    string
@@ -410,7 +410,7 @@ type Info struct {
 	// IPs by network.
 	IPs    map[string]string
 	Labels map[string]string
-	// User is who the container runs as, as Docker keeps it; bedrock sets
+	// User is who the container runs as, as Docker keeps it; helios sets
 	// it as uid:gid.
 	User string
 	// Volumes are the named volumes it mounts.
@@ -501,7 +501,7 @@ func (e *Engine) Start(ctx context.Context, name string) error {
 	return nil
 }
 
-// Owned lists every container bedrock created, running or not.
+// Owned lists every container helios created, running or not.
 func (e *Engine) Owned(ctx context.Context) ([]Info, error) {
 	res, err := e.cli.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
@@ -521,7 +521,7 @@ func (e *Engine) Owned(ctx context.Context) ([]Info, error) {
 	return out, nil
 }
 
-// Unowned counts containers bedrock didn't create.
+// Unowned counts containers helios didn't create.
 func (e *Engine) Unowned(ctx context.Context) ([]string, error) {
 	res, err := e.cli.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
@@ -625,7 +625,7 @@ func repository(ref string) string {
 	return ref
 }
 
-// RemoveImage deletes an image bedrock built. Missing is fine.
+// RemoveImage deletes an image helios built. Missing is fine.
 func (e *Engine) RemoveImage(ctx context.Context, ref string) error {
 	_, err := e.cli.ImageRemove(ctx, ref, client.ImageRemoveOptions{})
 	if err != nil && !IsNotFound(err) {

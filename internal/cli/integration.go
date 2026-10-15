@@ -14,15 +14,15 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/kylebegeman/bedrock/internal/cloudflare"
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/cloudflare"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 func newIntegration(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "integration",
-		Short: "The credentials bedrock itself uses: storage for backups, email for alerts, Cloudflare for DNS.",
+		Short: "The credentials helios itself uses: storage for backups, email for alerts, Cloudflare for DNS.",
 	}
 	set := &cobra.Command{
 		Use:   "set <name>",
@@ -56,9 +56,9 @@ func newIntegration(a *app) *cobra.Command {
 				return err
 			}
 			for field, value := range generated {
-				fmt.Fprintf(a.stderr, "\nbedrock made a %s for %s. It is shown once, here, and nowhere else. Keep it with the recovery identity in your password manager; a new machine needs it to read these backups:\n\n  %s\n\n", field, def.Name, value)
+				fmt.Fprintf(a.stderr, "\nhelios made a %s for %s. It is shown once, here, and nowhere else. Keep it with the recovery identity in your password manager; a new machine needs it to read these backups:\n\n  %s\n\n", field, def.Name, value)
 			}
-			fmt.Fprintf(a.stdout, "%s set (bedrock's secrets version %d)\n", def.Name, version)
+			fmt.Fprintf(a.stdout, "%s set (helios's secrets version %d)\n", def.Name, version)
 			return nil
 		},
 	}
@@ -111,7 +111,7 @@ func newIntegration(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(a.stdout, "%s removed (bedrock's secrets version %d)\n", args[0], version)
+			fmt.Fprintf(a.stdout, "%s removed (helios's secrets version %d)\n", args[0], version)
 			return nil
 		},
 	}

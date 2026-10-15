@@ -1,9 +1,9 @@
 === {App:acme Kind:web Host:acme.example.com Port:0 Schedule: Postgres:false Dir: Existing:false}
-# acme, as bedrock deploys it.
+# acme, as helios deploys it.
 #
 # Anything left out takes its default, and the defaults are the safe
 # ones: a read-only root, no capabilities, a non-root user. Run
-# `bedrock deploy` from the directory holding this file.
+# `helios deploy` from the directory holding this file.
 app: acme
 description: What this app is
 owner: personal
@@ -30,11 +30,11 @@ workloads:
 checks:
   - url: https://acme.example.com/
 === {App:acme Kind:web Host:acme.example.com Port:3000 Schedule: Postgres:true Dir: Existing:false}
-# acme, as bedrock deploys it.
+# acme, as helios deploys it.
 #
 # Anything left out takes its default, and the defaults are the safe
 # ones: a read-only root, no capabilities, a non-root user. Run
-# `bedrock deploy` from the directory holding this file.
+# `helios deploy` from the directory holding this file.
 app: acme
 description: What this app is
 owner: personal
@@ -72,7 +72,7 @@ workloads:
 
 data:
   # Every workload above is given DATABASE_URL pointing here, so
-  # nothing else needs declaring to use it. bedrock generates the
+  # nothing else needs declaring to use it. helios generates the
   # password, seals it, and never writes it to a log or a receipt.
   postgres:
     version: "17"
@@ -92,11 +92,11 @@ backup:
 checks:
   - url: https://acme.example.com/
 === {App:acme Kind:static Host:acme.example.com Port:0 Schedule: Postgres:false Dir: Existing:false}
-# acme, as bedrock deploys it.
+# acme, as helios deploys it.
 #
 # Anything left out takes its default, and the defaults are the safe
 # ones: a read-only root, no capabilities, a non-root user. Run
-# `bedrock deploy` from the directory holding this file.
+# `helios deploy` from the directory holding this file.
 app: acme
 description: What this app is
 owner: personal
@@ -114,11 +114,11 @@ workloads:
 checks:
   - url: https://acme.example.com/
 === {App:acme Kind:static Host:acme.example.com Port:0 Schedule: Postgres:true Dir:dist Existing:false}
-# acme, as bedrock deploys it.
+# acme, as helios deploys it.
 #
 # Anything left out takes its default, and the defaults are the safe
 # ones: a read-only root, no capabilities, a non-root user. Run
-# `bedrock deploy` from the directory holding this file.
+# `helios deploy` from the directory holding this file.
 app: acme
 description: What this app is
 owner: personal
@@ -147,7 +147,7 @@ workloads:
 
 data:
   # Every workload above is given DATABASE_URL pointing here, so
-  # nothing else needs declaring to use it. bedrock generates the
+  # nothing else needs declaring to use it. helios generates the
   # password, seals it, and never writes it to a log or a receipt.
   postgres:
     version: "17"
@@ -167,11 +167,11 @@ backup:
 checks:
   - url: https://acme.example.com/
 === {App:acme Kind:worker Host: Port:0 Schedule: Postgres:false Dir: Existing:false}
-# acme, as bedrock deploys it.
+# acme, as helios deploys it.
 #
 # Anything left out takes its default, and the defaults are the safe
 # ones: a read-only root, no capabilities, a non-root user. Run
-# `bedrock deploy` from the directory holding this file.
+# `helios deploy` from the directory holding this file.
 app: acme
 description: What this app is
 owner: personal
@@ -191,11 +191,11 @@ workloads:
     resources:
       memory: 512m
 === {App:acme Kind:worker Host: Port:0 Schedule: Postgres:true Dir: Existing:false}
-# acme, as bedrock deploys it.
+# acme, as helios deploys it.
 #
 # Anything left out takes its default, and the defaults are the safe
 # ones: a read-only root, no capabilities, a non-root user. Run
-# `bedrock deploy` from the directory holding this file.
+# `helios deploy` from the directory holding this file.
 app: acme
 description: What this app is
 owner: personal
@@ -230,7 +230,7 @@ workloads:
 
 data:
   # Every workload above is given DATABASE_URL pointing here, so
-  # nothing else needs declaring to use it. bedrock generates the
+  # nothing else needs declaring to use it. helios generates the
   # password, seals it, and never writes it to a log or a receipt.
   postgres:
     version: "17"
@@ -246,11 +246,11 @@ backup:
   #   sql: select count(*) from users
   #   at_least: 1
 === {App:acme Kind:cron Host: Port:0 Schedule: Postgres:false Dir: Existing:false}
-# acme, as bedrock deploys it.
+# acme, as helios deploys it.
 #
 # Anything left out takes its default, and the defaults are the safe
 # ones: a read-only root, no capabilities, a non-root user. Run
-# `bedrock deploy` from the directory holding this file.
+# `helios deploy` from the directory holding this file.
 app: acme
 description: What this app is
 owner: personal
@@ -269,11 +269,11 @@ workloads:
     resources:
       memory: 512m
 === {App:acme Kind:cron Host: Port:0 Schedule:*/15 * * * * Postgres:true Dir: Existing:false}
-# acme, as bedrock deploys it.
+# acme, as helios deploys it.
 #
 # Anything left out takes its default, and the defaults are the safe
 # ones: a read-only root, no capabilities, a non-root user. Run
-# `bedrock deploy` from the directory holding this file.
+# `helios deploy` from the directory holding this file.
 app: acme
 description: What this app is
 owner: personal
@@ -307,7 +307,7 @@ workloads:
 
 data:
   # Every workload above is given DATABASE_URL pointing here, so
-  # nothing else needs declaring to use it. bedrock generates the
+  # nothing else needs declaring to use it. helios generates the
   # password, seals it, and never writes it to a log or a receipt.
   postgres:
     version: "17"

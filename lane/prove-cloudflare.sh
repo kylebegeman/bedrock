@@ -39,11 +39,11 @@ for h in api.$LANE_DOMAIN go.$LANE_DOMAIN; do
 done
 
 echo "== a route's record follows it: made with the route, removed when the route goes"
-run "grep -q dnstest /srv/lane/hello/bedrock.yaml || sed -i 's|      - host: hello.$LANE_DOMAIN|      - host: hello.$LANE_DOMAIN\n      - host: dnstest.$LANE_DOMAIN\n        dns: direct|' /srv/lane/hello/bedrock.yaml"
+run "grep -q dnstest /srv/lane/hello/helios.yaml || sed -i 's|      - host: hello.$LANE_DOMAIN|      - host: hello.$LANE_DOMAIN\n      - host: dnstest.$LANE_DOMAIN\n        dns: direct|' /srv/lane/hello/helios.yaml"
 run 'bedrock deploy /srv/lane/hello --yes' | quiet | grep -E "dnstest|succeeded|failed"
 [[ "$(verdict dnstest.$LANE_DOMAIN)" == ok ]] || fail "dnstest.$LANE_DOMAIN has no record of bedrock's"
 echo "-- from the outside: $(fetch https://dnstest.$LANE_DOMAIN/)"
-run "sed -i '/dnstest.$LANE_DOMAIN/,+1d' /srv/lane/hello/bedrock.yaml && bedrock deploy /srv/lane/hello --yes" | quiet | grep -E "record removed|succeeded|failed"
+run "sed -i '/dnstest.$LANE_DOMAIN/,+1d' /srv/lane/hello/helios.yaml && bedrock deploy /srv/lane/hello --yes" | quiet | grep -E "record removed|succeeded|failed"
 audit_mentions dnstest.$LANE_DOMAIN && fail "dnstest.$LANE_DOMAIN's record outlived its route"
 echo "-- the audit finds nothing left of dnstest.$LANE_DOMAIN"
 
@@ -59,7 +59,7 @@ echo "== exploratory: a proxied route, reached through Cloudflare's own addresse
 # Two levels below the zone, so Cloudflare's free certificate doesn't cover
 # it: plain HTTP goes through the proxy, HTTPS fails at Cloudflare's edge,
 # and bedrock says so. A name one level below the zone is what proxied suits.
-run "grep -q proxytest /srv/lane/hello/bedrock.yaml || sed -i 's|      - host: hello.$LANE_DOMAIN|      - host: hello.$LANE_DOMAIN\n      - host: proxytest.$LANE_DOMAIN\n        dns: proxied|' /srv/lane/hello/bedrock.yaml"
+run "grep -q proxytest /srv/lane/hello/helios.yaml || sed -i 's|      - host: hello.$LANE_DOMAIN|      - host: hello.$LANE_DOMAIN\n      - host: proxytest.$LANE_DOMAIN\n        dns: proxied|' /srv/lane/hello/helios.yaml"
 run 'bedrock deploy /srv/lane/hello --yes' 2>&1 | quiet | grep -E "proxytest|note:|succeeded|failed" || true
 proxy=""
 for _ in $(seq 1 30); do
@@ -71,7 +71,7 @@ done
 echo "-- public DNS answers with Cloudflare's $proxy"
 echo "-- plain HTTP through Cloudflare: $(fetch --resolve "proxytest.$LANE_DOMAIN:80:$proxy" -o /dev/null -w '%{http_code}' http://proxytest.$LANE_DOMAIN/ 2>&1 || true)"
 echo "-- HTTPS through Cloudflare: $(fetch --resolve "proxytest.$LANE_DOMAIN:443:$proxy" -o /dev/null -w '%{http_code}' https://proxytest.$LANE_DOMAIN/ 2>&1 | tail -1 || true)"
-run "sed -i '/proxytest.$LANE_DOMAIN/,+1d' /srv/lane/hello/bedrock.yaml && bedrock deploy /srv/lane/hello --yes" | quiet | grep -E "record removed|succeeded|failed"
+run "sed -i '/proxytest.$LANE_DOMAIN/,+1d' /srv/lane/hello/helios.yaml && bedrock deploy /srv/lane/hello --yes" | quiet | grep -E "record removed|succeeded|failed"
 audit_mentions proxytest.$LANE_DOMAIN && fail "proxytest.$LANE_DOMAIN's record outlived its route"
 echo "-- proxytest.$LANE_DOMAIN's record is gone again"
 

@@ -369,6 +369,7 @@
             "enum": [
               "bedrock",
               "edge",
+              "helios",
               "registry",
               "restic"
             ]
@@ -1298,7 +1299,8 @@
   "$id": "https://raw.githubusercontent.com/kylebegeman/bedrock/next/schema/bedrock.schema.json",
   "$ref": "#/$defs/Manifest",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "One app's workloads, routes, data, checks, secrets and backups. Run bedrock check for complete offline validation, including cross-field references and source files.",
-  "title": "Bedrock app manifest",
-  "x-bedrock-schema-version": "1"
+  "description": "One app's workloads, routes, data, checks, secrets and backups. Run helios check for complete offline validation, including cross-field references and source files.",
+  "title": "Helios app manifest",
+  "x-bedrock-schema-version": "1",
+  "x-helios-schema-version": "1"
 }

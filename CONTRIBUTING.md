@@ -1,6 +1,6 @@
-# Contributing To Bedrock
+# Contributing To Helios
 
-Bedrock is one Go program (Go 1.26, no cgo) that runs a machine. Changes
+Helios is one Go program (Go 1.26, no cgo) that runs a machine. Changes
 are small, proven where they can be, and written in plain prose: an error
 says what to do next, a plan says what will change.
 
@@ -8,8 +8,8 @@ says what to do next, a plan says what will change.
 
 ```sh
 make check   # gofmt, go vet, go test ./...
-make build   # bin/bedrock for this Mac
-make linux   # bin/bedrock-linux-amd64 for the machines
+make build   # bin/helios for this Mac
+make linux   # bin/helios-linux-amd64 for the machines
 ```
 
 CI runs `make check` and cross-builds for linux/amd64 and darwin/arm64 on
@@ -50,6 +50,6 @@ than passing. Select proof scopes appropriate to the changed behavior.
 
 ## Pull requests
 
-Run `make check`, say what changes for a person using bedrock and how it
-was verified, and keep a pull request to one subject. Bedrock is licensed
+Run `make check`, say what changes for a person using helios and how it
+was verified, and keep a pull request to one subject. Helios is licensed
 under the Apache License 2.0; a contribution is licensed the same way.

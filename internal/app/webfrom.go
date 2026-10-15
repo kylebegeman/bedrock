@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/helios/internal/manifest"
 )
 
 // CloudflareOnly reports whether this machine lets only Cloudflare's proxy
@@ -36,7 +36,7 @@ func (only CloudflareOnly) bypassing(hosts map[string]manifest.DNSMode) ([]strin
 }
 
 // onlyCloudflare opens the refusals below.
-const onlyCloudflare = "this machine takes the web only from Cloudflare (bedrock host setup --web-from cloudflare)"
+const onlyCloudflare = "this machine takes the web only from Cloudflare (helios host setup --web-from cloudflare)"
 
 // checkRoutes refuses a manifest with a route Cloudflare's proxy would not
 // carry, on a machine that answers only Cloudflare.
@@ -45,7 +45,7 @@ func (only CloudflareOnly) checkRoutes(m *manifest.Manifest) error {
 	if err != nil || len(direct) == 0 {
 		return err
 	}
-	return fmt.Errorf("%s, so nothing could reach %s's %s. Give every route dns: proxied, or open the web to anyone with bedrock host setup --web-from anyone",
+	return fmt.Errorf("%s, so nothing could reach %s's %s. Give every route dns: proxied, or open the web to anyone with helios host setup --web-from anyone",
 		onlyCloudflare, m.App, strings.Join(direct, ", "))
 }
 

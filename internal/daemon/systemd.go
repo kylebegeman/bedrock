@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/api"
-	"github.com/kylebegeman/bedrock/internal/host"
+	"github.com/kylebegeman/helios/internal/api"
+	"github.com/kylebegeman/helios/internal/host"
 )
 
 // UnitPath is where the daemon's systemd unit lives.
@@ -26,8 +26,8 @@ const UnitPath = "/etc/systemd/system/bedrock.service"
 // modules Docker needs. The limit on open files is the one bound it can
 // take: sockets, the store, Docker's streams and every probe at once.
 const unitTemplate = `[Unit]
-Description=Bedrock host daemon
-Documentation=https://github.com/kylebegeman/bedrock
+Description=Helios host daemon
+Documentation=https://github.com/kylebegeman/helios
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=60
@@ -112,7 +112,7 @@ func Install(ctx context.Context, out io.Writer) error {
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		if info, err := client.Version(ctx); err == nil {
-			fmt.Fprintf(out, "bedrock daemon %s is running\n", info.Version)
+			fmt.Fprintf(out, "helios daemon %s is running\n", info.Version)
 			return nil
 		}
 		if time.Now().After(deadline) {

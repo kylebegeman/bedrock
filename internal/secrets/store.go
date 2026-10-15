@@ -36,7 +36,7 @@ type Store struct {
 
 var namePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 
-// reservedApp is the app whose secrets are bedrock's own, the integration
+// reservedApp is the app whose secrets are helios's own, the integration
 // credentials: manifest.ReservedApp, spelled here because this package
 // sits beneath manifest. They are never transferred, copied or removed as
 // an app's are.
@@ -330,7 +330,7 @@ func (s *Store) lock(app string) (func(), error) {
 }
 
 // RemoveApp forgets every version of an app's secrets. It is for an app
-// that is leaving the machine for good; bedrock's own never go this way.
+// that is leaving the machine for good; helios's own never go this way.
 func (s *Store) RemoveApp(app string) error {
 	if !appPattern.MatchString(app) || app == reservedApp {
 		return fmt.Errorf("%q isn't an app whose secrets can be removed", app)
@@ -343,7 +343,7 @@ func (s *Store) RemoveApp(app string) error {
 	return os.RemoveAll(s.appDir(app))
 }
 
-// Apps lists the apps that hold secrets here, bedrock's own left out:
+// Apps lists the apps that hold secrets here, helios's own left out:
 // the ones deployed, and any an app left behind when it was removed.
 func (s *Store) Apps() ([]string, error) {
 	entries, err := os.ReadDir(s.Dir)

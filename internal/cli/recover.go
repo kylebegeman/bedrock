@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	apps "github.com/kylebegeman/bedrock/internal/app"
+	apps "github.com/kylebegeman/helios/internal/app"
 )
 
 func newRecover(a *app) *cobra.Command {
@@ -31,10 +31,10 @@ published ports or live routes. A separate cutover changes live traffic after
 readiness. --rehearsal skips target state/profile/integrations and removes its
 isolated workloads and volumes after the check.
 
-  bedrock recover old-host --snapshot <id> --identity-file ./recovery.key --plan
-  bedrock recover old-host --snapshot <id> --identity-file ./recovery.key --yes
-  bedrock recover old-host --snapshot <id> --identity-stdin --rehearsal --yes
-  bedrock recover cutover <recovery-id> --plan
+  helios recover old-host --snapshot <id> --identity-file ./recovery.key --plan
+  helios recover old-host --snapshot <id> --identity-file ./recovery.key --yes
+  helios recover old-host --snapshot <id> --identity-stdin --rehearsal --yes
+  helios recover cutover <recovery-id> --plan
 
 The machine snapshot must contain a compatible recovery catalog and workload
 image archive. Data recovery restores the app recovery points embedded inside

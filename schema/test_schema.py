@@ -1,7 +1,7 @@
 """Validate editor semantics with a standard JSON Schema implementation.
 
 Run: uv run --with jsonschema --with PyYAML schema/test_schema.py
-These are development-only verification dependencies, not Bedrock dependencies.
+These are development-only verification dependencies, not Helios dependencies.
 """
 
 import copy
@@ -13,7 +13,7 @@ import jsonschema
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMA = json.loads((ROOT / "schema/bedrock.schema.json").read_text())
+SCHEMA = json.loads((ROOT / "schema/helios.schema.json").read_text())
 VALIDATOR = jsonschema.Draft202012Validator(SCHEMA)
 
 
@@ -45,7 +45,7 @@ class ManifestSchemaTests(unittest.TestCase):
                 self.assert_valid({"app": "demo", "workloads": {name: workload}})
         for name in ("hello", "site", "notes"):
             with self.subTest(fixture=name):
-                manifest = yaml.safe_load((ROOT / f"lane/fixtures/{name}/bedrock.yaml").read_text())
+                manifest = yaml.safe_load((ROOT / f"lane/fixtures/{name}/helios.yaml").read_text())
                 self.assert_valid(manifest)
 
     def test_scalar_configuration_and_defaults_are_accepted(self) -> None:

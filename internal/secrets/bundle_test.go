@@ -127,7 +127,7 @@ func TestBundlesRefuseWhatTheyShould(t *testing.T) {
 	}
 	// The integration store is not an app and never travels.
 	if _, err := source.ExportBundle("bedrock", recipient); err == nil {
-		t.Fatal("bedrock's own credentials must never be exported")
+		t.Fatal("helios's own credentials must never be exported")
 	}
 	if _, err := source.ExportBundle("notes", "not-a-recipient"); err == nil {
 		t.Fatal("an invalid recipient must be refused")

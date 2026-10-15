@@ -12,10 +12,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/restic"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/restic"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 func (x *machineRecovering) names(m *manifest.Manifest) drillNames {
@@ -343,7 +343,7 @@ func (x *machineRecovering) startPrivate(ctx context.Context, rec *machineRecove
 }
 
 // Recorded names reserve resources, but a container or network can be
-// replaced outside Bedrock between attempts. Validate every existing private
+// replaced outside Helios between attempts. Validate every existing private
 // resource before removing any container or restored volume.
 func (x *machineRecovering) checkPrivateResources(ctx context.Context, rec *machineRecoveryRecord, e *docker.Engine) error {
 	for _, rev := range rec.Catalog.Revisions {
@@ -363,7 +363,7 @@ func (x *machineRecovering) checkPrivateResources(ctx context.Context, rec *mach
 				return err
 			}
 			if !slices.Contains(owned, n.network) {
-				return fmt.Errorf("recovery network %s is no longer owned by bedrock", n.network)
+				return fmt.Errorf("recovery network %s is no longer owned by helios", n.network)
 			}
 		}
 	}

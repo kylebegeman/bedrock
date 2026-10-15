@@ -1,23 +1,23 @@
 # Named targets and portable bootstrap
 
-Named targets let the same Bedrock CLI plan, inspect and operate a remote
+Named targets let the same Helios CLI plan, inspect and operate a remote
 machine through SSH. Select the machine explicitly on every invocation.
 Connection failures never fall back to the local machine.
 
 ## Configure and verify a target
 
-First establish the host's SSH key through your normal trusted channel. Bedrock
+First establish the host's SSH key through your normal trusted channel. Helios
 uses strict host-key checking and noninteractive SSH, including for bootstrap.
 An existing SSH configuration alias can supply connection settings.
 
-The examples below require Bedrock already installed on the target. For a fresh
+The examples below require Helios already installed on the target. For a fresh
 host, save the target, complete [portable bootstrap](#write-a-portable-profile),
-then run `bedrock target verify staging`.
+then run `helios target verify staging`.
 
 ```sh
-bedrock target set staging --ssh bedrock-staging --sudo
-bedrock target verify staging
-bedrock target list
+helios target set staging --ssh bedrock-staging --sudo
+helios target verify staging
+helios target list
 bedrock --target staging status --json
 bedrock --target staging check . --host
 bedrock --target staging deploy . --plan --json
@@ -40,7 +40,7 @@ Local sources for `deploy`, `check`, `rehearse`, `move stage` and `move test`
 are uploaded as bounded checksum-addressed archives. Git trees follow Git's
 tracked and unignored file selection; non-Git trees exclude `.git` and
 `node_modules`. Named-target archives omit `.env` and `.env.*` files, including
-nested ones. Supply runtime values through Bedrock's secret store. Alternate
+nested ones. Supply runtime values through Helios's secret store. Alternate
 manifest names and deploy restore files are supported. Source archives retain
 internal symlinks and reject paths that escape the extraction root.
 
@@ -61,23 +61,23 @@ Malformed integration input is explained by line number without showing it.
 
 ## Write a portable profile
 
-A profile contains a host configuration, an exact Bedrock version, reviewed
+A profile contains a host configuration, an exact Helios version, reviewed
 Linux binary checksums and integration names. It contains no private identity
 or integration values.
 
 ```sh
-bedrock host profile write staging.json \
+helios host profile write staging.json \
   --hostname staging --version 0.7.5 \
   --checksum linux_arm64=<reviewed-sha256> \
   --integration storage,email
-bedrock host profile check staging.json
+helios host profile check staging.json
 bedrock --target staging host bootstrap --profile staging.json --plan
 bedrock --target staging host bootstrap --profile staging.json --yes
 ```
 
 Use the checksum published with the selected release. Bootstrap probes the
 machine architecture and downloads the matching Linux build. For a local
-Linux build, use `--binary ./bin/bedrock-linux-arm64`; its version and bytes must
+Linux build, use `--binary ./bin/helios-linux-arm64`; its version and bytes must
 match the profile. A development build may pin its reported development
 version and a locally reviewed checksum.
 
@@ -88,8 +88,8 @@ daemon, then verify the daemon and doctor. A different existing target binary
 is refused; use compatibility-aware `upgrade` to replace it.
 
 ```sh
-bedrock host bootstrap --resume
-bedrock history --state-dir ~/.bedrock/bootstrap --socket '' --json
+helios host bootstrap --resume
+helios history --state-dir ~/.bedrock/bootstrap --socket '' --json
 ```
 
 `--resume` replays unfinished receipts after their lease expires, using the
@@ -109,7 +109,7 @@ The target keeps its own age identity.
 
 ```sh
 bedrock --target staging secret recipient
-bedrock integration export storage email --to <target-age-recipient> \
+helios integration export storage email --to <target-age-recipient> \
   | bedrock --target staging integration import storage email
 ```
 

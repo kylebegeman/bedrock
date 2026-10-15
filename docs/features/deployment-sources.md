@@ -7,8 +7,8 @@ include the supplied checkout and Git metadata. Named-target uploads retain
 their existing source selection and environment-file exclusions.
 
 ```sh
-bedrock deploy ./app --plan --json
-bedrock deploy ./app --digest <approved-plan-digest>
+helios deploy ./app --plan --json
+helios deploy ./app --digest <approved-plan-digest>
 ```
 
 Interactive confirmation applies the digest of the displayed plan too. A
@@ -29,10 +29,10 @@ absolute links, cycles and special files are refused. Safe dangling relative
 links may remain for build-generated files. A Dockerfile must stay inside its
 build context; its actual file is checked before the builder starts.
 
-Capturing a tree that contains Bedrock's own capture directory is refused to
-avoid recursive copies. Before copying, Bedrock accounts for logical file
+Capturing a tree that contains Helios's own capture directory is refused to
+avoid recursive copies. Before copying, Helios accounts for logical file
 sizes, including sparse files, and entry overhead while preserving at least
-5 GiB of free space. Free space or run `bedrock gc` if this check fails.
+5 GiB of free space. Free space or run `helios gc` if this check fails.
 
 ## Retry and recovery
 

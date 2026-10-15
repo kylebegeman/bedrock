@@ -6,9 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/cloudflare"
-	"github.com/kylebegeman/bedrock/internal/cloudflare/cloudflaretest"
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/helios/internal/cloudflare"
+	"github.com/kylebegeman/helios/internal/cloudflare/cloudflaretest"
+	"github.com/kylebegeman/helios/internal/manifest"
 )
 
 func TestZoneCacheAlwaysChoosesTheMostSpecificVisibleZone(t *testing.T) {

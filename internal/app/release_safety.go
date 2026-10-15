@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/restic"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/restic"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // ErrReleaseRestorePending distinguishes an intentional writer fence from state corruption.
@@ -173,7 +173,7 @@ func unsafeRollbackError(app string, unsafe []state.ReleaseBoundary) error {
 		}
 		details = append(details, detail)
 	}
-	return fmt.Errorf("code-only rollback of %s is unsafe after %s; use bedrock rollback %s --to <checkpoint's previous revision> --restore-data <exact-checkpoint> to replace data and discard writes since that checkpoint", app, strings.Join(details, ", "), app)
+	return fmt.Errorf("code-only rollback of %s is unsafe after %s; use helios rollback %s --to <checkpoint's previous revision> --restore-data <exact-checkpoint> to replace data and discard writes since that checkpoint", app, strings.Join(details, ", "), app)
 }
 
 func checkReleaseStoreAccess(ctx context.Context, store *state.Store, app string) error {

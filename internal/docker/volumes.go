@@ -237,7 +237,7 @@ func cliOutput(ctx context.Context, stdin io.Reader, name string, args ...string
 }
 
 // Volumes lists the names of the volumes whose names start with prefix,
-// sorted. Bedrock labels the volumes it makes, but Docker makes one
+// sorted. Helios labels the volumes it makes, but Docker makes one
 // without a label when a container mounts a name that isn't there yet,
 // so the name is what is matched.
 func (e *Engine) Volumes(ctx context.Context, prefix string) ([]string, error) {

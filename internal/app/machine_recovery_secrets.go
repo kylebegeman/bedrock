@@ -18,7 +18,7 @@ import (
 
 	"filippo.io/age"
 
-	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/helios/internal/secrets"
 )
 
 var recoverySourcePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
@@ -75,7 +75,7 @@ func parseRecoveryIdentity(data []byte) (*age.X25519Identity, error) {
 
 func targetRecoveryIdentity(sec *secrets.Store) (*age.X25519Identity, error) {
 	if err := recoveryPlainFile(sec.KeyPath); err != nil {
-		return nil, errors.New("the target needs its own secrets identity; run bedrock init first")
+		return nil, errors.New("the target needs its own secrets identity; run helios init first")
 	}
 	data, err := os.ReadFile(sec.KeyPath)
 	if err != nil {

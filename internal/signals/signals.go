@@ -17,10 +17,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/edge"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/edge"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // Retention is how long rollups are kept.
@@ -400,7 +400,7 @@ func du(ctx context.Context, path string) (int64, error) {
 	return strconv.ParseInt(fields[0], 10, 64)
 }
 
-// Summary is an app's signals over a window, in the words bedrock status
+// Summary is an app's signals over a window, in the words helios status
 // uses.
 type Summary struct {
 	Requests int64 `json:"requests"`

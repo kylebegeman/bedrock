@@ -33,7 +33,7 @@ import os,sys,subprocess
 if os.environ.get("LANE_TEST_UNREACHABLE"): raise SystemExit(255)
 if sys.argv[-2:] == ["uname", "-m"]: print("x86_64"); raise SystemExit(0)
 script=sys.stdin.read() if sys.argv[-1].startswith("sh -s") else sys.argv[-1]
-for original, local in (("/etc/bedrock-production", "/bedrock-production"), ("/etc/bedrock-lane-id", "/bedrock-lane-id"), ("/root/.lane-minio-key", "/minio-key"),
+for original, local in (("/etc/bedrock-production", "/bedrock-production"), ("/etc/helios-production", "/helios-production"), ("/etc/bedrock-lane-id", "/bedrock-lane-id"), ("/root/.lane-minio-key", "/minio-key"),
                         ("/var/run/docker.sock", "/footprint/var-run-docker.sock"), ("/run/docker.sock", "/footprint/run-docker.sock"),
                         ("/run/user/", "/footprint/run-user/"), ("/var/lib/docker", "/footprint/docker-data"),
                         ("/etc/systemd/system/docker.", "/footprint/etc-systemd-docker."),
@@ -281,6 +281,14 @@ else:
 
     def test_production_marker_cannot_be_overridden(self):
         (self.work / "bedrock-production").touch()
+        self.refused(BEDROCK_LANE_DESTROY="127.0.0.1")
+
+    def test_helios_production_marker_cannot_be_overridden(self):
+        (self.work / "helios-production").touch()
+        self.refused(BEDROCK_LANE_DESTROY="127.0.0.1")
+
+    def test_dangling_helios_production_marker_is_refused(self):
+        (self.work / "helios-production").symlink_to("missing")
         self.refused(BEDROCK_LANE_DESTROY="127.0.0.1")
 
     def test_foreign_app_cannot_be_overridden(self):

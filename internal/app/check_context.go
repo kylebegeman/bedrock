@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/manifest"
 )
 
 type checkInspector interface {
@@ -84,7 +84,7 @@ func CheckSecretNames(m *manifest.Manifest) []string {
 func checkVerificationSecrets(m *manifest.Manifest, values map[string]string) error {
 	for _, name := range CheckSecretNames(m) {
 		if values[name] == "" {
-			return fmt.Errorf("verification secret %s is not set; bedrock secret set %s %s", name, m.App, name)
+			return fmt.Errorf("verification secret %s is not set; helios secret set %s %s", name, m.App, name)
 		}
 	}
 	return nil

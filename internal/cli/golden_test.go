@@ -25,6 +25,9 @@ func TestEveryCommandsHelpStaysWhatItWas(t *testing.T) {
 	t.Setenv("BEDROCK_SOCKET", "/run/bedrock/bedrock.sock")
 	t.Setenv("BEDROCK_TARGETS_FILE", "~/.bedrock/targets.json")
 	t.Setenv("BEDROCK_BOOTSTRAP_DIR", "~/.bedrock/bootstrap")
+	for _, suffix := range []string{"STATE_DIR", "SOCKET", "TARGETS_FILE", "BOOTSTRAP_DIR"} {
+		t.Setenv("HELIOS_"+suffix, os.Getenv("BEDROCK_"+suffix))
+	}
 	root := newRoot(io.Discard, io.Discard)
 	var b strings.Builder
 	var walk func(c *cobra.Command)

@@ -42,8 +42,8 @@ notes_marker() {
 }
 
 printf '== build exact product binaries\n'
-(cd "$here/.." && go build -trimpath -ldflags "-X github.com/kylebegeman/bedrock/internal/version.number=$version" -o "$work/bedrock" ./cmd/bedrock)
-(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -ldflags "-X github.com/kylebegeman/bedrock/internal/version.number=$version" -o "$work/bedrock-linux" ./cmd/bedrock)
+(cd "$here/.." && go build -trimpath -ldflags "-X github.com/kylebegeman/helios/internal/version.number=$version" -o "$work/bedrock" ./cmd/helios)
+(cd "$here/.." && CGO_ENABLED=0 GOOS=linux GOARCH="$LANE_ARCH" go build -trimpath -ldflags "-X github.com/kylebegeman/helios/internal/version.number=$version" -o "$work/bedrock-linux" ./cmd/helios)
 checksum=$(shasum -a 256 "$work/bedrock-linux" | awk '{print $1}')
 client target set lane --ssh "$box" --port "$PORT" --identity "$KEY" --known-hosts "$KNOWN_HOSTS"
 lane_run "install -d -m 700 '$remote_work'"
@@ -107,7 +107,7 @@ lane_run "test -f '$remote_work/markers/step-1' && test -f '$remote_work/markers
 
 printf '== source upload, read-only host preflight and stale-source refusal\n'
 mkdir "$work/hello" "$work/preview" "$work/notes" "$work/candidate"
-cat >"$work/hello/bedrock.yaml" <<'YAML'
+cat >"$work/hello/helios.yaml" <<'YAML'
 app: hello
 workloads:
   worker:
@@ -120,14 +120,14 @@ br check "$work/hello" --host --json | python3 -c 'import json,sys; r=json.load(
 [[ "$(last_operation)" == "$before" ]]
 br deploy "$work/hello" --plan --json >"$work/source-plan.json"
 source_digest=$(field digest <"$work/source-plan.json")
-printf '\n# changed source after approval\n' >>"$work/hello/bedrock.yaml"
+printf '\n# changed source after approval\n' >>"$work/hello/helios.yaml"
 expect_refusal 'source|digest|bound' br deploy "$work/hello" --digest "$source_digest"
 [[ "$(last_operation)" == "$before" ]]
 br deploy "$work/hello" --yes
 hello_revision=$(active_revision hello)
 
 printf '== preview retention and reviewable cleanup\n'
-cat >"$work/preview/bedrock.yaml" <<'YAML'
+cat >"$work/preview/helios.yaml" <<'YAML'
 app: lane-preview
 preview: {of: hello, branch: fixture}
 workloads:
@@ -188,7 +188,7 @@ test "$(curl -s -o /dev/null -w '%{http_code}' https://127.0.0.1:18443/guard)" =
 printf 'Bearer lane-fixture-check\n' | bedrock secret set hello CHECK_TOKEN >/dev/null
 systemctl restart bedrock
 REMOTE
-cat >>"$work/hello/bedrock.yaml" <<'YAML'
+cat >>"$work/hello/helios.yaml" <<'YAML'
 checks:
   - url: https://127.0.0.1:18443/guard
     context: edge
@@ -200,16 +200,16 @@ br check "$work/hello" --host --json | python3 -c 'import json,sys; r=json.load(
 sleep 1
 br deploy "$work/hello" --yes
 hello_revision=$(active_revision hello)
-sed 's@18443/guard@18443/redirect@' "$work/hello/bedrock.yaml" >"$work/hello/bedrock.changed"
-mv "$work/hello/bedrock.changed" "$work/hello/bedrock.yaml"
+sed 's@18443/guard@18443/redirect@' "$work/hello/helios.yaml" >"$work/hello/bedrock.changed"
+mv "$work/hello/bedrock.changed" "$work/hello/helios.yaml"
 sleep 1
 expect_refusal 'another origin' br deploy "$work/hello" --yes
 [[ "$(active_revision hello)" == "$hello_revision" ]]
 lane_run 'test "$(curl -s -H "Authorization: Bearer lane-fixture-check" https://127.0.0.1:18443/guard)" = "authenticated fixture"'
-sed 's@18443/redirect@18443/guard@' "$work/hello/bedrock.yaml" >"$work/hello/bedrock.changed"
-mv "$work/hello/bedrock.changed" "$work/hello/bedrock.yaml"
+sed 's@18443/redirect@18443/guard@' "$work/hello/helios.yaml" >"$work/hello/bedrock.changed"
+mv "$work/hello/bedrock.changed" "$work/hello/helios.yaml"
 # Leave a usable app after the temporary authenticated-check fixture is removed.
-cat >"$work/hello/bedrock.yaml" <<'YAML'
+cat >"$work/hello/helios.yaml" <<'YAML'
 app: hello
 workloads:
   worker:
@@ -222,7 +222,7 @@ br deploy "$work/hello" --yes
 
 printf '== real backup, scratch release rehearsal, and data-aware rollback\n'
 "$here/setup-fixtures.sh" storage
-cat >"$work/notes/bedrock.yaml" <<'YAML'
+cat >"$work/notes/helios.yaml" <<'YAML'
 app: notes
 workloads:
   worker:
@@ -239,7 +239,7 @@ br deploy "$work/notes" --yes
 [[ "$(notes_marker)" == original ]]
 notes_revision=$(active_revision notes)
 br backup notes --yes
-cat >"$work/candidate/bedrock.yaml" <<'YAML'
+cat >"$work/candidate/helios.yaml" <<'YAML'
 app: notes
 release: {data_compatibility: restore-required}
 workloads:

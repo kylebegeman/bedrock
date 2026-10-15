@@ -38,7 +38,7 @@ type Revision struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
-// App is one app bedrock runs.
+// App is one app helios runs.
 type App struct {
 	Name           string    `json:"name"`
 	ActiveRevision string    `json:"active_revision,omitempty"`

@@ -10,8 +10,8 @@ import (
 	"os"
 	"regexp"
 
-	"github.com/kylebegeman/bedrock/internal/host"
-	"github.com/kylebegeman/bedrock/internal/integration"
+	"github.com/kylebegeman/helios/internal/host"
+	"github.com/kylebegeman/helios/internal/integration"
 )
 
 const ProfileVersion = 1
@@ -25,7 +25,7 @@ type Binary struct {
 type Profile struct {
 	Version      int          `json:"version"`
 	Host         host.Profile `json:"host"`
-	Bedrock      Binary       `json:"bedrock"`
+	Helios       Binary       `json:"bedrock"`
 	Integrations []string     `json:"integrations,omitempty"`
 }
 
@@ -36,13 +36,13 @@ func (p Profile) Validate() error {
 	if err := p.Host.Validate(); err != nil {
 		return err
 	}
-	if p.Bedrock.Version == "" {
-		return errors.New("profile must pin a bedrock version")
+	if p.Helios.Version == "" {
+		return errors.New("profile must pin a helios version")
 	}
-	if len(p.Bedrock.SHA256) == 0 {
+	if len(p.Helios.SHA256) == 0 {
 		return errors.New("profile must pin binary checksums")
 	}
-	for platform, sum := range p.Bedrock.SHA256 {
+	for platform, sum := range p.Helios.SHA256 {
 		if platform != "linux_amd64" && platform != "linux_arm64" {
 			return errors.New("profile checksum platform must be linux_amd64 or linux_arm64")
 		}

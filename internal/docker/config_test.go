@@ -46,7 +46,7 @@ func TestAContainerIsGivenOnlyWhatItsSpecAsks(t *testing.T) {
 	}
 }
 
-func TestEveryContainerIsLabeledAsBedrocks(t *testing.T) {
+func TestEveryContainerIsLabeledAsHelioss(t *testing.T) {
 	c := containerConfigFor(Spec{Image: "x", Labels: map[string]string{LabelApp: "shop"}, NoHealthcheck: true}, nil)
 	if c.Labels[LabelOwner] != OwnerValue || c.Labels[LabelApp] != "shop" || c.Healthcheck == nil || c.Healthcheck.Test[0] != "NONE" || c.OpenStdin {
 		t.Fatalf("%+v", c)

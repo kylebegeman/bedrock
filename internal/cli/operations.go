@@ -12,11 +12,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/kylebegeman/bedrock/internal/api"
-	"github.com/kylebegeman/bedrock/internal/daemon"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/state"
-	"github.com/kylebegeman/bedrock/internal/ui"
+	"github.com/kylebegeman/helios/internal/api"
+	"github.com/kylebegeman/helios/internal/daemon"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/state"
+	"github.com/kylebegeman/helios/internal/ui"
 )
 
 // operate is what every mutating command does: show the plan, stop there
@@ -90,7 +90,7 @@ func (a *app) operateRaw(ctx context.Context, runner api.Runner, kind string, ra
 // historyOutputCommand keeps a diagnostic follow-up on the same state and
 // socket when the operator uses a nondefault installation.
 func (a *app) historyOutputCommand(id string) string {
-	command := "bedrock history " + shellArgument(id) + " --output"
+	command := "helios history " + shellArgument(id) + " --output"
 	if a.targetName != "" {
 		command += " --target " + shellArgument(a.targetName)
 		if a.targetsFile != defaultTargetsFile() {
@@ -139,9 +139,9 @@ List filters are combined and applied before --limit. --failed includes
 failed and compensated operations. --since accepts a positive duration
 such as 24h, or an RFC3339 timestamp such as 2026-10-10T12:00:00Z.
 
-  bedrock history --app api --kind app.deploy --failed --since 24h
-  bedrock history <operation-id> --output
-  bedrock history <operation-id> --output --step build-web
+  helios history --app api --kind app.deploy --failed --since 24h
+  helios history <operation-id> --output
+  helios history <operation-id> --output --step build-web
 
 Output is opt-in and contains saved tails, not a complete log. Each step
 execution keeps up to 40 lines; a running execution's output is saved when
@@ -155,7 +155,7 @@ it finishes. --step selects an exact name or a one-based step position.`,
 				return errors.New("--step needs --output and a step name or one-based position")
 			}
 			if output && len(args) == 0 {
-				return errors.New("--output needs an operation ID: bedrock history <operation-id> --output")
+				return errors.New("--output needs an operation ID: helios history <operation-id> --output")
 			}
 			if len(args) == 1 {
 				for _, name := range []string{"app", "kind", "failed", "since"} {

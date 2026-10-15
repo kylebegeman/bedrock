@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kylebegeman/bedrock/internal/cloudflare"
-	"github.com/kylebegeman/bedrock/internal/cloudflare/cloudflaretest"
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/helios/internal/cloudflare"
+	"github.com/kylebegeman/helios/internal/cloudflare/cloudflaretest"
+	"github.com/kylebegeman/helios/internal/manifest"
 )
 
 const here = "203.0.113.10"
@@ -57,7 +57,7 @@ func TestARecordElsewhereIsNeverTakenSilently(t *testing.T) {
 	m, fake := setup(t)
 	fake.Seed(cloudflaretest.Record{Type: "A", Name: "dragonwriter.begam.in", Content: "198.51.100.20", Comment: "bedrock: dragon-writer on braintreelabs"})
 	_, err := m.Ensure(ctx, "dragon-writer", "dragonwriter.begam.in", manifest.DNSDirect, false)
-	if !errors.Is(err, ErrElsewhere) || !strings.Contains(err.Error(), "198.51.100.20 (dragon-writer on braintreelabs)") || !strings.Contains(err.Error(), "bedrock dns point dragonwriter.begam.in") {
+	if !errors.Is(err, ErrElsewhere) || !strings.Contains(err.Error(), "198.51.100.20 (dragon-writer on braintreelabs)") || !strings.Contains(err.Error(), "helios dns point dragonwriter.begam.in") {
 		t.Fatalf("%v", err)
 	}
 	// The other machine's record must not be removed by this machine.
@@ -130,7 +130,7 @@ func TestLookAndAudit(t *testing.T) {
 	joined := strings.Join(lines, "\n")
 	for _, want := range []string{
 		"begam.in: points at this machine without a route: nothing answers for it",
-		"old.lane.begam.in: made by bedrock for gone on bedrock-lane, which no longer routes it",
+		"old.lane.begam.in: made by helios for gone on bedrock-lane, which no longer routes it",
 		"hello.lane.begam.in: routed by hello here but points at 198.51.100.7",
 		"shop.nowhere.test: routed by shop but in no zone this token sees",
 	} {
@@ -156,7 +156,7 @@ func TestDepthBelowTheZone(t *testing.T) {
 func TestARecordPointedElsewhereByHandStaysWhenTheAppLeaves(t *testing.T) {
 	ctx := context.Background()
 	m, fake := setup(t)
-	// bedrock's own comment is still on it, but someone moved it since.
+	// helios's own comment is still on it, but someone moved it since.
 	fake.Seed(cloudflaretest.Record{Type: "A", Name: "site.begam.in", Content: "203.0.113.9", Comment: "bedrock: site on bedrock-lane"})
 	removed, err := m.Remove(ctx, "site", []string{"site.begam.in"})
 	if err != nil || len(removed) != 0 {
@@ -189,7 +189,7 @@ func TestADropTakesOnlyRecordsThatPointHereAtExactlyThatName(t *testing.T) {
 	fake.Seed(cloudflaretest.Record{Type: "A", Name: "*.begam.in", Content: here})
 	fake.Seed(cloudflaretest.Record{Type: "A", Name: "mixed.begam.in", Content: here})
 	fake.Seed(cloudflaretest.Record{Type: "A", Name: "mixed.begam.in", Content: "198.51.100.20"})
-	// bedrock's comment naming this machine, but pointed elsewhere since:
+	// helios's comment naming this machine, but pointed elsewhere since:
 	// where it points decides, not what it says.
 	fake.Seed(cloudflaretest.Record{Type: "A", Name: "moved.begam.in", Content: "198.51.100.20", Comment: "bedrock: moved on bedrock-lane"})
 	fake.Seed(cloudflaretest.Record{Type: "CNAME", Name: "www.begam.in", Content: "begam.in"})

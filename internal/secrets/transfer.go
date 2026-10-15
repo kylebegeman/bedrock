@@ -45,7 +45,7 @@ type secretBundle struct {
 }
 
 // transferable reports whether an app's secrets may leave the store this
-// way: any app's but bedrock's own, whose integration credentials belong
+// way: any app's but helios's own, whose integration credentials belong
 // to the machine.
 func transferable(app string) bool { return appPattern.MatchString(app) && app != reservedApp }
 
@@ -203,7 +203,7 @@ func (s *Store) ImportBundle(app string, input io.Reader) ([]string, error) {
 // with the same value is left alone, so running it again writes no new
 // version.
 //
-// It stays on one machine and never touches bedrock's own integration
+// It stays on one machine and never touches helios's own integration
 // credentials, which belong to the machine rather than to any app.
 func (s *Store) CopyAll(from, to string) ([]string, error) {
 	if !transferable(from) || !transferable(to) {

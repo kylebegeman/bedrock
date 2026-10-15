@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/restic"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/state"
-	"github.com/kylebegeman/bedrock/internal/version"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/restic"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/state"
+	"github.com/kylebegeman/helios/internal/version"
 )
 
 const RecoverMachineKind = "machine.recover"
@@ -303,7 +303,7 @@ func (x *machineRecovering) fetch(ctx context.Context, out io.Writer) error {
 	}
 	catalogPath := filepath.Join(x.stage(), machineCatalogFile)
 	if err := recoveryPlainFile(catalogPath); err != nil {
-		return errors.New("this legacy machine snapshot has no recovery catalog or workload image archive; create a new machine backup with this bedrock version")
+		return errors.New("this legacy machine snapshot has no recovery catalog or workload image archive; create a new machine backup with this helios version")
 	}
 	data, err := os.ReadFile(catalogPath)
 	if err != nil {
@@ -674,7 +674,7 @@ func (x *machineRecovering) finish(ctx context.Context, out io.Writer) error {
 	if x.in.Rehearsal {
 		fmt.Fprintln(out, "machine recovery rehearsal passed; disposable resources removed")
 	} else {
-		fmt.Fprintf(out, "private recovery ready; review bedrock recover cutover %s --plan before changing live traffic\n", x.in.ID)
+		fmt.Fprintf(out, "private recovery ready; review helios recover cutover %s --plan before changing live traffic\n", x.in.ID)
 	}
 	return nil
 }

@@ -2,15 +2,15 @@ package cli
 
 import (
 	"encoding/json"
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/secrets"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// withStdin runs bedrock with stdin replaced by text, for commands that
+// withStdin runs helios with stdin replaced by text, for commands that
 // read values without echo.
 func withStdin(t *testing.T, text string, stateDir string, args ...string) (string, string, int) {
 	t.Helper()
@@ -38,7 +38,7 @@ func TestIntegrationsAreSetFromStdinAndListedWithoutValues(t *testing.T) {
 		t.Fatalf("the first secret should make the machine's key: %q", errOut)
 	}
 	out, errOut, code = withStdin(t, "kind=s3\nendpoint=http://127.0.0.1:9000\nkey_id=lane\nkey=hush\nbucket_prefix=lane\n", stateDir, "integration", "set", "storage")
-	if code != 0 || !strings.Contains(out, "storage set") || !strings.Contains(errOut, "bedrock made a password for storage") {
+	if code != 0 || !strings.Contains(out, "storage set") || !strings.Contains(errOut, "helios made a password for storage") {
 		t.Fatalf("code %d, out %q, err %q", code, out, errOut)
 	}
 	out, _, code = run(t, stateDir, "integration", "list")
@@ -135,7 +135,7 @@ func TestIntegrationSetAgainKeepsTheStoragePassword(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, errOut, code := withStdin(t, "key=hush2\n", stateDir, "integration", "set", "storage")
-	if code != 0 || strings.Contains(errOut, "bedrock made a password") {
+	if code != 0 || strings.Contains(errOut, "helios made a password") {
 		t.Fatalf("code %d, err %q", code, errOut)
 	}
 	again, err := integration.LoadStorage(secrets.DefaultStore(stateDir))

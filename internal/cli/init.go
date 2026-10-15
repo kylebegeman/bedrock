@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/kylebegeman/bedrock/internal/manifest"
+	"github.com/kylebegeman/helios/internal/manifest"
 )
 
 func newInit(a *app) *cobra.Command {
@@ -20,14 +20,14 @@ func newInit(a *app) *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "init <app>",
-		Short: "Write a starting bedrock.yaml for a new app.",
-		Long: "Write a starting bedrock.yaml for a new app.\n\n" +
+		Short: "Write a starting helios.yaml for a new app.",
+		Long: "Write a starting helios.yaml for a new app.\n\n" +
 			"The file is commented and ready to deploy once the app itself exists.\n" +
 			"Nothing on a machine is touched; this only writes a file.\n\n" +
-			"  bedrock init blog --kind static --host blog.example.com\n" +
-			"  bedrock init api --host api.example.com --postgres\n" +
-			"  bedrock init mailer --kind worker\n" +
-			"  bedrock init nightly --kind cron --schedule \"0 4 * * *\"",
+			"  helios init blog --kind static --host blog.example.com\n" +
+			"  helios init api --host api.example.com --postgres\n" +
+			"  helios init mailer --kind worker\n" +
+			"  helios init nightly --kind cron --schedule \"0 4 * * *\"",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s.App = args[0]
@@ -43,13 +43,22 @@ func newInit(a *app) *cobra.Command {
 			} else if !info.IsDir() {
 				return fmt.Errorf("%s isn't a directory", dir)
 			}
-			path := filepath.Join(dir, manifest.FileName)
-			if _, err := os.Stat(path); err == nil && !force {
-				return fmt.Errorf("%s already exists; pass --force to overwrite it", path)
-			} else if err != nil && !os.IsNotExist(err) {
+			name, err := manifest.ResolveFileName(dir, "")
+			if err != nil {
 				return err
 			}
-			if err := os.WriteFile(path, body, 0o644); err != nil {
+			path := filepath.Join(dir, name)
+			if info, err := os.Lstat(path); err == nil {
+				if !info.Mode().IsRegular() {
+					return fmt.Errorf("%s must be a plain file, not a link or directory", path)
+				}
+				if !force {
+					return fmt.Errorf("%s already exists; pass --force to overwrite it", path)
+				}
+			} else if !os.IsNotExist(err) {
+				return err
+			}
+			if err := writeInitManifest(path, body, force); err != nil {
 				return err
 			}
 			next := s.Next()
@@ -66,7 +75,7 @@ func newInit(a *app) *cobra.Command {
 					fmt.Fprintf(a.stdout, "  - %s\n", step)
 				}
 			}
-			fmt.Fprintf(a.stdout, "\nThen: bedrock deploy %s\n", dir)
+			fmt.Fprintf(a.stdout, "\nThen: helios deploy %s\n", dir)
 			return nil
 		},
 	}
@@ -78,4 +87,38 @@ func newInit(a *app) *cobra.Command {
 	cmd.Flags().StringVar(&dir, "dir", ".", "the directory to write the manifest into")
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing manifest")
 	return cmd
+}
+
+// An unforced init creates exclusively. A forced replacement uses rename so
+// even a link introduced after validation cannot redirect the write elsewhere.
+func writeInitManifest(path string, body []byte, force bool) error {
+	if !force {
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err != nil {
+			return err
+		}
+		_, err = f.Write(body)
+		closeErr := f.Close()
+		if err != nil {
+			return err
+		}
+		return closeErr
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".helios-init-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(body); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Chmod(0o644); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
 }

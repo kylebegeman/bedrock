@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/containerd/errdefs"
-	"github.com/kylebegeman/bedrock/internal/docker"
-	"github.com/kylebegeman/bedrock/internal/docker/dockertest"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/docker"
+	"github.com/kylebegeman/helios/internal/docker/dockertest"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // jobFixture is Docker as job runs see it: containers by name, with the

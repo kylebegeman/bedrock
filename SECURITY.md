@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Bedrock is pre-1.0. Fixes land on the default branch, `next`, and ship as
+Helios is pre-1.0. Fixes land on the default branch, `next`, and ship as
 the next 0.7.x patch release; there are no backports.
 
 ## Reporting a vulnerability
@@ -26,18 +26,18 @@ another machine's traffic are treated as high priority.
   `/etc/bedrock/secrets.key`, mode 0600. Values never appear in arguments,
   logs, receipts or backups; only names do. The recovery identity is shown
   once, when the key is made.
-- Releases are static binaries published with `SHA256SUMS`. `bedrock
+- Releases are static binaries published with `SHA256SUMS`. `helios
   upgrade --version` checks a download against them; `--sha256` pins a
   checksum from reviewed source, which is what proves where it came from.
-- The daemon listens on `/run/bedrock/bedrock.sock`, mode 0660, owned by
-  root and the `bedrock` group that receives pushes. The edge's admin API is
+- The daemon listens on `/run/helios/helios.sock`, mode 0660, owned by
+  root and the `helios` group that receives pushes. The edge's admin API is
   a Unix socket only the machine reaches.
-- A machine's address is not treated as a secret. `bedrock host setup
+- A machine's address is not treated as a secret. `helios host setup
   --web-from cloudflare` lets only Cloudflare's proxy reach 80 and 443, so
   the address serves nothing on the web to anyone who finds it; every route
   must then be `dns: proxied`. Docker forwards published ports past ufw,
   so the rule that holds is a guard in Docker's `DOCKER-USER` chain, which
-  `bedrock doctor` checks. SSH stays reachable, keys only, behind fail2ban.
+  `helios doctor` checks. SSH stays reachable, keys only, behind fail2ban.
 - A backup runs restic in a container. The repository password and the
   storage credentials reach it in a file only root reads, mounted read-only
   for the length of the run and removed with it, never in the container's

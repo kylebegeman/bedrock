@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/cloudflare"
-	"github.com/kylebegeman/bedrock/internal/dns"
-	"github.com/kylebegeman/bedrock/internal/edge"
-	"github.com/kylebegeman/bedrock/internal/integration"
-	"github.com/kylebegeman/bedrock/internal/kernel"
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/secrets"
-	"github.com/kylebegeman/bedrock/internal/state"
+	"github.com/kylebegeman/helios/internal/cloudflare"
+	"github.com/kylebegeman/helios/internal/dns"
+	"github.com/kylebegeman/helios/internal/edge"
+	"github.com/kylebegeman/helios/internal/integration"
+	"github.com/kylebegeman/helios/internal/kernel"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/secrets"
+	"github.com/kylebegeman/helios/internal/state"
 )
 
 // DNSManager opens the Cloudflare integration for this machine, or says
@@ -39,7 +39,7 @@ func DNSManager(sec *secrets.Store, addresses []string) (*dns.Manager, error) {
 // errNoCloudflare says what to do when a manifest asks for records and
 // the machine can't keep them.
 func errNoCloudflare(app string, err error) error {
-	return fmt.Errorf("%s's routes ask bedrock to keep their DNS records (dns: direct or proxied), but %w", app, err)
+	return fmt.Errorf("%s's routes ask helios to keep their DNS records (dns: direct or proxied), but %w", app, err)
 }
 
 // managedHostsOf reads a revision's managed hosts.
@@ -53,7 +53,7 @@ func managedHostsOf(rev state.Revision) map[string]manifest.DNSMode {
 
 // keepRecords makes the records a manifest asks for and waits until every
 // host points here. A record that points at another machine stops the
-// deploy: moving a name is `bedrock dns point`, never a side effect.
+// deploy: moving a name is `helios dns point`, never a side effect.
 func keepRecords(ctx context.Context, sec *secrets.Store, m *manifest.Manifest, addrs []string, out io.Writer) error {
 	managed := m.ManagedHosts()
 	if len(managed) > 0 {
@@ -86,7 +86,7 @@ func keepRecords(ctx context.Context, sec *secrets.Store, m *manifest.Manifest, 
 }
 
 // waitResolves checks a host's public DNS, waiting up to two minutes for a
-// record bedrock just made to reach the resolvers.
+// record helios just made to reach the resolvers.
 func waitResolves(ctx context.Context, host string, addrs []string, patient bool) error {
 	deadline := time.Now().Add(2 * time.Minute)
 	for {
@@ -108,7 +108,7 @@ func waitResolves(ctx context.Context, host string, addrs []string, patient bool
 	}
 }
 
-// pruneRecords removes the records bedrock keeps for an app's hosts that
+// pruneRecords removes the records helios keeps for an app's hosts that
 // its active revision no longer routes. It needs the integration only
 // when there is something to remove.
 func pruneRecords(ctx context.Context, store *state.Store, sec *secrets.Store, app string, addrs []string, out io.Writer) error {
@@ -239,7 +239,7 @@ func (p Point) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, err
 }
 
 // DropKind deletes a record that points at this machine for a host no
-// app here routes: what bedrock dns audit finds and nothing else removes,
+// app here routes: what helios dns audit finds and nothing else removes,
 // such as an app's name after the app was removed by hand.
 const DropKind = "dns.drop"
 
@@ -281,7 +281,7 @@ func (d Drop) Plan(ctx context.Context, raw json.RawMessage) (*kernel.Plan, erro
 			return nil, fmt.Errorf("%s routes %s on this machine; its record goes when the route is retired or the app is removed", routed[h], host)
 		}
 		if wildcard && dns.Covers(host, h) {
-			return nil, fmt.Errorf("%s covers %s, which %s routes on this machine; bedrock drops a wildcard only when no route here falls under it", host, h, routed[h])
+			return nil, fmt.Errorf("%s covers %s, which %s routes on this machine; helios drops a wildcard only when no route here falls under it", host, h, routed[h])
 		}
 	}
 	if _, err := integration.LoadCloudflare(d.Secrets); err != nil {

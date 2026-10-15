@@ -17,7 +17,7 @@ target is ready and traffic reaches it.
 ## Prepare the target
 
 Initialize the target with its own machine identity and install a compatible
-Bedrock version. `--to` on the capture names the target's exact hostname, not a
+Helios version. `--to` on the capture names the target's exact hostname, not a
 local SSH target alias. Place the app's source on the target with the same
 manifest and captured Git commit. Remote `--target` commands upload local source
 and preserve its Git commit for validation.
@@ -34,13 +34,13 @@ passwords cannot replace them. The target keeps its own private machine key:
 
 ```sh
 # On the target, obtain its public age recipient.
-bedrock secret recipient
+helios secret recipient
 
 # On the source, seal the app's secrets to that recipient.
-bedrock move secrets my-app --to age1... > secrets.age
+helios move secrets my-app --to age1... > secrets.age
 
 # Transfer the ciphertext to the target and accept it within ten minutes.
-bedrock move secrets my-app --accept < secrets.age
+helios move secrets my-app --accept < secrets.age
 ```
 
 Configure the target integrations used by the app, including Cloudflare for
@@ -58,12 +58,12 @@ go to standard error.
 
 ```sh
 # On the source, review first, then capture.
-bedrock move rehearse my-app --to target-hostname --plan
-bedrock move rehearse my-app --to target-hostname --yes > rehearsal.json
+helios move rehearse my-app --to target-hostname --plan
+helios move rehearse my-app --to target-hostname --yes > rehearsal.json
 
 # Copy rehearsal.json to the target, then test the source there.
-bedrock move test ./my-app --handoff rehearsal.json --plan
-bedrock move test ./my-app --handoff rehearsal.json --yes
+helios move test ./my-app --handoff rehearsal.json --plan
+helios move test ./my-app --handoff rehearsal.json --yes
 ```
 
 The target restores scratch volumes and a scratch database, builds the source,
@@ -85,19 +85,19 @@ Start the maintenance window with a final capture:
 
 ```sh
 # On the source.
-bedrock move final my-app --to target-hostname --plan
-bedrock move final my-app --to target-hostname --yes > final.json
+helios move final my-app --to target-hostname --plan
+helios move final my-app --to target-hostname --yes > final.json
 
 # Copy final.json to the target.
-bedrock move stage ./my-app --handoff final.json --plan
-bedrock move stage ./my-app --handoff final.json --yes
+helios move stage ./my-app --handoff final.json --plan
+helios move stage ./my-app --handoff final.json --yes
 ```
 
 Final capture drains operator commands and jobs, records every source writer's
 identity and original restart policy, disables automatic restart and cleanly
 stops web, worker, cron, one-off jobs and object storage. Postgres remains up
 for the dump. An unclean writer stop fails the capture while retaining the
-fence. Bedrock never automatically resumes this source after a failed capture.
+fence. Helios never automatically resumes this source after a failed capture.
 Daemon startup keeps these writers stopped while allowing explicit recovery;
 retrying final capture still refuses their unclean stop.
 
@@ -126,8 +126,8 @@ Use matching clean source when exact code provenance matters.
 
 ```sh
 # On the target.
-bedrock move cutover my-app --plan
-bedrock move cutover my-app --yes
+helios move cutover my-app --plan
+helios move cutover my-app --yes
 ```
 
 Cutover rechecks the staged application, records that destination write
@@ -153,12 +153,12 @@ clear the migration metadata while preserving its data for inspection:
 
 ```sh
 # On the target, review the resource and DNS removal plan.
-bedrock remove my-app --plan
-bedrock remove my-app --yes
+helios remove my-app --plan
+helios remove my-app --yes
 
 # On the source, explicitly assert that target writers have stopped.
-bedrock move resume my-app --target-stopped --plan
-bedrock move resume my-app --target-stopped --yes
+helios move resume my-app --target-stopped --plan
+helios move resume my-app --target-stopped --yes
 ```
 
 Resume restores the original restart policies and only writers that were
@@ -166,7 +166,7 @@ running before the fence. It changes no DNS records. Review traffic routing
 separately before returning users to the source. The source cannot verify the
 remote assertion and contains none of the destination's later writes. A
 reverse move is required to preserve those writes before returning service.
-A completed destination can be the source of that new move; Bedrock archives
+A completed destination can be the source of that new move; Helios archives
 its previous cutover record before installing the new source fence. The old
 source must first become a clean destination, with any retained data handled
 explicitly rather than overwritten.

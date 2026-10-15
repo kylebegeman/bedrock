@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kylebegeman/bedrock/internal/kernel"
+	"github.com/kylebegeman/helios/internal/kernel"
 )
 
 // MaintainKind is the maintenance window: install updates, reboot if the

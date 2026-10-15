@@ -13,8 +13,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/kylebegeman/bedrock/internal/manifest"
-	"github.com/kylebegeman/bedrock/internal/secrets"
+	"github.com/kylebegeman/helios/internal/manifest"
+	"github.com/kylebegeman/helios/internal/secrets"
 )
 
 // secretsStore is the machine's store.
@@ -35,7 +35,7 @@ func newSecret(a *app) *cobra.Command {
 	return cmd
 }
 
-// newSecretSet is bedrock secret set.
+// newSecretSet is helios secret set.
 func newSecretSet(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set <app> <NAME>",
@@ -65,7 +65,7 @@ func newSecretSet(a *app) *cobra.Command {
 	return cmd
 }
 
-// newSecretList is bedrock secret list.
+// newSecretList is helios secret list.
 func newSecretList(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list <app>",
@@ -96,7 +96,7 @@ func newSecretList(a *app) *cobra.Command {
 	return cmd
 }
 
-// newSecretRemove is bedrock secret remove.
+// newSecretRemove is helios secret remove.
 func newSecretRemove(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "remove <app> <NAME>",
@@ -114,7 +114,7 @@ func newSecretRemove(a *app) *cobra.Command {
 	return cmd
 }
 
-// newSecretVersions is bedrock secret versions.
+// newSecretVersions is helios secret versions.
 func newSecretVersions(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "versions <app>",
@@ -143,7 +143,7 @@ func newSecretVersions(a *app) *cobra.Command {
 	return cmd
 }
 
-// newSecretCopy is bedrock secret copy.
+// newSecretCopy is helios secret copy.
 func newSecretCopy(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "copy <from-app> <NAME> <to-app>",
@@ -156,7 +156,7 @@ store. Copying the same value again changes nothing.`,
 		RunE: func(_ *cobra.Command, args []string) error {
 			from, name, to := args[0], args[1], args[2]
 			if from == manifest.ReservedApp || to == manifest.ReservedApp {
-				return fmt.Errorf("the integrations' credentials stay bedrock's own")
+				return fmt.Errorf("the integrations' credentials stay helios's own")
 			}
 			if from == to {
 				return fmt.Errorf("%s would copy onto itself", name)
@@ -189,7 +189,7 @@ store. Copying the same value again changes nothing.`,
 	return cmd
 }
 
-// newSecretRecipient is bedrock secret recipient.
+// newSecretRecipient is helios secret recipient.
 func newSecretRecipient(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "recipient", Short: "Print the machine's public encryption recipient, creating its key if needed.", Args: cobra.NoArgs,
@@ -207,7 +207,7 @@ func newSecretRecipient(a *app) *cobra.Command {
 	return cmd
 }
 
-// newSecretExport is bedrock secret export.
+// newSecretExport is helios secret export.
 func newSecretExport(a *app) *cobra.Command {
 	var recipientKey string
 	cmd := &cobra.Command{
@@ -226,7 +226,7 @@ func newSecretExport(a *app) *cobra.Command {
 	return cmd
 }
 
-// newSecretImport is bedrock secret import.
+// newSecretImport is helios secret import.
 func newSecretImport(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "import <app> <NAME>", Short: "Read a secret sealed for this machine from stdin, without showing it.", Args: cobra.ExactArgs(2),
