@@ -26,6 +26,10 @@ owned identities, bounded deadlines and recovery receipts. Daemon shutdown,
 SQLite durability, private sidecar permissions, Git and credential workflows,
 DNS reconciliation and IPv4/IPv6 firewall reconciliation are hardened.
 
+Correction: the deadlines covered jobs and an app backup's maintenance window.
+A backup's other restic repository calls, including retention, had no limit
+until [0.7.11](release-0.7.11.md).
+
 ## Validation before release preparation
 
 The complete `make check` suite passed, including 78 lane tests. Race checks

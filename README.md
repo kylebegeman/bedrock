@@ -430,8 +430,10 @@ deploy a guarded route rather than serve it open, and previews rely on it.
 The daemon watches every app and the machine once a minute: containers
 running, health paths and checks answering through the edge, certificates
 valid and renewing, disk and memory, backups fresh and drills passing, each
-workload able to write the volumes it mounts (checked hourly), and any URL
-added with `helios watch add` (the other machine's sites, say). A
+workload able to write the volumes it mounts (checked hourly), an operation
+holding the machine's operation lock for over 4 hours (backups, drills and
+deploys wait behind it), and any URL added with `helios watch add` (the
+other machine's sites, say). A
 problem has to hold for three rounds before it becomes an alert, one alert
 per app, and you hear once when it starts, once a day while it lasts, and
 once when it recovers.
@@ -456,6 +458,20 @@ and upload, bounded to 30 minutes. Backups then restart exactly the containers
 that were running, with the object store first. Retention runs after service is
 restored. A forced shutdown aborts the capture instead of certifying an
 inconsistent snapshot.
+
+Every repository call a backup makes has a limit, so one stuck call can't hold
+the machine's operations: opening the repository and clearing stale locks 5
+minutes each, a machine backup's upload 2 hours, and retention 1 hour. A call
+that runs out of time is stopped, and restic gets a minute to release its
+repository lock. When retention fails or runs out of time after a snapshot was
+taken, the snapshot is kept and the backup still counts as good: `bedrock
+backups` and `bedrock status` show "retention deferred" with the reason, and
+the next backup applies retention again. Before each backup Bedrock runs
+`restic unlock`, which removes only locks restic considers stale (not
+refreshed for 30 minutes). It never removes a live lock, so if a stopped call
+couldn't release its lock, a backup started within the next 30 minutes can
+still find the repository locked and fail; the next scheduled run goes
+through.
 
 | Command | What it does |
 |---|---|
