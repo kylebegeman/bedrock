@@ -42,10 +42,17 @@ const (
 	// EdgeAddress is where the machine's own edge answers TLS.
 	EdgeAddress = "127.0.0.1:443"
 	// OperationLockStale is how long one operation may hold the machine's
-	// operation lock before it is a problem. It is longer than a backup's
-	// bounded repository calls added together (about 3 h 10 min), so only
-	// a stuck operation crosses it.
+	// operation lock before it is a problem. It is a heuristic, not an upper
+	// bound on healthy work: an app backup's bounded repository calls add
+	// up to about 3 h 25 min, plus up to two minutes of cleanup for each
+	// call that is stopped, while a machine backup also copies each data
+	// app's pinned snapshot in (up to 2 h each) and archives the workload
+	// images (up to 1 h). A slow machine backup on a host with several
+	// data apps can cross it.
 	OperationLockStale = 4 * time.Hour
+	// RetentionDeferredStale is how long every backup of a repository may
+	// defer its retention before the growing repository is a problem.
+	RetentionDeferredStale = 72 * time.Hour
 )
 
 // Prober looks at the machine and its apps and reports what is wrong.
@@ -97,6 +104,9 @@ func (p *Prober) Observe(ctx context.Context) []Condition {
 	var conditions []Condition
 	conditions = append(conditions, p.host()...)
 	conditions = append(conditions, p.operationLock(ctx)...)
+	if why := p.retentionProblem(ctx, manifest.ReservedApp, p.Now()); why != "" {
+		conditions = append(conditions, Condition{Key: "host:backup-retention", Subject: "machine backups", Severity: state.SeverityWarning, Message: why})
+	}
 
 	e, err := p.Connect(ctx)
 	if err != nil {
@@ -277,6 +287,10 @@ func (p *Prober) app(ctx context.Context, e *docker.Engine, rev state.Revision) 
 			problems = append(problems, why)
 			worse(state.SeverityWarning)
 		}
+		if why := p.retentionProblem(ctx, rev.App, now); why != "" {
+			problems = append(problems, why)
+			worse(state.SeverityWarning)
+		}
 		if last, err := p.Store.LastBackupRun(ctx, rev.App, state.BackupRunDrill); err == nil && last != nil && last.Finished() && !last.OK {
 			problems = append(problems, "the last restore drill failed: "+last.Error)
 			worse(state.SeverityWarning)
@@ -371,6 +385,36 @@ func (p *Prober) backupProblem(ctx context.Context, appName string, now time.Tim
 		return fmt.Sprintf("never backed up, deployed %s ago", ago(first, now))
 	}
 	return ""
+}
+
+// retentionProblem says when every good backup of a repository has
+// deferred its retention for too long. Each deferral still keeps a good
+// snapshot, so backups look fresh while old snapshots stay and the
+// repository grows.
+func (p *Prober) retentionProblem(ctx context.Context, appName string, now time.Time) string {
+	runs, err := p.Store.BackupRuns(ctx, appName, state.BackupRunBackup, 50)
+	if err != nil {
+		return ""
+	}
+	var since time.Time
+	var reason string
+	for _, run := range runs {
+		if !run.OK {
+			continue
+		}
+		_, why, deferred := strings.Cut(run.Detail, app.RetentionDeferred+": ")
+		if !deferred {
+			break
+		}
+		if reason == "" {
+			reason = why
+		}
+		since = run.StartedAt
+	}
+	if since.IsZero() || now.Sub(since) < RetentionDeferredStale {
+		return ""
+	}
+	return fmt.Sprintf("every backup since %s (%s ago) deferred retention, so old snapshots stay and the repository keeps growing; the last said: %s", since.Format("2006-01-02 15:04"), ago(since, now), reason)
 }
 
 // healthProblem asks a workload's health path directly.
