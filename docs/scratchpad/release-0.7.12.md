@@ -91,8 +91,8 @@ alerted on.
   `SHA256SUMS` into a temporary directory from the committed tree. It
   publishes nothing.
 
-The lane tests (`make check`, `lane-up`, `lane-proof`) were not run for this
-patch. CI and the release process own them.
+Release CI on PR #8 passed `make check` (format, vet, lane checks, tests and
+build) and the disposable Linux daemon recovery proof.
 
 ## Known boundaries
 
@@ -111,5 +111,34 @@ patch. CI and the release process own them.
   restore is reported by the operation lock alert. A machine backup's local
   work other than the image archive, such as copying the state database, has
   no new limit.
-- Rollout to personal-vps and braintreelabs (both on 0.7.11) is recorded
-  below once it happens.
+
+## Release and rollout
+
+Published 2026-10-15 as
+[v0.7.12](https://github.com/kylebegeman/helios/releases/tag/v0.7.12) from
+merge commit `1153d86` (PR #8), with `helios_*` and identical `bedrock_*`
+assets and `SHA256SUMS`. The published checksums matched a local build of
+the same commit.
+
+Rehearsal on a disposable local lane VM (Ubuntu 24.04, arm64): the published
+0.7.11 binary, checksum-verified and installed under systemd, upgraded with
+`helios upgrade --version 0.7.12 --sha256 <sum> --plan` and then `--digest`.
+All four steps succeeded across the daemon restart, the daemon answered on
+0.7.12, and the operation lock was released. A wrong `--sha256` was refused
+before anything was staged. An earlier `lane/prove.sh m2` attempt on the same
+emulated VM timed out installing Docker during `host setup` and left the
+guest unreachable. That step is unchanged in this release; the VM was
+recreated for the focused rehearsal.
+
+Live, 2026-10-15, with each host idle and no open alerts beforehand, and
+the pending OS reboot on both left in place:
+
+- personal-vps: plan digest `f908481213d8171041a6e53f`, upgraded in 15.2s
+  (`op-20261015-193304-3vxgq`). All 10 apps healthy and no open alerts
+  afterwards. A manual `loom-identity` backup, the app whose retention hung
+  on 2026-10-15, took a 4.5 MB snapshot in 6.1s and finished retention
+  (forget, then bounded prune, removing 1 old snapshot) in 9.4s, with no
+  deferral.
+- braintreelabs: same plan digest, upgraded in 15.2s
+  (`op-20261015-193347-jzhpr`). Its app is healthy and there are no open
+  alerts.
