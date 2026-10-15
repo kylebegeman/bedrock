@@ -424,7 +424,7 @@ func (l *Local) Run(ctx context.Context, kind string, input json.RawMessage, emi
 // machine; with no daemon to hold them in line, a lock beside the store
 // does, so two commands run by hand can't interleave their steps.
 func (l *Local) RunExpecting(ctx context.Context, kind string, input json.RawMessage, expect string, emit func(kernel.Event)) (*kernel.Receipt, error) {
-	unlock, err := lockOperations(ctx, l.Store.Path())
+	unlock, err := LockOperations(ctx, l.Store.Path())
 	if err != nil {
 		return nil, err
 	}
@@ -432,21 +432,33 @@ func (l *Local) RunExpecting(ctx context.Context, kind string, input json.RawMes
 	return l.Engine.RunExpecting(ctx, kind, input, expect, emit)
 }
 
-// lockOperations takes the machine's operation lock, kept beside the state
-// store, waiting for whoever holds it until ctx ends.
-func lockOperations(ctx context.Context, statePath string) (func(), error) {
+// LockOperations takes the machine's operation lock, kept beside the state
+// store, waiting for whoever holds it until ctx ends. The holder writes when
+// it took the lock into the lock file, so HeldOperationLock can tell how long
+// the machine's operations have been waiting on it.
+func LockOperations(ctx context.Context, statePath string) (func(), error) {
 	dir := filepath.Join(filepath.Dir(statePath), "locks")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(filepath.Join(dir, "operations.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := os.OpenFile(operationLockPath(statePath), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
 	for {
 		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
-			return func() { _ = f.Close() }, nil
+			// The record is advisory: a lock without one still locks, it just
+			// can't say since when.
+			if body, err := json.Marshal(OperationLock{PID: os.Getpid(), AcquiredAt: time.Now().UTC()}); err == nil {
+				if f.Truncate(0) == nil {
+					_, _ = f.WriteAt(body, 0)
+				}
+			}
+			return func() {
+				_ = f.Truncate(0)
+				_ = f.Close()
+			}, nil
 		}
 		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
 			_ = f.Close()
@@ -459,6 +471,47 @@ func lockOperations(ctx context.Context, statePath string) (func(), error) {
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+}
+
+func operationLockPath(statePath string) string {
+	return filepath.Join(filepath.Dir(statePath), "locks", "operations.lock")
+}
+
+// OperationLock describes who holds the machine's operation lock.
+type OperationLock struct {
+	PID        int       `json:"pid"`
+	AcquiredAt time.Time `json:"acquired_at"`
+}
+
+// HeldOperationLock reports whether some process holds the machine's
+// operation lock, and since when if the holder recorded it. A holder from a
+// release before 0.7.11 records nothing, so it reads as held with a zero
+// AcquiredAt. Looking takes a shared lock for an instant, which a process
+// waiting to take the lock simply retries past.
+func HeldOperationLock(statePath string) (OperationLock, bool, error) {
+	f, err := os.Open(operationLockPath(statePath))
+	if errors.Is(err, os.ErrNotExist) {
+		return OperationLock{}, false, nil
+	}
+	if err != nil {
+		return OperationLock{}, false, err
+	}
+	defer f.Close()
+	err = syscall.Flock(int(f.Fd()), syscall.LOCK_SH|syscall.LOCK_NB)
+	if err == nil {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		return OperationLock{}, false, nil
+	}
+	if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
+		return OperationLock{}, false, err
+	}
+	var held OperationLock
+	if body, err := io.ReadAll(io.LimitReader(f, 4096)); err == nil && len(body) > 0 {
+		if json.Unmarshal(body, &held) != nil {
+			held = OperationLock{}
+		}
+	}
+	return held, true, nil
 }
 
 // List implements Runner.
@@ -498,12 +551,12 @@ func (s *Server) lockMachine(ctx context.Context) (func(), error) {
 	if s.Store == nil {
 		return func() {}, nil
 	}
-	return lockOperations(ctx, s.Store.Path())
+	return LockOperations(ctx, s.Store.Path())
 }
 
 // Recover resumes a client's dedicated journal under the same execution lock.
 func (l *Local) Recover(ctx context.Context, emit func(kernel.Event)) (int, error) {
-	unlock, err := lockOperations(ctx, l.Store.Path())
+	unlock, err := LockOperations(ctx, l.Store.Path())
 	if err != nil {
 		return 0, err
 	}

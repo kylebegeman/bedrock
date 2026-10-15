@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kylebegeman/helios/internal/api"
 	"github.com/kylebegeman/helios/internal/app"
 	"github.com/kylebegeman/helios/internal/docker"
 	"github.com/kylebegeman/helios/internal/edge"
@@ -40,6 +41,11 @@ const (
 	DataCheckEvery = time.Hour
 	// EdgeAddress is where the machine's own edge answers TLS.
 	EdgeAddress = "127.0.0.1:443"
+	// OperationLockStale is how long one operation may hold the machine's
+	// operation lock before it is a problem. It is longer than a backup's
+	// bounded repository calls added together (about 3 h 10 min), so only
+	// a stuck operation crosses it.
+	OperationLockStale = 4 * time.Hour
 )
 
 // Prober looks at the machine and its apps and reports what is wrong.
@@ -52,6 +58,9 @@ type Prober struct {
 	Root string
 	// CheckSecrets loads only the revision-bound credentials used by checks.
 	CheckSecrets func(app string, version int) (map[string]string, error)
+	// OperationLockStale overrides how long the operation lock may be
+	// held; zero means OperationLockStale.
+	OperationLockStale time.Duration
 
 	// mu keeps rounds from overlapping.
 	mu sync.Mutex
@@ -87,6 +96,7 @@ func (p *Prober) Observe(ctx context.Context) []Condition {
 	p.forgetOldScans(p.Now())
 	var conditions []Condition
 	conditions = append(conditions, p.host()...)
+	conditions = append(conditions, p.operationLock(ctx)...)
 
 	e, err := p.Connect(ctx)
 	if err != nil {
@@ -443,6 +453,37 @@ func (p *Prober) host() []Condition {
 		}
 	}
 	return out
+}
+
+// operationLock reports the machine's operation lock when one operation has
+// held it too long. Everything else that changes the machine waits behind
+// it, so a stuck holder silently stops backups and deploys.
+func (p *Prober) operationLock(ctx context.Context) []Condition {
+	limit := p.OperationLockStale
+	if limit <= 0 {
+		limit = OperationLockStale
+	}
+	lock, held, err := api.HeldOperationLock(p.Store.Path())
+	now := p.Now()
+	// An undated lock comes from a release that didn't record when it
+	// took it; it can't be judged, and is gone after the upgrade.
+	if err != nil || !held || lock.AcquiredAt.IsZero() || now.Sub(lock.AcquiredAt) < limit {
+		return nil
+	}
+	msg := fmt.Sprintf("the machine's operation lock has been held for %s, since %s", ago(lock.AcquiredAt, now), lock.AcquiredAt.UTC().Format("2006-01-02 15:04 UTC"))
+	if ops, err := p.Store.ListFiltered(ctx, state.OperationFilter{Limit: 20}); err == nil {
+		var running []string
+		for _, op := range ops {
+			if !op.Status.Final() {
+				running = append(running, fmt.Sprintf("%s %s (%s)", op.Kind, op.Target, op.ID))
+			}
+		}
+		if len(running) > 0 {
+			msg += " by " + strings.Join(running, ", ")
+		}
+	}
+	msg += "; scheduled backups, drills and deploys wait until it is released"
+	return []Condition{{Key: "host:operations", Subject: "machine operations", Severity: state.SeverityWarning, Message: msg}}
 }
 
 // DiskFree reports free and total bytes on a filesystem.

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kylebegeman/helios/internal/api"
 	"github.com/kylebegeman/helios/internal/docker"
 	"github.com/kylebegeman/helios/internal/docker/dockertest"
 	"github.com/kylebegeman/helios/internal/manifest"
@@ -207,5 +208,85 @@ func TestDockerOutageCannotCertifyAppOrEdgeRecovery(t *testing.T) {
 		if open, err := w.Store.OpenIncidentByKey(ctx, key); err != nil || open == nil {
 			t.Fatalf("unobserved %s was reported recovered: %+v, %v", key, open, err)
 		}
+	}
+}
+
+func TestAnOperationLockHeldTooLongRaisesAnAlertUntilReleased(t *testing.T) {
+	ctx := context.Background()
+	notifier := &fakeNotifier{}
+	w, now := newWatcher(t, notifier)
+	unlock, err := api.LockOperations(ctx, w.Store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	released := false
+	defer func() {
+		if !released {
+			unlock()
+		}
+	}()
+	if err := w.Store.CreateOperation(ctx, state.NewOperation{ID: "op-backup", Kind: "backup", Target: "bedrock", Input: json.RawMessage(`{}`), Plan: json.RawMessage(`[]`), CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	lock, held, err := api.HeldOperationLock(w.Store.Path())
+	if err != nil || !held {
+		t.Fatalf("lock: %v %v", held, err)
+	}
+	*now = lock.AcquiredAt.Add(time.Hour)
+	p := NewProber(w.Store)
+	p.Root = t.TempDir()
+	p.Now = func() time.Time { return *now }
+	p.Connect = func(context.Context) (*docker.Engine, error) { return nil, errors.New("Docker unavailable") }
+	p.OperationLockStale = 2 * time.Hour
+	lockConditions := func() []Condition {
+		var out []Condition
+		for _, c := range p.Observe(ctx) {
+			if c.Key == "host:operations" {
+				out = append(out, c)
+			}
+		}
+		return out
+	}
+	if found := lockConditions(); len(found) != 0 {
+		t.Fatalf("an operation inside the limit is not a problem: %+v", found)
+	}
+
+	*now = lock.AcquiredAt.Add(3 * time.Hour)
+	for range DefaultOpenAfter {
+		*now = now.Add(time.Minute)
+		if err := w.Round(ctx, p.Observe(ctx)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	open, err := w.Store.OpenIncidentByKey(ctx, "host:operations")
+	if err != nil || open == nil {
+		t.Fatalf("a stuck operation lock raised no incident: %v", err)
+	}
+	if !strings.Contains(open.Message, "held for 3.0 h") || !strings.Contains(open.Message, "backup bedrock (op-backup)") || !strings.Contains(open.Message, "wait until it is released") {
+		t.Fatalf("the alert must say how long and by what: %q", open.Message)
+	}
+	sent := false
+	for _, n := range notifier.sent {
+		if strings.Contains(n.Subject, "machine operations has a problem") {
+			sent = true
+		}
+	}
+	if !sent {
+		t.Fatalf("no one was told: %+v", notifier.sent)
+	}
+
+	unlock()
+	released = true
+	if found := lockConditions(); len(found) != 0 {
+		t.Fatalf("a released lock is still reported: %+v", found)
+	}
+	for range DefaultResolveAfter {
+		*now = now.Add(time.Minute)
+		if err := w.Round(ctx, p.Observe(ctx)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if open, err := w.Store.OpenIncidentByKey(ctx, "host:operations"); err != nil || open != nil {
+		t.Fatalf("the incident did not resolve after the lock was released: %+v %v", open, err)
 	}
 }
