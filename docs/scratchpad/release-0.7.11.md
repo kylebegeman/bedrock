@@ -23,3 +23,20 @@ Twelve isolated real-binary CLI/state checks passed. Interrupted upgrades from
 successful receipts with staged markers cleared. These container proofs used a
 simulated restart boundary; real Linux daemon recovery is additionally required
 by release CI. Live results are recorded after rollout.
+
+## Published and live
+
+PR #7 merged at `a00813be058fc03b16e09933cd34301370746f1b`. Both PR CI and
+merged-commit CI passed the code checks and fresh Linux daemon-recovery proof.
+All nine uploaded assets matched their local SHA-256 and GitHub metadata before
+publication. Release 0.7.11 is published under `kylebegeman/helios`.
+
+Both known live hosts upgraded through 0.7.10 to Helios 0.7.11 using exact reviewed
+plan digests and pinned AMD64 binaries. Successful receipts are
+`op-20261015-182619-xiw2k` (braintreelabs) and
+`op-20261015-182716-dprvr` (personal-vps). All 11 active apps report healthy;
+both edges are OK, and no alerts are open. Data/secret identities and Corbelo's
+production hold remain intact. The personal site and Packrat subsequently
+deployed their renamed manifests through their existing webhooks. See the
+[rollout record](../operations/helios-rename-plan.md) for consumer changes,
+verification evidence and supported compatibility identities.

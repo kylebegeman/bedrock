@@ -16,7 +16,7 @@ For a YAML editor that supports the YAML Language Server, put this directive
 at the top of a manifest:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/kylebegeman/bedrock/next/schema/helios.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kylebegeman/helios/next/schema/helios.schema.json
 ```
 
 Use a reviewed release tag instead of `next` to pin the schema, or point the
@@ -63,5 +63,5 @@ in uv's isolated environment. Helios and its Go tests need neither package.
 The generator also writes `bedrock.schema.json` with its historical schema ID.
 Both files validate the same manifest contract and retain the legacy
 `x-bedrock-schema-version` extension alongside `x-helios-schema-version`.
-Existing editor annotations keep working. The repository URL stays on Bedrock
-until its separate GitHub rename.
+Existing editor annotations keep working through the repository redirect. Current
+annotations can use the canonical Helios repository URL.
