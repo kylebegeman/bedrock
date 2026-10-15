@@ -24,31 +24,39 @@ func hangingRestic(t *testing.T) (*dockertest.Server, *[][]string) {
 	return fake, &commands
 }
 
+// safetyContext ends a test whose call ignores its own deadline with a
+// plain context error, which the assertions then reject, instead of
+// letting the call hang until go test's own timeout.
+func safetyContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
 func TestRepositoryCallsAreStoppedAtTheirDeadline(t *testing.T) {
 	const limit = 50 * time.Millisecond
 	for _, tc := range []struct {
 		action string
-		call   func(Runner) error
+		call   func(context.Context, Runner) error
 	}{
-		{"init", func(r Runner) error { _, err := r.Ensure(context.Background()); return err }},
-		{"unlock", func(r Runner) error { return r.Unlock(context.Background()) }},
-		{"backup", func(r Runner) error {
-			_, err := r.Backup(context.Background(), "site", nil, DataRoot)
+		{"init", func(ctx context.Context, r Runner) error { _, err := r.Ensure(ctx); return err }},
+		{"unlock", func(ctx context.Context, r Runner) error { return r.Unlock(ctx) }},
+		{"backup", func(ctx context.Context, r Runner) error {
+			_, err := r.Backup(ctx, "site", nil, DataRoot)
 			return err
 		}},
-		{"forget", func(r Runner) error { _, err := r.Forget(context.Background(), "site", Keep{Daily: 7}); return err }},
+		{"forget", func(ctx context.Context, r Runner) error { _, err := r.Forget(ctx, "site", Keep{Daily: 7}); return err }},
+		{"restore", func(ctx context.Context, r Runner) error {
+			_, err := r.Restore(ctx, "latest", "site", nil)
+			return err
+		}},
 	} {
 		t.Run(tc.action, func(t *testing.T) {
 			fake, commands := hangingRestic(t)
 			r := runner(t)
-			r.Deadlines = Deadlines{Ensure: limit, Unlock: limit, Backup: limit, Forget: limit}
-			started := time.Now()
-			err := tc.call(r)
-			// The wait polls once a second; anything near ForgetTimeout means
-			// the deadline was not applied.
-			if took := time.Since(started); took > 10*time.Second {
-				t.Fatalf("the call outlived its deadline: %s", took)
-			}
+			r.Deadlines = Deadlines{Ensure: limit, Unlock: limit, Backup: limit, Forget: limit, Prune: limit, Restore: limit}
+			err := tc.call(safetyContext(t), r)
 			var deadline *DeadlineError
 			if !errors.As(err, &deadline) || !errors.Is(err, context.DeadlineExceeded) {
 				t.Fatalf("a stopped call must say it ran out of time: %v", err)
@@ -70,6 +78,45 @@ func TestRepositoryCallsAreStoppedAtTheirDeadline(t *testing.T) {
 	}
 }
 
+func TestPruneRunsOnItsOwnDeadlineAfterForget(t *testing.T) {
+	for _, removed := range []bool{true, false} {
+		t.Run(map[bool]string{true: "after removing", false: "with nothing removed"}[removed], func(t *testing.T) {
+			fake := dockertest.New(t)
+			var commands [][]string
+			fake.OnCreate = func(c dockertest.Container) {
+				commands = append(commands, append([]string(nil), c.Cmd...))
+				fake.Update(c.Name, func(c *dockertest.Container) {
+					switch c.Cmd[0] {
+					case "forget":
+						c.ExitAfter, c.Logs = 1, `[{"remove":[]}]`
+						if removed {
+							c.Logs = `[{"remove":[{"id":"old"}]}]`
+						}
+					default:
+						// The prune never finishes.
+						c.Logs = `{"message_type":"status"}`
+					}
+				})
+			}
+			r := runner(t)
+			r.Deadlines = Deadlines{Forget: time.Hour, Prune: 50 * time.Millisecond}
+			n, err := r.Forget(safetyContext(t), "site", Keep{Daily: 7})
+			var deadline *DeadlineError
+			if !errors.As(err, &deadline) || deadline.Action != "prune" {
+				t.Fatalf("a prune out of time must say so: %v", err)
+			}
+			if want := map[bool]int{true: 1, false: 0}[removed]; n != want {
+				t.Fatalf("forgotten snapshots are gone even when the prune is not: got %d, want %d", n, want)
+			}
+			// A prune an earlier run lost still has space to free, so it runs
+			// even when nothing was forgotten, and rewrites a bounded amount.
+			if len(commands) != 2 || slices.Contains(commands[0], "--prune") || !slices.Equal(commands[1], []string{"prune", "--max-repack-size", PruneMaxRepack}) {
+				t.Fatalf("unexpected restic runs: %v", commands)
+			}
+		})
+	}
+}
+
 func TestTheCallersCancellationIsNotReportedAsADeadline(t *testing.T) {
 	fake := dockertest.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -83,6 +130,37 @@ func TestTheCallersCancellationIsNotReportedAsADeadline(t *testing.T) {
 	var deadline *DeadlineError
 	if !errors.Is(err, context.Canceled) || errors.As(err, &deadline) {
 		t.Fatalf("cancellation must stay cancellation: %v", err)
+	}
+}
+
+func TestTheCallersDeadlineIsNotReportedAsTheCallsOwn(t *testing.T) {
+	hangingRestic(t)
+	// An app capture runs inside its maintenance window: when that window
+	// ends first, the upload did not run out of its own two hours.
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	r := runner(t)
+	r.Deadlines.Backup = time.Hour
+	_, err := r.Backup(ctx, "site", nil, DataRoot)
+	var deadline *DeadlineError
+	if !errors.Is(err, context.DeadlineExceeded) || errors.As(err, &deadline) {
+		t.Fatalf("the caller's deadline must not read as the call's own: %v", err)
+	}
+}
+
+func TestOnlyACallsOwnDeadlineGetsTheLongStopGrace(t *testing.T) {
+	own, cancelOwn := context.WithTimeoutCause(context.Background(), time.Nanosecond, errCallDeadline)
+	defer cancelOwn()
+	<-own.Done()
+	if got := graceFor(own); got != stopGrace {
+		t.Fatalf("a call out of its own time must let restic release its lock: %s", got)
+	}
+	parent, cancelParent := context.WithCancel(context.Background())
+	call, cancelCall := context.WithTimeoutCause(parent, time.Hour, errCallDeadline)
+	defer cancelCall()
+	cancelParent()
+	if got := graceFor(call); got != shutdownStopGrace {
+		t.Fatalf("a daemon stopping must fit its stop budget: %s", got)
 	}
 }
 

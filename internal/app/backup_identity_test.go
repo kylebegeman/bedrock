@@ -380,7 +380,7 @@ func TestBackupReplayPreservesStagingPreparedByANewerOperation(t *testing.T) {
 			calls := 0
 			fake.OnCreate = func(c dockertest.Container) {
 				calls++
-				if phase != "pending retention" || c.Cmd[0] != "forget" {
+				if phase != "pending retention" || (c.Cmd[0] != "forget" && c.Cmd[0] != "prune") {
 					t.Errorf("backup replay reached an unexpected repository command: %v", c.Cmd)
 				}
 				fake.Update(c.Name, func(c *dockertest.Container) { c.ExitAfter, c.Logs = 1, `[]` })

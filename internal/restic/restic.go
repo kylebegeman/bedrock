@@ -73,14 +73,29 @@ const (
 	// BackupTimeout bounds one upload. An app's capture is also inside its
 	// 30 minute maintenance window, whichever ends first.
 	BackupTimeout = 2 * time.Hour
-	// ForgetTimeout bounds retention and the prune that follows it. A
-	// deferred prune keeps the snapshot and is retried by the next backup.
-	ForgetTimeout = time.Hour
+	// ForgetTimeout bounds forgetting snapshots the policy no longer keeps,
+	// which reads the snapshot list and deletes a few files.
+	ForgetTimeout = 15 * time.Minute
+	// PruneTimeout bounds the prune that frees what forgotten snapshots
+	// used. PruneMaxRepack keeps one prune's rewriting small enough to
+	// finish inside it, so successive prunes make progress.
+	PruneTimeout = time.Hour
+	// RestoreTimeout bounds a restore a backup makes, such as a machine
+	// backup copying an app's pinned snapshot into itself. A restore an
+	// operator asks for has no limit unless its runner sets one.
+	RestoreTimeout = 2 * time.Hour
 )
 
-// Deadlines bound individual repository calls. Tests shorten them.
+// PruneMaxRepack is how much data one prune may rewrite. restic leaves
+// the rest for the next prune; packs that are wholly unused are deleted
+// whatever their size.
+const PruneMaxRepack = "2G"
+
+// Deadlines bound individual repository calls. A zero field takes its
+// default, except Restore: zero leaves a restore unbounded. Tests shorten
+// them.
 type Deadlines struct {
-	Ensure, Unlock, Backup, Forget time.Duration
+	Ensure, Unlock, Backup, Forget, Prune, Restore time.Duration
 }
 
 func orDefault(d, def time.Duration) time.Duration {
@@ -109,13 +124,18 @@ func (e *DeadlineError) Error() string {
 
 func (e *DeadlineError) Unwrap() []error { return []error{context.DeadlineExceeded, e.Err} }
 
+// errCallDeadline is the cause bounded gives a call's own deadline, which
+// tells it apart from the caller's cancellation or deadline.
+var errCallDeadline = errors.New("restic call deadline")
+
 // bounded runs restic under its own deadline. Running out of that deadline
-// is reported as a DeadlineError; the caller's own cancellation is not.
+// is reported as a DeadlineError; the caller's own cancellation or deadline
+// is not.
 func (r Runner) bounded(ctx context.Context, limit time.Duration, mounts []string, args ...string) ([]string, error) {
-	callCtx, cancel := context.WithTimeout(ctx, limit)
+	callCtx, cancel := context.WithTimeoutCause(ctx, limit, errCallDeadline)
 	defer cancel()
 	lines, err := r.run(callCtx, mounts, args...)
-	if err != nil && ctx.Err() == nil && errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+	if err != nil && errors.Is(context.Cause(callCtx), errCallDeadline) {
 		return lines, &DeadlineError{Action: args[0], Limit: limit, Err: err}
 	}
 	return lines, err
@@ -197,14 +217,14 @@ func (r Runner) run(ctx context.Context, mounts []string, args ...string) ([]str
 		}
 	}
 	if err := e.Run(ctx, spec); err != nil {
-		lines, cleanupErr := finish(e, spec)
+		lines, cleanupErr := finish(e, spec, graceFor(ctx))
 		return lines, errors.Join(err, cleanupErr)
 	}
 	code, waitErr := e.WaitExit(ctx, spec.Name)
 	// The wait may have taken an hour, or ended with ctx. The container's
 	// last words and its removal get a context of their own, made now: one
 	// made before the wait would have been spent by it.
-	lines, cleanupErr := finish(e, spec)
+	lines, cleanupErr := finish(e, spec, graceFor(ctx))
 	if waitErr != nil {
 		return lines, errors.Join(waitErr, cleanupErr)
 	}
@@ -259,17 +279,31 @@ type commandError struct {
 
 func (e *commandError) Error() string { return fmt.Sprintf("restic %s: %s", e.action, e.reason) }
 
-// stopGrace is how long a restic helper that is still running, because its
-// deadline or its caller's context ended, has to stop before it is killed.
-// restic treats SIGTERM as an interruption: it cancels its work and then
-// spends up to a minute of its own removing its repository lock. A helper
-// that already exited is removed at once.
+// stopGrace is how long a restic helper still running when its call's own
+// deadline ended has to stop before it is killed. restic treats SIGTERM as
+// an interruption: it cancels its work and then spends up to a minute of
+// its own removing its repository lock. A helper that already exited is
+// removed at once.
 const stopGrace = time.Minute
+
+// shutdownStopGrace is the grace when the caller went away instead, as a
+// daemon stopping does: the daemon's stop budget (TimeoutStopSec=60) must
+// still cover reading the output, stopping the helper and removing its
+// credentials file, or systemd kills the daemon partway through.
+const shutdownStopGrace = 5 * time.Second
+
+// graceFor is how long a helper whose run ended with ctx gets to stop.
+func graceFor(ctx context.Context) time.Duration {
+	if errors.Is(context.Cause(ctx), errCallDeadline) {
+		return stopGrace
+	}
+	return shutdownStopGrace
+}
 
 // finish reads the helper's output and removes only that helper. Logging
 // and cleanup have separate budgets, so a slow log endpoint cannot spend
 // the time needed to stop a writer and remove the container.
-func finish(e *docker.Engine, spec docker.Spec) ([]string, error) {
+func finish(e *docker.Engine, spec docker.Spec, grace time.Duration) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	info, err := e.Inspect(ctx, spec.Name)
 	if docker.IsNotFound(err) {
@@ -287,8 +321,8 @@ func finish(e *docker.Engine, spec docker.Spec) ([]string, error) {
 	var buf bytes.Buffer
 	logErr := e.Logs(ctx, spec.Name, false, "all", &buf)
 	cancel()
-	cleanup, stop := context.WithTimeout(context.Background(), stopGrace+30*time.Second)
-	removeErr := e.Remove(cleanup, info.ID, stopGrace)
+	cleanup, stop := context.WithTimeout(context.Background(), grace+25*time.Second)
+	removeErr := e.Remove(cleanup, info.ID, grace)
 	stop()
 	var errs []error
 	if logErr != nil {
@@ -422,10 +456,16 @@ func (r Runner) Unlock(ctx context.Context) error {
 	return err
 }
 
-// Forget applies the retention policy and prunes what it freed. It
-// returns how many snapshots were removed.
+// Forget applies the retention policy, then prunes. It returns how many
+// snapshots were removed, also when the prune then fails.
+//
+// The prune is a call of its own and runs even when nothing was forgotten
+// this time: forgotten snapshots are gone as soon as forget returns, so a
+// prune an earlier backup lost to its deadline would otherwise wait until
+// the policy next removes one. Each prune rewrites at most PruneMaxRepack,
+// so a repository with a lot to reclaim catches up over several backups.
 func (r Runner) Forget(ctx context.Context, host string, keep Keep) (int, error) {
-	args := []string{"forget", "--json", "--host", host, "--tag", Tag, "--prune", "--keep-tag", ReleaseCheckpointTag}
+	args := []string{"forget", "--json", "--host", host, "--tag", Tag, "--keep-tag", ReleaseCheckpointTag}
 	if keep.Daily > 0 {
 		args = append(args, "--keep-daily", fmt.Sprint(keep.Daily))
 	}
@@ -453,12 +493,14 @@ func (r Runner) Forget(ctx context.Context, host string, keep Keep) (int, error)
 			}
 		}
 	}
-	return removed, nil
+	_, err = r.bounded(ctx, orDefault(r.Deadlines.Prune, PruneTimeout), nil, "prune", "--max-repack-size", PruneMaxRepack)
+	return removed, err
 }
 
 // Restore puts a snapshot's files back under /data, into whatever is
 // mounted there and verifies restored file contents before returning success.
-// Includes limit it to paths inside the snapshot.
+// Includes limit it to paths inside the snapshot. It runs as long as the
+// data needs unless Deadlines.Restore sets a limit.
 func (r Runner) Restore(ctx context.Context, snapshot, host string, mounts []string, includes ...string) (*RestoreSummary, error) {
 	args := []string{"restore", snapshot, "--json", "--verify", "--target", "/"}
 	if snapshot == "latest" {
@@ -467,7 +509,13 @@ func (r Runner) Restore(ctx context.Context, snapshot, host string, mounts []str
 	for _, inc := range includes {
 		args = append(args, "--include", inc)
 	}
-	lines, err := r.run(ctx, mounts, args...)
+	var lines []string
+	var err error
+	if r.Deadlines.Restore > 0 {
+		lines, err = r.bounded(ctx, r.Deadlines.Restore, mounts, args...)
+	} else {
+		lines, err = r.run(ctx, mounts, args...)
+	}
 	if err != nil {
 		return nil, err
 	}
