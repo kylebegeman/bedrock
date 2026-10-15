@@ -467,12 +467,12 @@ data app's pinned snapshot in with a 2 hour limit per app and archives the
 workload images with a 1 hour limit. A call that runs out of time is stopped,
 and restic gets a minute to release its repository lock. When retention fails
 or runs out of time after a snapshot was taken, the snapshot is kept and the
-backup still counts as good: `bedrock backups` shows "retention deferred" with
-the reason (so does `bedrock status <app>` for an app's last good backup), and
+backup still counts as good: `helios backups` shows "retention deferred" with
+the reason (so does `helios status <app>` for an app's last good backup), and
 the next backup applies retention again. Every backup prunes, even when it
 forgot nothing, and one prune rewrites at most 2 GB, so a repository with a lot
 to reclaim catches up over several backups. Retention deferred on every backup
-for over 3 days raises an alert. Before each backup Bedrock runs `restic
+for over 3 days raises an alert. Before each backup Helios runs `restic
 unlock`, which removes only locks restic considers stale (not refreshed for 30
 minutes). It never removes a live lock, so if a stopped call couldn't release
 its lock, a backup started within the next 30 minutes can still find the

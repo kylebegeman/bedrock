@@ -1,4 +1,4 @@
-# Bedrock 0.7.11
+# Helios 0.7.12
 
 This patch release stops one stuck backup from holding a machine's operations.
 On 2026-10-15 a scheduled backup on a 0.7.9 host spent about three hours in
@@ -25,16 +25,16 @@ every later backup, drill and deploy waited behind it.
   One prune rewrites at most 2 GB, so a repository with a lot to reclaim
   catches up over several backups instead of starting over each time.
 - When retention fails or runs out of time after a snapshot was taken, the
-  backup is recorded as successful and keeps its snapshot. `bedrock backups`
+  backup is recorded as successful and keeps its snapshot. `helios backups`
   and the operation output show "retention deferred" with the reason, and so
-  does `bedrock status <app>` for an app's last good backup. The overview of
-  `bedrock status` does not show it, and a machine backup's deferral appears
-  only in `bedrock backups`. The operation finishes and releases the lock, and
+  does `helios status <app>` for an app's last good backup. The overview of
+  `helios status` does not show it, and a machine backup's deferral appears
+  only in `helios backups`. The operation finishes and releases the lock, and
   the next backup applies retention again.
 - When every backup of an app, or of the machine, has deferred retention for
   over 3 days, the watcher raises a warning (in the app's alert, or as
   "machine backups") with the last reason. It clears once retention completes.
-- Before each capture on an existing repository, Bedrock runs plain
+- Before each capture on an existing repository, Helios runs plain
   `restic unlock`. It removes only locks restic itself considers stale, which
   includes a lock left by a prune that was stopped by hand. It never uses
   `--remove-all`, so a lock held by a live restic process is never forced.
@@ -50,8 +50,8 @@ every later backup, drill and deploy waited behind it.
 
 No state migration and no schema change. A deferred retention is an ordinary
 successful backup run with a note in its existing detail column. Backup plan
-step names and descriptions are unchanged, so a 0.7.9 or 0.7.7 backup
-interrupted by the upgrade still resumes under 0.7.11 instead of failing its
+step names and descriptions are unchanged, so a 0.7.11 backup
+interrupted by the upgrade still resumes under 0.7.12 instead of failing its
 plan check. The lock holder now writes when it took the lock into
 `locks/operations.lock`. Earlier releases only lock that file and ignore its
 contents, and a lock taken by an earlier release reads as undated and is not
@@ -99,7 +99,7 @@ patch. CI and the release process own them.
 - A lock left by a restic call that couldn't release it in time is not stale
   for 30 minutes, because restic runs as PID 1 in every helper container.
   A manual backup in that window can fail on the lock; the next scheduled run
-  clears it. Bedrock does not unlock right after a stopped call, because a
+  clears it. Helios does not unlock right after a stopped call, because a
   fresh lock would not yet be removed.
 - A prune whose fixed work (reading the index and every snapshot's trees)
   takes longer than an hour still never finishes, whatever it would repack.
@@ -111,5 +111,5 @@ patch. CI and the release process own them.
   restore is reported by the operation lock alert. A machine backup's local
   work other than the image archive, such as copying the state database, has
   no new limit.
-- The fix has not been rolled out to the affected host. That host should
-  upgrade from 0.7.9 through the reviewed upgrade plan.
+- Rollout to personal-vps and braintreelabs (both on 0.7.11) is recorded
+  below once it happens.
